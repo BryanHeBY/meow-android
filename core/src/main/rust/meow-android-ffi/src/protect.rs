@@ -46,6 +46,29 @@ mod inner {
         }
     }
 
+    pub(super) fn direct_dns(payload: &[u8]) -> Option<Vec<u8>> {
+        use jni::objects::{JByteArray, JValue};
+        let service = DIRECT.read().clone()?;
+        let mut env = service.jvm.attach_current_thread().ok()?;
+        let query = env.byte_array_from_slice(payload).ok()?;
+        let result = env
+            .call_method(
+                &service.service,
+                "resolveDirectDns",
+                "([B)[B",
+                &[JValue::Object(query.as_ref())],
+            )
+            .and_then(|v| v.l());
+        match result {
+            Ok(value) if !value.is_null() => env.convert_byte_array(JByteArray::from(value)).ok(),
+            Ok(_) => None,
+            Err(_) => {
+                let _ = env.exception_clear();
+                None
+            }
+        }
+    }
+
     /// `SocketProtector` impl that calls `VpnService.protect(int)` over JNI.
     pub(super) struct VpnSocketProtector {
         jvm: JavaVM,
@@ -128,4 +151,9 @@ pub fn clear() {
 #[cfg(target_os = "android")]
 pub fn direct(fd: std::os::fd::RawFd) -> std::io::Result<()> {
     inner::direct(fd)
+}
+
+#[cfg(target_os = "android")]
+pub fn direct_dns(payload: &[u8]) -> Option<Vec<u8>> {
+    inner::direct_dns(payload)
 }

@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Network
+import android.net.DnsResolver
 import android.os.Build
+import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.Core
@@ -20,6 +23,8 @@ import java.io.File
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import android.net.VpnService as BaseVpnService
 
 class VpnService : BaseVpnService(), BaseService.Interface {
@@ -77,6 +82,8 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     private var networkChanges: NetworkChangeRecorder? = null
     /** Keeps the declared underlying network current, below API 29 only. */
     private var underlying: DefaultNetwork? = null
+    private var directNetworkObserver: DefaultNetwork? = null
+    @Volatile private var directNetwork: Network? = null
 
     override fun onBind(intent: Intent) = when (intent.action) {
         SERVICE_INTERFACE -> super<BaseVpnService>.onBind(intent)
@@ -86,6 +93,9 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     override fun onRevoke() = stopRunner()
 
     override fun killProcesses(scope: CoroutineScope) {
+        directNetworkObserver?.stop()
+        directNetworkObserver = null
+        directNetwork = null
         underlying?.stop()
         underlying = null
         networkChanges?.stop()
@@ -159,6 +169,37 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     @androidx.annotation.Keep
     fun protectDirectSocket(fd: Int): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isLockdownEnabled && protect(fd)
+
+    /** System DNS on the physical network, including the platform's Private DNS. */
+    @androidx.annotation.Keep
+    fun resolveDirectDns(query: ByteArray): ByteArray? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || isLockdownEnabled) return null
+        if (query.size !in 12..4096) return null
+        val network = directNetwork ?: return null
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return null
+        if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return null
+        val signal = CancellationSignal()
+        val result = CompletableFuture<ByteArray?>()
+        return try {
+            DnsResolver.getInstance().rawQuery(
+                network, query, DnsResolver.FLAG_EMPTY, { it.run() }, signal,
+                object : DnsResolver.Callback<ByteArray> {
+                    override fun onAnswer(answer: ByteArray, rcode: Int) {
+                        result.complete(answer.takeIf { it.size in 12..4096 })
+                    }
+                    override fun onError(error: DnsResolver.DnsException) {
+                        result.complete(null)
+                    }
+                },
+            )
+            val answer = result.get(3, TimeUnit.SECONDS)
+            answer.takeIf { !isLockdownEnabled && directNetwork == network }
+        } catch (_: Exception) {
+            null
+        } finally {
+            signal.cancel()
+        }
+    }
 
     /**
      * Snapshot directly attached IPv4 networks before establishing our own VPN.
@@ -256,6 +297,13 @@ class VpnService : BaseVpnService(), BaseService.Interface {
             }
         }
 
+        if (overlayConfig.optBoolean("enabled") && clash.mode != "all") {
+            directNetworkObserver = DefaultNetwork(this) { network, capabilities ->
+                directNetwork = network.takeIf {
+                    capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true
+                }
+            }.also { it.start() }
+        }
         active = true
         if (Build.VERSION.SDK_INT >= 29) builder.setMetered(metered)
 

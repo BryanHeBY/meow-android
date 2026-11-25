@@ -153,9 +153,52 @@ pub(crate) mod udp {
     }
 }
 
+fn dns_query(payload: &[u8]) -> bool {
+    (12..=4096).contains(&payload.len()) && payload[2] & 0x80 == 0 && payload[4..6] != [0, 0]
+}
+
+fn dns_response(query: &[u8], answer: &[u8]) -> bool {
+    dns_query(query)
+        && (12..=4096).contains(&answer.len())
+        && answer[2] & 0x80 != 0
+        && answer[..2] == query[..2]
+}
+
+#[cfg(target_os = "android")]
+pub(crate) async fn system_dns(query: &[u8]) -> Option<Vec<u8>> {
+    // The Java resolver blocks outside Tokio and is cancelled on timeout.
+    if !dns_query(query) {
+        return None;
+    }
+    static IN_FLIGHT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(32);
+    let permit = IN_FLIGHT.try_acquire().ok()?;
+    let query = query.to_vec();
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        crate::protect::direct_dns(&query).filter(|answer| dns_response(&query, answer))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_only_a_matching_dns_response_for_a_query() {
+        let mut query = [0; 12];
+        query[1] = 7;
+        query[5] = 1;
+        let mut answer = query;
+        answer[2] = 0x80;
+        assert!(dns_response(&query, &answer));
+        assert!(!dns_response(&answer, &query));
+        answer[0] = 1;
+        assert!(!dns_response(&query, &answer));
+        assert!(!dns_response(&query, &answer[..3]));
+    }
 
     #[test]
     fn blocks_synthetic_reserved_and_ipv4_mapped_targets() {

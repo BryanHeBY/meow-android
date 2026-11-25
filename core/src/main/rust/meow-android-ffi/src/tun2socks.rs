@@ -288,14 +288,12 @@ async fn run_tun2socks(
                 accepted = tcp_listener.next() => {
                     match accepted {
                         Some((stream, local_addr, remote_addr)) => {
-                            if remote_addr.port() == 53 {
-                                drop(stream);
-                                continue;
-                            }
                             let gate = stack_clash_gate.clone();
                             let handle = tokio::spawn(async move {
                                 match flow_exit(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
-                                    FlowExit::Clash => dispatch_tcp(stream, local_addr, remote_addr).await,
+                                    FlowExit::Clash if remote_addr.port() != 53 => {
+                                        dispatch_tcp(stream, local_addr, remote_addr).await;
+                                    }
                                     #[cfg(target_os = "android")]
                                     FlowExit::Direct(_) => { let _ = crate::direct_exit::tcp(stream, remote_addr).await; }
                                     _ => {}
@@ -456,34 +454,39 @@ async fn run_tun2socks(
                             let Some(parsed) = parse_udp_packet(&request) else {
                                 return;
                             };
-                            if flow_exit(
+                            let response_payload = match flow_exit(
                                 gate.as_deref(),
                                 owner::IPPROTO_UDP,
                                 parsed.src,
                                 parsed.dst,
                             )
                             .await
-                                != FlowExit::Clash
                             {
-                                return;
-                            }
-                            // Every qtype, not just A/AAAA: HTTPS, TXT, MX,
-                            // PTR, … then use the upstreams Settings' Built-in
-                            // DNS switch picked, and HTTPS/SVCB answers for a
-                            // fake-IP name lose the address hints that would
-                            // route around it.
-                            let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
-                                trace!("tun2socks: DNS dropped — resolver not ready");
-                                return;
-                            };
-                            let response_payload =
-                                match DnsServer::handle_query(parsed.payload, &resolver).await {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        trace!("tun2socks: DnsServer::handle_query error: {}", e);
+                                FlowExit::Clash => {
+                                    // Preserve the configured resolver and all DNS qtypes.
+                                    let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
                                         return;
-                                    }
-                                };
+                                    };
+                                    let Ok(bytes) =
+                                        DnsServer::handle_query(parsed.payload, &resolver).await
+                                    else {
+                                        return;
+                                    };
+                                    bytes
+                                }
+                                #[cfg(target_os = "android")]
+                                FlowExit::Direct(_)
+                                    if parsed.dst.ip() == Ipv4Addr::new(172, 19, 0, 2) =>
+                                {
+                                    let Some(bytes) =
+                                        crate::direct_exit::system_dns(parsed.payload).await
+                                    else {
+                                        return;
+                                    };
+                                    bytes
+                                }
+                                _ => return,
+                            };
                             let Some(reply_pkt) = build_udp_reply(&request, &response_payload)
                             else {
                                 return;
