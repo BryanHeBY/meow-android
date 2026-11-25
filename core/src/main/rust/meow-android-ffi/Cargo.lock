@@ -1877,6 +1877,7 @@ dependencies = [
  "meow-common",
  "meow-config",
  "meow-dns",
+ "meow-overlay-policy",
  "meow-proxy",
  "meow-transport",
  "meow-tunnel",
@@ -2036,6 +2037,10 @@ dependencies = [
  "tokio-boring",
  "tracing",
 ]
+
+[[package]]
+name = "meow-overlay-policy"
+version = "0.1.0"
 
 [[package]]
 name = "meow-proxy"

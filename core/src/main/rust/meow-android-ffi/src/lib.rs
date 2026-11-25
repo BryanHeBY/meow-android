@@ -29,6 +29,11 @@ mod traffic;
 mod tun2socks;
 #[cfg(target_os = "android")]
 mod zerotier;
+#[cfg(any(test, target_os = "android"))]
+mod zerotier_config;
+#[cfg(target_os = "android")]
+#[allow(dead_code)]
+mod zerotier_worker;
 
 use dashmap::DashMap;
 use jni::objects::{JClass, JObject, JString};

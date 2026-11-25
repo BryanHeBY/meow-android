@@ -1,0 +1,239 @@
+//! Runs one native node on a dedicated thread for the lifetime of one VPN.
+use crate::{
+    zerotier::{Client, Frame},
+    zerotier_config::Config,
+};
+use meow_overlay_policy::{
+    bridge::{Bridge, Ethernet},
+    Destination,
+};
+use serde::Serialize;
+use std::{
+    fs,
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError, SyncSender},
+        Arc,
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
+
+const TUN_IP: Ipv4Addr = Ipv4Addr::new(172, 19, 0, 1);
+// ZT_VirtualNetworkStatus::ZT_NETWORK_STATUS_OK in the pinned SDK.
+const NETWORK_STATUS_OK: i32 = 1;
+const IDLE_WAKE: Duration = Duration::from_millis(60);
+const MAX_FRAME_BATCH: usize = 128;
+
+#[derive(Clone, Serialize, PartialEq, Eq)]
+struct Status {
+    phase: &'static str,
+    network: String,
+    node: Option<String>,
+    ip: Option<Ipv4Addr>,
+    sdk_status: Option<i32>,
+    error: Option<&'static str>,
+}
+
+pub(crate) struct Worker {
+    pub config: Arc<Config>,
+    ready: Arc<AtomicBool>,
+    quit: Arc<AtomicBool>,
+    packets: SyncSender<Vec<u8>>,
+    task: Option<JoinHandle<()>>,
+}
+
+impl Worker {
+    pub(crate) fn start(
+        config: Config,
+        root: PathBuf,
+        tun_out: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    ) -> std::io::Result<Self> {
+        let config = Arc::new(config);
+        let ready = Arc::new(AtomicBool::new(false));
+        let quit = Arc::new(AtomicBool::new(false));
+        let (packets, incoming) = mpsc::sync_channel(128);
+        let thread_state = (config.clone(), ready.clone(), quit.clone());
+        let task = thread::Builder::new()
+            .name("meowz-zerotier".into())
+            .spawn(move || {
+                run(thread_state, &root, incoming, &tun_out);
+            })?;
+        Ok(Self {
+            config,
+            ready,
+            quit,
+            packets,
+            task: Some(task),
+        })
+    }
+
+    pub(crate) fn classify(&self, packet: &[u8]) -> Destination {
+        self.config
+            .policy
+            .classify_packet(packet, self.ready.load(Ordering::Acquire))
+            .unwrap_or(Destination::DropOverlayUnavailable)
+    }
+
+    pub(crate) fn transmit(&self, packet: Vec<u8>) {
+        let _ = self.packets.try_send(packet);
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.ready.store(false, Ordering::Release);
+        self.quit.store(true, Ordering::Release);
+        if let Some(task) = self.task.take() {
+            let _ = task.join();
+        }
+    }
+}
+
+fn publish(path: &Path, last: &mut Option<Status>, status: &Status) {
+    if last.as_ref() == Some(status) {
+        return;
+    }
+    let temp = path.with_extension("tmp");
+    if let Ok(bytes) = serde_json::to_vec(status) {
+        if fs::write(&temp, bytes).is_ok() && fs::rename(&temp, path).is_ok() {
+            *last = Some(status.clone());
+        }
+    }
+}
+
+fn run(
+    (config, ready, quit): (Arc<Config>, Arc<AtomicBool>, Arc<AtomicBool>),
+    root: &Path,
+    incoming: mpsc::Receiver<Vec<u8>>,
+    tun_out: &tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+) {
+    let state_path = root.join("state");
+    let status_path = root.join("status.json");
+    let mut status = Status {
+        phase: "starting",
+        network: config.network.to_string(),
+        node: None,
+        ip: None,
+        sdk_status: None,
+        error: None,
+    };
+    let mut last = None;
+    publish(&status_path, &mut last, &status);
+    let result = (|| -> Result<(), &'static str> {
+        fs::create_dir_all(&state_path).map_err(|_| "could not create node state")?;
+        let mut client = Client::open(&state_path)?;
+        status.node = Some(format!("{:010x}", client.address()));
+        let network = config.network.sdk_value();
+        let status_code = client.join(network);
+        if status_code != 0 {
+            return Err("native join request failed");
+        }
+        // Replay only configured Moon entries. A removed world is not restored
+        // after a normal restart, even if its cached definition remains on disk.
+        for moon in &config.moons {
+            let (world, seed) = moon.sdk_args();
+            if client.orbit(world, seed) != 0 {
+                return Err("native Moon orbit request failed");
+            }
+        }
+        let mut bridge = None;
+        let mut current = None;
+        let mut last_expire = Instant::now();
+        while !quit.load(Ordering::Acquire) {
+            if client.step() != 0 {
+                return Err("native ZeroTier transport stopped");
+            }
+            let view = client.network(network);
+            let online = client.online();
+            let usable =
+                view.filter(|v| online && v.status == NETWORK_STATUS_OK && v.first_ipv4 != 0);
+            let next = usable.map(|v| (Ipv4Addr::from(v.first_ipv4), v.mac, v.mtu as usize));
+            if next != current {
+                bridge = next.and_then(|(ip, mac, mtu)| {
+                    if client.subscribe_arp(network, u32::from(ip)) != 0 {
+                        None
+                    } else {
+                        Bridge::new(TUN_IP, ip, mac, mtu)
+                    }
+                });
+                current = next;
+            }
+            ready.store(bridge.is_some(), Ordering::Release);
+            status.phase = if bridge.is_some() { "ready" } else { "waiting" };
+            status.ip = usable.map(|v| Ipv4Addr::from(v.first_ipv4));
+            status.sdk_status = view.map(|v| v.status);
+            publish(&status_path, &mut last, &status);
+
+            if let Some(bridge) = bridge.as_mut() {
+                let now = Instant::now();
+                if now.duration_since(last_expire) >= Duration::from_secs(1) {
+                    bridge.expire(now);
+                    last_expire = now;
+                }
+                for _ in 0..MAX_FRAME_BATCH {
+                    let Ok(frame) = client.receive() else { break };
+                    if frame.network != network {
+                        continue;
+                    }
+                    let incoming = bridge.receive(
+                        Ethernet {
+                            from: frame.from,
+                            to: frame.to,
+                            kind: frame.kind,
+                            payload: frame.data,
+                        },
+                        now,
+                    );
+                    if let Some(pkt) = incoming.tun {
+                        let _ = tun_out.send(pkt);
+                    }
+                    for reply in incoming.frames {
+                        send(&mut client, network, reply);
+                    }
+                }
+            } else {
+                // No stale frame may cross an authorization or config boundary.
+                while client.receive().is_ok() {}
+            }
+
+            match incoming.recv_timeout(IDLE_WAKE) {
+                Ok(packet) => {
+                    let Some(bridge) = bridge.as_mut() else {
+                        continue;
+                    };
+                    if !config
+                        .policy
+                        .classify_packet(&packet, true)
+                        .is_ok_and(|d| d == Destination::ZeroTier)
+                    {
+                        continue;
+                    }
+                    if let Some(frame) = bridge.transmit(packet, None, Instant::now()) {
+                        send(&mut client, network, frame);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        Ok(())
+    })();
+    ready.store(false, Ordering::Release);
+    status.phase = if result.is_ok() { "stopped" } else { "failed" };
+    status.ip = None;
+    status.error = result.err();
+    publish(&status_path, &mut last, &status);
+}
+
+fn send(client: &mut Client, network: u64, frame: Ethernet) {
+    let _ = client.send(&Frame {
+        network,
+        from: frame.from,
+        to: frame.to,
+        kind: frame.kind,
+        data: frame.payload,
+    });
+}
