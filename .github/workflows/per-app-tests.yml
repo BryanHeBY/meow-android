@@ -5,6 +5,8 @@ on:
     branches-ignore: [master, main]
     paths:
       - 'core/src/main/java/io/github/madeye/meow/repo/InstalledAppsRepository.kt'
+      - 'core/src/main/java/io/github/madeye/meow/repo/OverlayAppRepository.kt'
+      - 'core/src/test/java/io/github/madeye/meow/repo/OverlayAppRepositoryTest.kt'
       - 'mobile/src/main/java/io/github/madeye/meow/ui/screens/perapp/**'
       - 'mobile/src/test/java/io/github/madeye/meow/ui/screens/perapp/**'
       - '.github/workflows/per-app-tests.yml'
