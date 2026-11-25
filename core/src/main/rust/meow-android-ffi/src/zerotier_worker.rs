@@ -90,7 +90,7 @@ impl Worker {
     pub(crate) fn start(
         config: Config,
         root: PathBuf,
-        tun_out: tokio::sync::mpsc::Sender<Vec<u8>>,
+        tun_out: crate::tun_egress::Tx,
     ) -> std::io::Result<Self> {
         let config = Arc::new(config);
         let ready = Arc::new(AtomicBool::new(false));
@@ -250,7 +250,7 @@ fn run(
     (config, ready, quit, managed): (Arc<Config>, Arc<AtomicBool>, Arc<AtomicBool>, ManagedPolicy),
     root: &Path,
     incoming: mpsc::Receiver<Vec<u8>>,
-    tun_out: &tokio::sync::mpsc::Sender<Vec<u8>>,
+    tun_out: &crate::tun_egress::Tx,
     wake: &Wake,
 ) {
     let state_path = root.join("state");
@@ -520,7 +520,7 @@ fn run(
                         }) {
                             continue;
                         }
-                        let _ = tun_out.try_send(pkt);
+                        tun_out.enqueue(pkt);
                     }
                     for reply in incoming.frames {
                         send(&mut client, network, reply);

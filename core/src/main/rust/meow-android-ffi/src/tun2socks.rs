@@ -225,9 +225,14 @@ async fn run_tun2socks(
     let reply_readers: ReplyReaders = Arc::new(Mutex::new(HashMap::new()));
 
     let (stack_ingress_tx, mut stack_ingress_rx) = mpsc::channel::<AnyIpPktFrame>(256);
-    let (egress_tx, mut egress_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // One reactor registration for both directions; the tasks each own
+    // their readiness guard and stop waits for both before the fd closes.
+    let tun = Arc::new(unsafe {
+        AsyncFd::register_with_interest(fd, Interest::READABLE | Interest::WRITABLE)?
+    });
+    let (egress_tx, mut egress_rx, egress_stats) = crate::tun_egress::channel(256, 2 * 1024 * 1024);
     #[cfg(target_os = "android")]
-    let (overlay_out, mut overlay_in) = mpsc::channel::<Vec<u8>>(128);
+    let (overlay_out, mut overlay_in, overlay_stats) = crate::tun_egress::channel(128, 512 * 1024);
     #[cfg(target_os = "android")]
     let mut overlay = match overlay {
         Some((root, config)) => Some(crate::zerotier_worker::Worker::start(
@@ -277,7 +282,7 @@ async fn run_tun2socks(
                 }
                 pkt = stack.next() => {
                     match pkt {
-                        Some(Ok(frame)) => { let _ = egress_tx_lwip.send(frame); }
+                        Some(Ok(frame)) => { egress_tx_lwip.enqueue(frame); }
                         Some(Err(e)) => {
                             logging::bridge_log(&format!("stack recv error: {}", e));
                             break;
@@ -340,6 +345,7 @@ async fn run_tun2socks(
         }
     });
 
+    let tun_writer = Arc::clone(&tun);
     let tun_writer_handle = tokio::spawn(async move {
         loop {
             #[cfg(not(target_os = "android"))]
@@ -350,20 +356,9 @@ async fn run_tun2socks(
                 next = egress_rx.recv() => next,
             };
             let Some(pkt) = next else { break };
-            let mut retries = 0u32;
-            loop {
-                let written = unsafe { libc::write(fd, pkt.as_ptr() as *const c_void, pkt.len()) };
-                if written >= 0 {
-                    break;
-                }
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                if errno == libc::EAGAIN && retries < 3 {
-                    retries += 1;
-                    tokio::task::yield_now().await;
-                    continue;
-                }
-                break;
-            }
+            // The reactor clears stale writable readiness on EAGAIN. A stop
+            // aborts this task and drops any in-flight byte permit.
+            let _ = crate::tun_egress::write(&tun_writer, pkt).await;
         }
     });
 
@@ -378,17 +373,6 @@ async fn run_tun2socks(
         if TUN2SOCKS_STOP_REQUESTED.load(Ordering::SeqCst) {
             return;
         }
-        // Dropped when this task ends, which stop() waits for, so the fd
-        // leaves epoll before Kotlin closes it.
-        // SAFETY: for that reason `fd` stays open, and the same TUN, for the
-        // AsyncFd's whole life.
-        let tun = match unsafe { AsyncFd::register_with_interest(fd, Interest::READABLE) } {
-            Ok(tun) => tun,
-            Err(e) => {
-                logging::bridge_log(&format!("tun2socks: cannot poll the TUN fd: {}", e));
-                return;
-            }
-        };
         let mut read_buf = vec![0u8; 65535];
 
         loop {
@@ -503,7 +487,7 @@ async fn run_tun2socks(
                             else {
                                 return;
                             };
-                            let _ = egress.send(reply_pkt);
+                            egress.enqueue(reply_pkt);
                         };
                         if tokio::time::timeout(DNS_TASK_TIMEOUT, work).await.is_err() {
                             trace!(
@@ -533,6 +517,9 @@ async fn run_tun2socks(
     tun_writer_handle.abort();
     let _ = tun_writer_handle.await;
 
+    logging::bridge_log(&format!("tun2socks: egress {}", egress_stats.summary()));
+    #[cfg(target_os = "android")]
+    logging::bridge_log(&format!("tun2socks: ZeroTier egress {}", overlay_stats.summary()));
     logging::bridge_log("tun2socks: exiting");
     Ok(())
 }

@@ -29,6 +29,7 @@ mod protect;
 mod test_support;
 mod traffic;
 mod tun2socks;
+mod tun_egress;
 #[cfg(target_os = "android")]
 mod zerotier;
 #[cfg(any(test, target_os = "android"))]
