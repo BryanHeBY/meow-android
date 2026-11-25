@@ -1,0 +1,29 @@
+name: Overlay policy
+
+on:
+  push:
+    paths:
+      - 'core/src/main/rust/meow-overlay-policy/**'
+      - '.github/workflows/overlay-policy.yml'
+  pull_request:
+    paths:
+      - 'core/src/main/rust/meow-overlay-policy/**'
+      - '.github/workflows/overlay-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: core/src/main/rust/meow-overlay-policy
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - run: cargo +stable fmt --check
+      - run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - run: cargo +stable test --locked
