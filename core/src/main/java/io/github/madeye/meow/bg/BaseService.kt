@@ -55,7 +55,15 @@ object BaseService {
         @Volatile var meowInstance: MeowInstance? = null
         var notification: ServiceNotification? = null
         var closeReceiverRegistered = false
-        val binder = Binder(this)
+        @Volatile var forwardingFlags = 0
+            private set
+        val binder = Binder(this, service)
+
+        fun setForwarding(flags: Int) {
+            if (forwardingFlags == flags) return
+            forwardingFlags = flags
+            binder.forwardingChanged(flags)
+        }
         var connectingJob: Job? = null
 
         /**
@@ -83,7 +91,10 @@ object BaseService {
         }
     }
 
-    class Binder(@Volatile private var data: Data? = null) : IMeowService.Stub(), CoroutineScope, AutoCloseable {
+    class Binder(
+        @Volatile private var data: Data?,
+        private val service: Interface,
+    ) : IMeowService.Stub(), CoroutineScope, AutoCloseable {
         // RemoteCallbackList drops dead binders automatically; the parallel
         // bandwidthListeners map must mirror that. If a binder that died with
         // the app process stayed in the map, the 1 Hz traffic looper would
@@ -184,6 +195,22 @@ object BaseService {
         // On the binder thread: two counter reads, nothing that blocks.
         override fun getSessionStats(): SessionStats? = data?.meowInstance?.sessionStats()
 
+        override fun getForwardingFlags(): Int = data?.forwardingFlags ?: 0
+
+        override fun applyZeroTier(): Int = dispatchChange { service.applyZeroTier() }
+
+        override fun setMeowForwarding(enabled: Boolean): Int =
+            dispatchChange { service.setMeowForwarding(enabled) }
+
+        private fun dispatchChange(change: suspend () -> Int): Int =
+            if (data == null) ForwardingControl.OFFLINE else runBlocking(Dispatchers.Main.immediate) {
+                change()
+            }
+
+        fun forwardingChanged(flags: Int) = launch {
+            broadcast { it.forwardingChanged(flags) }
+        }
+
         fun stateChanged(s: State, msg: String?) = launch {
             val profileName = profileName
             broadcast { it.stateChanged(s.ordinal, profileName, msg) }
@@ -264,7 +291,7 @@ object BaseService {
             }
         }
 
-        fun killProcesses(scope: CoroutineScope) {
+        suspend fun killProcesses(scope: CoroutineScope) {
             data.meowInstance?.stop()
             data.meowInstance = null
         }
@@ -300,6 +327,9 @@ object BaseService {
                 if (restart) startRunner() else stopSelf()
             }
         }
+
+        suspend fun applyZeroTier(): Int = ForwardingControl.OFFLINE
+        suspend fun setMeowForwarding(enabled: Boolean): Int = ForwardingControl.OFFLINE
 
         suspend fun preInit() {}
 

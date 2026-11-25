@@ -73,6 +73,8 @@ class MeowInstance(val profile: ClashProfile) {
     // Set once the engine is up, for the Statistics screen; see sessionStats.
     @Volatile private var meter: NetworkTrafficMeter? = null
     private var networks: DefaultNetwork? = null
+    @Volatile internal var physicalNetwork: Network? = null
+        private set
 
     // JNI startup blocks while loading remote proxy/rule providers. Keep it
     // off the service's main thread so lifecycle callbacks remain responsive.
@@ -119,6 +121,9 @@ class MeowInstance(val profile: ClashProfile) {
         val meter = NetworkTrafficMeter(startedAt = System.currentTimeMillis())
         var outbound: Network? = null
         networks = DefaultNetwork(context) { network, capabilities ->
+            physicalNetwork = network.takeIf {
+                capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true
+            }
             // Every network change also re-reads the zone: one that moves
             // the device to another is, more often than not, a trip.
             pushTimeZone()
@@ -179,6 +184,7 @@ class MeowInstance(val profile: ClashProfile) {
     fun stop() {
         networks?.stop()
         networks = null
+        physicalNetwork = null
         meter = null
         MeowCore.nativeStopEngine()
         Timber.d("MeowInstance: engine stopped")

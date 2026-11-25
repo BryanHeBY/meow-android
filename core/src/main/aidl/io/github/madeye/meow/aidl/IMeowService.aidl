@@ -26,4 +26,9 @@ interface IMeowService {
     // The running session's start time and its traffic per kind of network;
     // null while no engine is up.
     SessionStats getSessionStats();
+
+    // Live forwarding controls. Must be called off the caller's main thread.
+    int applyZeroTier();
+    int setMeowForwarding(boolean enabled);
+    int getForwardingFlags();
 }

@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
 import io.github.madeye.meow.diagnostics.FaultProcess
@@ -20,6 +21,7 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
         fun stateChanged(state: BaseService.State, profileName: String, msg: String?)
         fun trafficUpdated(profileId: Long, stats: TrafficStats)
         fun trafficPersisted(profileId: Long)
+        fun forwardingChanged(flags: Int)
     }
 
     private var callback: Callback? = null
@@ -76,6 +78,7 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
             service.registerCallback(this)
             callbackRegistered = true
             if (listenForBandwidth) service.startListeningForBandwidth(this, 1000)
+            callback?.forwardingChanged(service.forwardingFlags)
         } catch (e: RemoteException) {
             Timber.w(e)
         }
@@ -90,6 +93,7 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
         bound = false
         // VPN runs in a separate :vpn process; if it dies (system kill, crash),
         // the UI would otherwise keep showing the last-known state.
+        callback?.forwardingChanged(0)
         callback?.stateChanged(BaseService.State.Stopped, "", null)
         // Rebind immediately so registerCallback()/startListeningForBandwidth()
         // run against the new process instance as soon as it is up. Without
@@ -143,6 +147,21 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
             // Gone with its process, and the VPN with it.
             null
         }
+    }
+
+    fun applyZeroTier(): Int = callForwarding { applyZeroTier() }
+
+    fun setMeowForwarding(enabled: Boolean): Int = callForwarding { setMeowForwarding(enabled) }
+
+    private inline fun callForwarding(call: IMeowService.() -> Int): Int = try {
+        service?.call() ?: ForwardingControl.OFFLINE
+    } catch (_: RemoteException) {
+        // Do not report success or restart automatically on lost IPC.
+        ForwardingControl.FAILED
+    }
+
+    override fun forwardingChanged(flags: Int) {
+        callback?.forwardingChanged(flags)
     }
 
     /** The running session's stats; null when no VPN runs or `:vpn` is not bound. */

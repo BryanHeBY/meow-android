@@ -6,6 +6,7 @@ import io.github.madeye.meow.aidl.MeowConnection
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.net.ProxyProbeTransport
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Turns the AIDL service callbacks into flows the UI can collect.
@@ -48,6 +50,21 @@ class VpnStateRepository(
 
     private val _profileName = MutableStateFlow("")
     val profileName: StateFlow<String> = _profileName.asStateFlow()
+
+    private val _meowForwarding = MutableStateFlow(true)
+    val meowForwarding = _meowForwarding.asStateFlow()
+    private val _overlayForwarding = MutableStateFlow(false)
+    val overlayForwarding = _overlayForwarding.asStateFlow()
+
+    override fun forwardingChanged(flags: Int) {
+        _meowForwarding.value = flags and ForwardingControl.MEOW != 0
+        _overlayForwarding.value = flags and ForwardingControl.ZEROTIER != 0
+    }
+
+    suspend fun applyZeroTier(): Int = withContext(Dispatchers.IO) { connection.applyZeroTier() }
+
+    suspend fun setMeowForwarding(enabled: Boolean): Int =
+        withContext(Dispatchers.IO) { connection.setMeowForwarding(enabled) }
 
     /** Service-reported failures, surfaced once each (snackbar, not state). */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)

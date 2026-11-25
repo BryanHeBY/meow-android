@@ -5,4 +5,5 @@ interface IMeowServiceCallback {
     void stateChanged(int state, String profileName, String msg);
     void trafficUpdated(long profileId, in TrafficStats stats);
     void trafficPersisted(long profileId);
+    oneway void forwardingChanged(int flags);
 }

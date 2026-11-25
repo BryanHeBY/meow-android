@@ -11,6 +11,7 @@ import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.Core
+import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
 import io.github.madeye.meow.diagnostics.FaultProcess
@@ -19,6 +20,10 @@ import io.github.madeye.meow.preference.PerAppConfigStore
 import io.github.madeye.meow.repo.OverlaySettingsRepository
 import io.github.madeye.meow.repo.PerAppMode
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
@@ -80,13 +85,20 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         ServiceNotification(this)
 
     private var conn: ParcelFileDescriptor? = null
-    private var active = false
+    private val tunChanges = Mutex()
+    private var tunPlan: TunPlan? = null
+    private var meowForwarding = true
+    private var overlayApplyUnknown = false
+
+    private data class TunPlan(val envelope: TunEnvelope, val overlayEnabled: Boolean, val overlayJson: String) {
+        fun nativeConfig(meowForwarding: Boolean): String =
+            JSONObject(overlayJson).put("meow_forwarding", meowForwarding).toString()
+    }
     private var metered = false
     private var networkChanges: NetworkChangeRecorder? = null
     /** Keeps the declared underlying network current, below API 29 only. */
     private var underlying: DefaultNetwork? = null
-    private var directNetworkObserver: DefaultNetwork? = null
-    @Volatile private var directNetwork: Network? = null
+    private val directNetwork: Network? get() = data.meowInstance?.physicalNetwork
 
     override fun onBind(intent: Intent) = when (intent.action) {
         SERVICE_INTERFACE -> super<BaseVpnService>.onBind(intent)
@@ -101,18 +113,18 @@ class VpnService : BaseVpnService(), BaseService.Interface {
 
     override fun onRevoke() = stopRunner()
 
-    override fun killProcesses(scope: CoroutineScope) {
-        directNetworkObserver?.stop()
-        directNetworkObserver = null
-        directNetwork = null
+    override suspend fun killProcesses(scope: CoroutineScope) = tunChanges.withLock {
         underlying?.stop()
         underlying = null
         networkChanges?.stop()
         networkChanges = null
         super.killProcesses(scope)
-        active = false
-        conn?.close()
+        closeTun(conn)
         conn = null
+        tunPlan = null
+        overlayApplyUnknown = false
+        meowForwarding = true
+        data.setForwarding(0)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -214,13 +226,18 @@ class VpnService : BaseVpnService(), BaseService.Interface {
      * Snapshot directly attached IPv4 networks before establishing our own VPN.
      * Default routes and the gateway's remote routes are not local subnets.
      */
-    private fun overlayConfig(): JSONObject {
+    private fun overlayConfig(reconfiguring: Boolean): JSONObject {
         val settings = OverlaySettingsRepository.directory.resolve("settings.json")
         if (!settings.isFile) return JSONObject()
         val config = JSONObject(settings.readText()).apply { remove("saved_networks") }
         if (!config.optBoolean("enabled")) return config
-        val network = connectivity.activeNetwork
+        val network = directNetwork ?: connectivity.activeNetwork
         val capabilities = network?.let(connectivity::getNetworkCapabilities)
+        // Do not rebuild the local-LAN exclusions from the VPN itself if the
+        // physical network has yet to be reported on a live session.
+        check(!reconfiguring || capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true) {
+            "Physical network has not been identified"
+        }
         val localRoutes = if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true) {
             connectivity.getLinkProperties(network)?.routes.orEmpty()
                 .filter { !it.hasGateway() && it.destination.address is Inet4Address && it.destination.prefixLength > 0 }
@@ -230,24 +247,8 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         return config.put("local_cidrs", JSONArray(localRoutes))
     }
 
-    private fun startVpn() {
-        val overlayConfig = overlayConfig()
-        val builder = Builder()
-            .setSession("Meow VPN")
-            .setMtu(VPN_MTU)
-            .addAddress(PRIVATE_VLAN4_CLIENT, 30)
-            .addDnsServer(PRIVATE_VLAN4_ROUTER)
-            .addRoute("0.0.0.0", 0)
-        // `ipv6: false` keeps IPv6 off the VPN, as mihomo drops its TUN's IPv6
-        // address. With no IPv6 address or route, Android blocks the family
-        // for the apps the VPN covers, so they fall back to IPv4 at once
-        // instead of reaching DIRECT over IPv6 with an address from their own
-        // DNS.
-        if (data.meowInstance!!.tunIpv6()) {
-            builder.addAddress(PRIVATE_VLAN6_CLIENT, 126)
-                .addRoute("::", 0)
-        }
-
+    private fun buildPlan(reconfiguring: Boolean = false): TunPlan {
+        val overlayConfig = overlayConfig(reconfiguring)
         // Per-app VPN routing — the file store is authoritative: this process
         // caches SharedPreferences for its whole lifetime, so edits saved
         // after the first establish would never reach the next one. A file
@@ -288,6 +289,24 @@ class VpnService : BaseVpnService(), BaseService.Interface {
             clash.union(overlay)
         } else clash
 
+        return TunPlan(
+            envelope = TunEnvelope(capture, checkNotNull(data.meowInstance).tunIpv6(), metered),
+            overlayEnabled = overlayConfig.optBoolean("enabled"),
+            overlayJson = overlayConfig.toString(),
+        )
+    }
+
+    private fun establish(plan: TunPlan): ParcelFileDescriptor {
+        val builder = Builder()
+            .setSession("Meow VPN")
+            .setMtu(VPN_MTU)
+            .addAddress(PRIVATE_VLAN4_CLIENT, 30)
+            .addDnsServer(PRIVATE_VLAN4_ROUTER)
+            .addRoute("0.0.0.0", 0)
+        if (plan.envelope.ipv6) {
+            builder.addAddress(PRIVATE_VLAN6_CLIENT, 126).addRoute("::", 0)
+        }
+        val capture = plan.envelope.capture
         when (capture.mode) {
             "exclude" -> for (pkg in capture.packages) {
                 try { builder.addDisallowedApplication(pkg) }
@@ -306,18 +325,44 @@ class VpnService : BaseVpnService(), BaseService.Interface {
             }
         }
 
-        if (overlayConfig.optBoolean("enabled") && clash.mode != "all") {
-            directNetworkObserver = DefaultNetwork(this) { network, capabilities ->
-                directNetwork = network.takeIf {
-                    capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true
-                }
-            }.also { it.start() }
-        }
-        active = true
-        if (Build.VERSION.SDK_INT >= 29) builder.setMetered(metered)
+        if (Build.VERSION.SDK_INT >= 29) builder.setMetered(plan.envelope.metered)
+        return builder.establish() ?: throw NullConnectionException()
+    }
 
-        val conn = builder.establish() ?: throw NullConnectionException()
-        this.conn = conn
+    private fun closeTun(fd: ParcelFileDescriptor?) {
+        if (fd == null) return
+        try {
+            fd.close()
+        } catch (e: java.io.IOException) {
+            Timber.w(e, "VPN interface close failed")
+        }
+    }
+
+    private suspend fun attachTun(fd: ParcelFileDescriptor, plan: TunPlan) {
+        val instance = checkNotNull(data.meowInstance)
+        val nativeConfig = plan.nativeConfig(meowForwarding)
+        withContext(Dispatchers.IO) {
+            instance.startTun2Socks(this@VpnService, fd.fd, nativeConfig)
+        }
+    }
+
+    private fun publishForwarding() {
+        val plan = tunPlan
+        val meow = if (plan != null && meowForwarding && data.meowInstance?.profile?.id != 0L)
+            ForwardingControl.MEOW else 0
+        val overlay = if (!overlayApplyUnknown && plan?.overlayEnabled == true) ForwardingControl.ZEROTIER else 0
+        data.setForwarding(meow or overlay)
+    }
+
+    private suspend fun startVpn() = tunChanges.withLock {
+        meowForwarding = true
+        overlayApplyUnknown = false
+        val plan = buildPlan()
+        val fd = establish(plan)
+        conn = fd
+        attachTun(fd, plan)
+        tunPlan = plan
+        publishForwarding()
         // Records in the logbook which network the VPN sits on, and what the
         // apps on it are told, as the networks change.
         networkChanges?.stop()
@@ -341,7 +386,112 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         } else {
             null
         }
-        data.meowInstance!!.startTun2Socks(this, conn.fd, overlayConfig.toString())
+    }
+
+    override suspend fun applyZeroTier(): Int = tunChanges.withLock {
+        if (data.state != BaseService.State.Connected) {
+            return@withLock if (data.state == BaseService.State.Stopped)
+                ForwardingControl.OFFLINE else ForwardingControl.FAILED
+        }
+        try {
+            val proposed = buildPlan(reconfiguring = true)
+            if (!proposed.overlayEnabled && (!meowForwarding || data.meowInstance?.profile?.id == 0L)) {
+                // There is no remaining tunnel to keep available.
+                stopRunner()
+                return@withLock ForwardingControl.STOPPED
+            }
+            val old = tunPlan
+            if (!overlayApplyUnknown && proposed == old) return@withLock ForwardingControl.APPLIED
+            val replaceInterface = old == null || old.envelope.requiresNewInterface(proposed.envelope)
+            if (!replaceInterface && !overlayApplyUnknown) {
+                val root = OverlaySettingsRepository.directory.absolutePath
+                when (withContext(Dispatchers.IO) {
+                    MeowCore.nativeApplyZeroTier(root, proposed.nativeConfig(meowForwarding))
+                }) {
+                    0 -> {
+                        tunPlan = proposed
+                        publishForwarding()
+                        return@withLock ForwardingControl.APPLIED
+                    }
+                    1 -> Unit // same interface, native forwarding only needs rebuilding
+                    -2 -> {
+                        // Native began a transition but has not acknowledged it.
+                        // Meow remains independently live; don't guess the ZT state.
+                        overlayApplyUnknown = true
+                        publishForwarding()
+                        return@withLock ForwardingControl.INDETERMINATE
+                    }
+                    else -> return@withLock ForwardingControl.FAILED
+                }
+            }
+            replaceForwarding(old, proposed, replaceInterface)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "applying ZeroTier settings failed")
+            ForwardingControl.FAILED
+        }
+    }
+
+    /** Rebind a data-plane only; never recreate MeowInstance or its controller.
+     * If establishment fails, the old VPN still works. Once Android has installed
+     * a replacement, keep it open even on attach error (fail closed) until a
+     * recovery plan can bind forwarding again or the user stops the master VPN.
+     */
+    private suspend fun replaceForwarding(old: TunPlan?, proposed: TunPlan, replaceInterface: Boolean): Int {
+        val previousFd = conn
+        val nextFd = if (replaceInterface || previousFd == null) establish(proposed) else previousFd
+        conn = nextFd
+        // The native stack owns a duplicate of its fd. A timed-out shutdown
+        // cannot write through an Android fd integer reused by the replacement.
+        val stopped = withContext(Dispatchers.IO) { MeowCore.nativeStopTun2Socks() }
+        if (previousFd !== nextFd) closeTun(previousFd)
+        if (!stopped) {
+            tunPlan = null
+            publishForwarding()
+            return ForwardingControl.FAILED
+        }
+        tunPlan = null
+        try {
+            attachTun(nextFd, proposed)
+            tunPlan = proposed
+            overlayApplyUnknown = false
+            publishForwarding()
+            return ForwardingControl.REBUILT
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "new VPN forwarding failed; restoring previous plan")
+        }
+        if (old != null && !overlayApplyUnknown) {
+            try {
+                val recovery = if (replaceInterface) establish(old) else nextFd
+                conn = recovery
+                if (recovery !== nextFd) closeTun(nextFd)
+                attachTun(recovery, old)
+                tunPlan = old
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.w(e, "previous forwarding could not be restored")
+            }
+        }
+        publishForwarding()
+        return ForwardingControl.FAILED
+    }
+
+    override suspend fun setMeowForwarding(enabled: Boolean): Int = tunChanges.withLock {
+        val plan = tunPlan
+        if (data.state != BaseService.State.Connected || overlayApplyUnknown || plan?.overlayEnabled != true ||
+            data.meowInstance?.profile?.id == 0L
+        ) return@withLock ForwardingControl.OFFLINE
+        if (meowForwarding == enabled) return@withLock ForwardingControl.APPLIED
+        if (withContext(Dispatchers.IO) { MeowCore.nativeSetMeowForwarding(enabled) } != 0) {
+            return@withLock ForwardingControl.FAILED
+        }
+        meowForwarding = enabled
+        publishForwarding()
+        ForwardingControl.APPLIED
     }
 
     override fun onDestroy() {
