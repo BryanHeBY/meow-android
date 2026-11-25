@@ -289,8 +289,12 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(tr("Moon orbit", "Moon 入轨"), style = MaterialTheme.typography.titleMedium)
                         for (entry in config.moons) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column(Modifier.align(Alignment.CenterVertically)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(entry.world)
                                     Text(
                                         if (entry.seed == null) tr("Imported file", "文件导入") else tr("Manual seed", "手动 Seed"),
