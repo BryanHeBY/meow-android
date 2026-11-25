@@ -387,4 +387,7 @@
     <string name="settings_vpn_notification_system">Android တွင် VPN အသိပေးချက် စီမံရန်</string>
     <string name="settings_vpn_notification_failed">အသိပေးချက် ဆက်တင် မသိမ်းနိုင်ပါ</string>
     <string name="tab_zerotier">ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">ပရောက်စီအုပ်စုများကို ဖွင့်မရပါ။</string>
+    <string name="proxy_groups_refresh_stale">ပြန်လည်ရယူမရပါ။ နောက်ဆုံးသိထားသော ပရောက်စီအုပ်စုများကို ပြနေသည်။</string>
+    <string name="proxy_groups_retry">ထပ်ကြိုးစားရန်</string>
 </resources>

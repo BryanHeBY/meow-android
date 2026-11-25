@@ -400,4 +400,7 @@
     <string name="settings_vpn_notification_system">مدیریت اعلان VPN در Android</string>
     <string name="settings_vpn_notification_failed">ذخیره تنظیمات اعلان ممکن نبود</string>
     <string name="tab_zerotier">شبکه ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">بارگیری گروه‌های پراکسی ممکن نبود.</string>
+    <string name="proxy_groups_refresh_stale">به‌روزرسانی ناموفق بود. آخرین گروه‌های پراکسی نمایش داده می‌شوند.</string>
+    <string name="proxy_groups_retry">تلاش دوباره</string>
 </resources>

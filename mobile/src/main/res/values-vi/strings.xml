@@ -382,4 +382,7 @@
     <string name="settings_vpn_notification_system">Quản lý thông báo VPN trong Android</string>
     <string name="settings_vpn_notification_failed">Không thể lưu cài đặt thông báo</string>
     <string name="tab_zerotier">ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">Không thể tải các nhóm proxy.</string>
+    <string name="proxy_groups_refresh_stale">Không thể làm mới. Đang hiển thị các nhóm proxy đã tải gần nhất.</string>
+    <string name="proxy_groups_retry">Thử lại</string>
 </resources>

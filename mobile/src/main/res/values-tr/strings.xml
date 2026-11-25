@@ -392,4 +392,7 @@
     <string name="settings_vpn_notification_system">Android VPN bildirimini yönet</string>
     <string name="settings_vpn_notification_failed">Bildirim ayarları kaydedilemedi</string>
     <string name="tab_zerotier">ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">Proxy grupları yüklenemedi.</string>
+    <string name="proxy_groups_refresh_stale">Yenileme başarısız. Son bilinen proxy grupları gösteriliyor.</string>
+    <string name="proxy_groups_retry">Yeniden dene</string>
 </resources>

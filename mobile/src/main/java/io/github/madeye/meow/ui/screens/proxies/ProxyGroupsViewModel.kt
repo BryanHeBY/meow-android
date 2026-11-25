@@ -51,6 +51,7 @@ data class ProxyGroupsUiState(
     val hasProfile: Boolean = false,
     val groups: List<ProxyGroupUi> = emptyList(),
     val expandedGroup: String? = null,
+    val refreshFailed: Boolean = false,
 )
 
 /**
@@ -66,7 +67,11 @@ class ProxyGroupsViewModel(
     private val routeChanges: RouteChanges,
 ) : ViewModel() {
 
-    private val groups = MutableStateFlow<List<ProxyGroupUi>>(emptyList())
+    private val selectedId = profiles.observeSelected().map { it?.id }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private val refresh = GroupSnapshots<Long, ProxyGroupUi>()
+    private val groups = MutableStateFlow(refresh.snapshot)
+    private var refreshJob: Job? = null
     private val expanded = MutableStateFlow<String?>(null)
 
     /** Running latency tests by group, laid over [groups] until each ends. */
@@ -78,14 +83,18 @@ class ProxyGroupsViewModel(
 
     val uiState: StateFlow<ProxyGroupsUiState> = combine(
         vpn.state,
-        profiles.observeSelected().map { it != null },
-        combine(groups, groupTests) { list, tests -> list.withTests(tests) },
+        selectedId,
+        combine(groups, groupTests) { snapshot, tests ->
+            snapshot.copy(rows = snapshot.rows.withTests(tests))
+        },
         expanded,
-    ) { state, hasProfile, groupList, expandedGroup ->
+    ) { state, profileId, snapshot, expandedGroup ->
+        val current = state == BaseService.State.Connected && snapshot.session == profileId
         ProxyGroupsUiState(
             state = state,
-            hasProfile = hasProfile,
-            groups = groupList,
+            hasProfile = profileId != null,
+            groups = if (current) snapshot.rows else emptyList(),
+            refreshFailed = current && snapshot.failed,
             expandedGroup = expandedGroup,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProxyGroupsUiState())
@@ -94,8 +103,18 @@ class ProxyGroupsViewModel(
         // They change when the user switches profile, so reload on every
         // state transition.
         viewModelScope.launch {
-            vpn.state.collect { state ->
-                if (state == BaseService.State.Connected) loadGroups() else groups.value = emptyList()
+            combine(vpn.state, selectedId) { state, id ->
+                id.takeIf { state == BaseService.State.Connected }
+            }.collect { session ->
+                if (!refresh.switchTo(session)) return@collect
+                refreshJob?.cancel()
+                val jobs = testJobs.values.toList()
+                testJobs.clear()
+                jobs.forEach { it.cancel() }
+                groupTests.value = emptyMap()
+                expanded.value = null
+                groups.value = refresh.snapshot
+                if (session != null) loadGroups()
             }
         }
     }
@@ -114,14 +133,20 @@ class ProxyGroupsViewModel(
         expanded.value = if (expanded.value == group) null else group
     }
 
+    fun onRetry() {
+        loadGroups()
+    }
+
     fun onSelectNode(group: String, node: String) {
+        if (!canUseGroups()) return
+        val profile = selectedId.value ?: return
         viewModelScope.launch {
             try {
                 api.selectProxy(group, node)
                 routeChanges.notifyChanged()
                 analytics.proxyNodeSelect(node)
                 // Persist the pick so it can be replayed on the next connect.
-                profiles.getSelected()?.let { profiles.saveSelectedProxy(it.id, node) }
+                if (selectedId.value == profile) profiles.saveSelectedProxy(profile, node)
                 loadGroups()
             } catch (e: MeowApiException) {
                 // The engine is the source of truth; a failed select simply
@@ -137,7 +162,8 @@ class ProxyGroupsViewModel(
      * restarted rather than joined; other groups' tests carry on.
      */
     fun onTestGroup(group: String) {
-        val target = groups.value.firstOrNull { it.name == group } ?: return
+        if (!canUseGroups()) return
+        val target = groups.value.rows.firstOrNull { it.name == group } ?: return
         testJobs.remove(group)?.cancel()
         val members = target.nodes.map { it.name }
         groupTests.update { it + (group to GroupTestProgress.start(members)) }
@@ -154,7 +180,7 @@ class ProxyGroupsViewModel(
                 // The engine kept every result as history (and an url-test
                 // group its new pick); reload before dropping the overlay so
                 // rows don't flash their pre-test values in between.
-                loadGroups().join()
+                loadGroups()?.join()
             } finally {
                 // A superseded run must leave its successor's state alone.
                 if (testJobs[group] === self) {
@@ -167,11 +193,19 @@ class ProxyGroupsViewModel(
         job.start()
     }
 
-    private fun loadGroups(): Job {
+    private fun canUseGroups(): Boolean = !refresh.snapshot.failed &&
+        refresh.snapshot.session != null && refresh.snapshot.session == selectedId.value &&
+        vpn.state.value == BaseService.State.Connected
+
+    private fun loadGroups(): Job? {
+        val session = selectedId.value ?: return null
+        if (vpn.state.value != BaseService.State.Connected || refresh.snapshot.session != session) return null
+        val ticket = refresh.begin()
+        refreshJob?.cancel()
         return viewModelScope.launch {
             // Read first: the mode decides whether GLOBAL is listed.
             val mode = loadRouteMode()
-            groups.value = try {
+            val rows = try {
                 val result = api.proxies()
                 result.visibleGroups(mode).map { group ->
                     ProxyGroupUi(
@@ -194,12 +228,15 @@ class ProxyGroupsViewModel(
                     )
                 }
             } catch (e: MeowApiException) {
-                // An empty group list and a failed fetch look identical on
-                // screen, so the reason has to reach logcat or it is invisible.
                 Timber.w(e, "loading proxy groups failed")
-                emptyList()
+                null
             }
-        }
+            if (vpn.state.value == BaseService.State.Connected && selectedId.value == session &&
+                refresh.finish(ticket, rows)
+            ) {
+                groups.value = refresh.snapshot
+            }
+        }.also { refreshJob = it }
     }
 
     private suspend fun loadRouteMode(): RouteMode? = try {

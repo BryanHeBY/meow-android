@@ -61,6 +61,7 @@ fun ProxyGroupsScreen(
     onToggleExpanded: (String) -> Unit,
     onSelectNode: (String, String) -> Unit,
     onTestGroup: (String) -> Unit,
+    onRetry: () -> Unit,
     onOpenNode: (node: String, testUrl: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -76,7 +77,21 @@ fun ProxyGroupsScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (state.groups.isEmpty()) {
+        if (state.refreshFailed) {
+            item {
+                GlassCard {
+                    Text(
+                        text = stringResource(
+                            if (state.groups.isEmpty()) R.string.proxy_groups_refresh_failed
+                            else R.string.proxy_groups_refresh_stale,
+                        ),
+                        color = MaterialTheme.meow.mutedText,
+                    )
+                    TextButton(onClick = onRetry) { Text(stringResource(R.string.proxy_groups_retry)) }
+                }
+            }
+        }
+        if (state.groups.isEmpty() && !state.refreshFailed) {
             item { Placeholder(state) }
         } else {
             items(state.groups, key = { it.name }) { group ->

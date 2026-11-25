@@ -382,4 +382,7 @@
     <string name="settings_vpn_notification_system">在系统设置中管理 VPN 通知</string>
     <string name="settings_vpn_notification_failed">无法保存通知设置</string>
     <string name="tab_zerotier">ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">无法加载代理分组。</string>
+    <string name="proxy_groups_refresh_stale">刷新失败，正在显示上次加载的代理分组。</string>
+    <string name="proxy_groups_retry">重试</string>
 </resources>

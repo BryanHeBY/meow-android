@@ -444,4 +444,7 @@
     <string name="settings_vpn_notification_system">إدارة إشعار VPN في Android</string>
     <string name="settings_vpn_notification_failed">تعذّر حفظ إعدادات الإشعار</string>
     <string name="tab_zerotier">شبكة ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">تعذّر تحميل مجموعات الوكيل.</string>
+    <string name="proxy_groups_refresh_stale">تعذّر التحديث. تُعرض آخر مجموعات وكيل معروفة.</string>
+    <string name="proxy_groups_retry">إعادة المحاولة</string>
 </resources>

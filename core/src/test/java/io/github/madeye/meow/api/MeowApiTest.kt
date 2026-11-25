@@ -241,7 +241,6 @@ class MeowApiTest {
             "404" to MockResponse().setResponseCode(404),
             "500" to MockResponse().setResponseCode(500),
             "dropped connection" to MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST),
-            // Not wrapped as Unreachable: the body read itself throws.
             "truncated body" to configuredGroups("Proxy", "Streaming", "Auto")
                 .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY),
         )
@@ -252,6 +251,18 @@ class MeowApiTest {
 
             assertEquals(label, listOf("Auto", "Proxy", "Streaming"), result.selectableGroups.map { it.name })
             assertEquals(label, setOf("HK 01", "SG 02", "DIRECT"), result.proxies.keys)
+        }
+    }
+
+    @Test
+    fun `a truncated proxy map is reported as unreachable`() = runTest {
+        server.enqueue(MockResponse().setBody(GROUPED_PROXIES)
+            .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY))
+        try {
+            api.proxies()
+            fail("expected the truncated body to fail")
+        } catch (_: MeowApiException.Unreachable) {
+            assertEquals("/proxies", server.takeRequest().path)
         }
     }
 

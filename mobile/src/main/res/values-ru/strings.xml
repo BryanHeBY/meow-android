@@ -412,4 +412,7 @@
     <string name="settings_vpn_notification_system">Настроить уведомление VPN в Android</string>
     <string name="settings_vpn_notification_failed">Не удалось сохранить настройки уведомлений</string>
     <string name="tab_zerotier">ZeroTier</string>
+    <string name="proxy_groups_refresh_failed">Не удалось загрузить группы прокси.</string>
+    <string name="proxy_groups_refresh_stale">Не удалось обновить список. Показаны последние известные группы прокси.</string>
+    <string name="proxy_groups_retry">Повторить</string>
 </resources>

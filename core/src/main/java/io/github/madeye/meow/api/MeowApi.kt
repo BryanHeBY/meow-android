@@ -557,14 +557,16 @@ class MeowApi(
         val authenticated = request.newBuilder()
             .tag(AuthSnapshot::class.java, AuthSnapshot(secret()))
             .build()
-        val response = try {
-            client.newCall(authenticated).await()
+        try {
+            client.newCall(authenticated).await().use {
+                if (it.code !in okCodes) throw MeowApiException.Http(operation, it.code)
+                it.body?.string().orEmpty()
+            }
+        } catch (e: MeowApiException) {
+            throw e
         } catch (e: IOException) {
+            // Reading the response body can fail after the headers arrive.
             throw MeowApiException.Unreachable(e)
-        }
-        response.use {
-            if (it.code !in okCodes) throw MeowApiException.Http(operation, it.code)
-            it.body?.string().orEmpty()
         }
     }
 
