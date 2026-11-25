@@ -16,6 +16,36 @@ mod inner {
     use std::os::fd::RawFd;
     use std::sync::Arc;
 
+    static DIRECT: parking_lot::RwLock<Option<Arc<VpnSocketProtector>>> =
+        parking_lot::RwLock::new(None);
+
+    pub(super) fn direct(fd: RawFd) -> std::io::Result<()> {
+        let error = || {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Android refused direct VPN egress",
+            )
+        };
+        let service = DIRECT.read().clone().ok_or_else(error)?;
+        let mut env = service.jvm.attach_current_thread().map_err(|_| error())?;
+        let ok = env
+            .call_method(
+                &service.service,
+                "protectDirectSocket",
+                "(I)Z",
+                &[jni::objects::JValue::Int(fd)],
+            )
+            .and_then(|v| v.z());
+        match ok {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(error()),
+            Err(_) => {
+                let _ = env.exception_clear();
+                Err(error())
+            }
+        }
+    }
+
     /// `SocketProtector` impl that calls `VpnService.protect(int)` over JNI.
     pub(super) struct VpnSocketProtector {
         jvm: JavaVM,
@@ -60,7 +90,9 @@ mod inner {
     pub(super) fn install(env: &jni::JNIEnv, service: &jni::objects::JObject) {
         match VpnSocketProtector::new(env, service) {
             Ok(p) => {
-                meow_common::set_socket_protector(Arc::new(p));
+                let p = Arc::new(p);
+                *DIRECT.write() = Some(p.clone());
+                meow_common::set_socket_protector(p);
                 crate::logging::bridge_log("protect: SocketProtector installed");
             }
             Err(e) => {
@@ -70,6 +102,7 @@ mod inner {
     }
 
     pub(super) fn clear() {
+        *DIRECT.write() = None;
         meow_common::clear_socket_protector();
         crate::logging::bridge_log("protect: SocketProtector cleared");
     }
@@ -90,4 +123,9 @@ pub fn install(env: &jni::JNIEnv, service: &jni::objects::JObject) {
 /// Remove the protector on VPN tear-down.
 pub fn clear() {
     inner::clear();
+}
+
+#[cfg(target_os = "android")]
+pub fn direct(fd: std::os::fd::RawFd) -> std::io::Result<()> {
+    inner::direct(fd)
 }

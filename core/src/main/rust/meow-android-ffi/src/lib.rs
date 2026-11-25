@@ -14,6 +14,8 @@
 //! `meow_dns::DnsServer::handle_query`.
 
 mod diagnostics;
+#[cfg(any(test, target_os = "android"))]
+mod direct_exit;
 mod engine;
 mod ip_info;
 mod live_dns;

@@ -44,19 +44,43 @@ type ReplyReaders = Arc<Mutex<HashMap<NatKey, Arc<UdpSession>>>>;
 
 type ClashGate = AppFilter;
 
-async fn clash_permitted(
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum FlowExit {
+    Clash,
+    #[cfg(any(test, target_os = "android"))]
+    Direct(Vec<String>),
+    Drop,
+}
+
+fn owner_exit(gate: &ClashGate, packages: &[&str]) -> FlowExit {
+    if gate.permits_owner(packages) {
+        return FlowExit::Clash;
+    }
+    #[cfg(any(test, target_os = "android"))]
+    if !packages.is_empty() && packages.iter().all(|name| !gate.permits(name)) {
+        let mut identity: Vec<_> = packages.iter().map(|name| (*name).to_owned()).collect();
+        identity.sort_unstable();
+        identity.dedup();
+        return FlowExit::Direct(identity);
+    }
+    FlowExit::Drop
+}
+
+async fn flow_exit(
     gate: Option<&ClashGate>,
     _protocol: i32,
     _src: SocketAddr,
     _dst: SocketAddr,
-) -> bool {
-    let Some(gate) = gate else { return true };
+) -> FlowExit {
+    let Some(gate) = gate else {
+        return FlowExit::Clash;
+    };
     #[cfg(target_os = "android")]
     let packages = owner::overlay_packages(_protocol, _src, _dst).await;
     #[cfg(not(target_os = "android"))]
     let packages: Vec<String> = Vec::new();
     let refs: Vec<&str> = packages.iter().map(String::as_str).collect();
-    gate.permits_owner(&refs)
+    owner_exit(gate, &refs)
 }
 
 static TUN2SOCKS_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -223,6 +247,8 @@ async fn run_tun2socks(
     #[cfg(not(target_os = "android"))]
     let clash_gate: Option<Arc<ClashGate>> = None;
     let stack_clash_gate = clash_gate.clone();
+    #[cfg(target_os = "android")]
+    let direct_udp = Arc::new(crate::direct_exit::udp::Flows::default());
     let dns_sem = Arc::new(Semaphore::new(DNS_BURST_CAP));
     let flow_tasks: FlowTasks = Arc::new(Mutex::new(Vec::new()));
 
@@ -268,8 +294,11 @@ async fn run_tun2socks(
                             }
                             let gate = stack_clash_gate.clone();
                             let handle = tokio::spawn(async move {
-                                if clash_permitted(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
-                                    dispatch_tcp(stream, local_addr, remote_addr).await;
+                                match flow_exit(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
+                                    FlowExit::Clash => dispatch_tcp(stream, local_addr, remote_addr).await,
+                                    #[cfg(target_os = "android")]
+                                    FlowExit::Direct(_) => { let _ = crate::direct_exit::tcp(stream, remote_addr).await; }
+                                    _ => {}
                                 }
                             });
                             track_flow_task(&flow_tasks_lwip, handle);
@@ -283,9 +312,14 @@ async fn run_tun2socks(
                             let reply_tx = udp_reply_tx_lwip.clone();
                             let readers = reply_readers_lwip.clone();
                             let gate = stack_clash_gate.clone();
+                            #[cfg(target_os = "android")]
+                            let direct = direct_udp.clone();
                             let handle = tokio::spawn(async move {
-                                if clash_permitted(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await {
-                                    dispatch_udp(payload, src, dst, reply_tx, readers).await;
+                                match flow_exit(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await {
+                                    FlowExit::Clash => dispatch_udp(payload, src, dst, reply_tx, readers).await,
+                                    #[cfg(target_os = "android")]
+                                    FlowExit::Direct(owner) => direct.transmit((src, dst), owner, payload, reply_tx),
+                                    _ => {}
                                 }
                             });
                             track_flow_task(&flow_tasks_lwip, handle);
@@ -422,13 +456,14 @@ async fn run_tun2socks(
                             let Some(parsed) = parse_udp_packet(&request) else {
                                 return;
                             };
-                            if !clash_permitted(
+                            if flow_exit(
                                 gate.as_deref(),
                                 owner::IPPROTO_UDP,
                                 parsed.src,
                                 parsed.dst,
                             )
                             .await
+                                != FlowExit::Clash
                             {
                                 return;
                             }
@@ -799,10 +834,26 @@ mod app_gate_tests {
     async fn a_missing_owner_never_reaches_a_restricted_clash_egress() {
         let local = "172.19.0.1:54321".parse().unwrap();
         let remote = "172.19.0.2:53".parse().unwrap();
-        assert!(clash_permitted(None, owner::IPPROTO_UDP, local, remote).await);
+        assert_eq!(
+            flow_exit(None, owner::IPPROTO_UDP, local, remote).await,
+            FlowExit::Clash
+        );
         let gate = AppFilter::Exclude(["com.example.overlay".to_owned()].into());
-        assert!(!clash_permitted(Some(&gate), owner::IPPROTO_UDP, local, remote).await);
-        assert!(!clash_permitted(Some(&gate), owner::IPPROTO_TCP, local, remote).await);
+        for protocol in [owner::IPPROTO_UDP, owner::IPPROTO_TCP] {
+            assert_eq!(
+                flow_exit(Some(&gate), protocol, local, remote).await,
+                FlowExit::Drop
+            );
+        }
+        assert_eq!(
+            owner_exit(&gate, &["com.example.overlay"]),
+            FlowExit::Direct(vec!["com.example.overlay".into()])
+        );
+        assert_eq!(
+            owner_exit(&gate, &["com.example.overlay", "other"]),
+            FlowExit::Drop
+        );
+        assert_eq!(owner_exit(&gate, &["other"]), FlowExit::Clash);
     }
 
     #[test]

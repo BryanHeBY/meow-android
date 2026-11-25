@@ -155,6 +155,11 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     fun packagesForOverlayUid(uid: Int): Array<String> =
         packageManager.getPackagesForUid(uid) ?: emptyArray()
 
+    /** Protect only the explicit direct fallback, never routes under lockdown. */
+    @androidx.annotation.Keep
+    fun protectDirectSocket(fd: Int): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isLockdownEnabled && protect(fd)
+
     /**
      * Snapshot directly attached IPv4 networks before establishing our own VPN.
      * Default routes and the gateway's remote routes are not local subnets.
