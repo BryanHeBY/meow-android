@@ -411,4 +411,8 @@
     <string name="fault_diagnostics_tun">Chuyển tiếp TUN dừng bất ngờ</string>
     <string name="fault_diagnostics_network">Mạng nền đã thay đổi</string>
     <string name="fault_diagnostics_groups">Không thể làm mới nhóm proxy</string>
+    <string name="home_meow_forwarding">Chuyển tiếp lưu lượng Meow</string>
+    <string name="home_meow_forwarding_scope">Chỉ áp dụng cho phiên VPN này. Khi tắt, lưu lượng do VPN xử lý mà không qua ZeroTier sẽ bị chặn, không đi trực tiếp.</string>
+    <string name="home_meow_forwarding_requires_zt">Để tạm dừng Meow mà không dừng VPN, hãy kết nối ZeroTier trước.</string>
+    <string name="home_meow_forwarding_failed">Không thể thay đổi trạng thái chuyển tiếp của Meow.</string>
 </resources>

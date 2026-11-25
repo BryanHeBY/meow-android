@@ -421,4 +421,8 @@
     <string name="fault_diagnostics_tun">TUN iletimi beklenmedik şekilde durdu</string>
     <string name="fault_diagnostics_network">Alt ağ değişti</string>
     <string name="fault_diagnostics_groups">Proxy grupları yenilenemedi</string>
+    <string name="home_meow_forwarding">Meow trafik iletimi</string>
+    <string name="home_meow_forwarding_scope">Yalnızca bu VPN oturumu için. Kapatıldığında VPN kapsamındaki ZeroTier dışı trafik engellenir; doğrudan gönderilmez.</string>
+    <string name="home_meow_forwarding_requires_zt">VPN durmadan Meow’u duraklatmak için önce ZeroTier’i bağlayın.</string>
+    <string name="home_meow_forwarding_failed">Meow iletimi değiştirilemedi.</string>
 </resources>

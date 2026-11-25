@@ -35,8 +35,15 @@ data class HomeUiState(
     /** False until Room's first answer, so launch doesn't flash the no-profile prompt. */
     val profileLoaded: Boolean = false,
     val routeMode: RouteMode = RouteMode.Rule,
+    val meowForwarding: Boolean = true,
+    val overlayForwarding: Boolean = false,
+    val forwardingChangePending: Boolean = false,
 ) {
     val isConnected: Boolean get() = state == BaseService.State.Connected
+
+    val showMeowForwarding: Boolean get() = isConnected && hasProfile
+    val canToggleMeowForwarding: Boolean
+        get() = showMeowForwarding && overlayForwarding && !forwardingChangePending
 
     /** The switch is inert mid-transition, matching the old Flutter behaviour. */
     val isBusy: Boolean
@@ -58,6 +65,10 @@ class HomeViewModel(
     /** What the running engine reports; `null` while disconnected. */
     private val engineMode = MutableStateFlow<RouteMode?>(null)
     private val modeSwitch = Mutex()
+    private val forwardingChangePending = MutableStateFlow(false)
+    private val channels = combine(
+        vpn.meowForwarding, vpn.overlayForwarding, forwardingChangePending,
+    ) { meow, overlay, pending -> Triple(meow, overlay, pending) }
 
     /** The engine is the truth while it runs; otherwise, what the next start will use. */
     private val routeMode: Flow<RouteMode> = combine(
@@ -74,13 +85,17 @@ class HomeViewModel(
         vpn.state,
         profiles.observeSelected(),
         routeMode,
-    ) { state, profile, mode ->
+        channels,
+    ) { state, profile, mode, channel ->
         HomeUiState(
             state = state,
             profileName = profile?.name.orEmpty(),
             hasProfile = profile != null,
             profileLoaded = true,
             routeMode = mode,
+            meowForwarding = channel.first,
+            overlayForwarding = channel.second,
+            forwardingChangePending = channel.third,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -114,6 +129,18 @@ class HomeViewModel(
     fun onDisconnect(context: android.content.Context) {
         analytics.vpnDisconnect()
         vpn.requestStop(context)
+    }
+
+    suspend fun setMeowForwarding(enabled: Boolean): Int {
+        if (forwardingChangePending.value || !uiState.value.canToggleMeowForwarding) return 2
+        forwardingChangePending.value = true
+        return try {
+            vpn.setMeowForwarding(enabled).also { result ->
+                if (result == 0) routeChanges.notifyChanged()
+            }
+        } finally {
+            forwardingChangePending.value = false
+        }
     }
 
     /**

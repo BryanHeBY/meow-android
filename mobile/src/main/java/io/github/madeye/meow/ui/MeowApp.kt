@@ -435,6 +435,7 @@ private fun HomeRoute(
     val askForNotifications = rememberNotificationPermissionRequest()
     val scope = rememberCoroutineScope()
     val startRefused = stringResource(R.string.home_start_refused)
+    val forwardingFailed = stringResource(R.string.home_meow_forwarding_failed)
 
     fun startVpn() {
         if (!startVpnService(context)) {
@@ -490,6 +491,13 @@ private fun HomeRoute(
             contentPadding = padding,
             onToggle = { checked ->
                 if (checked) connect() else viewModel.onDisconnect(context)
+            },
+            onToggleMeowForwarding = { enabled ->
+                scope.launch {
+                    if (viewModel.setMeowForwarding(enabled) != 0) {
+                        snackbarHost.showSnackbar(forwardingFailed)
+                    }
+                }
             },
             onSelectRouteMode = viewModel::onSelectRouteMode,
             exitIp = exitIpState,

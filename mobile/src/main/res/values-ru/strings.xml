@@ -441,4 +441,8 @@
     <string name="fault_diagnostics_tun">Пересылка TUN неожиданно остановилась</string>
     <string name="fault_diagnostics_network">Базовая сеть изменилась</string>
     <string name="fault_diagnostics_groups">Не удалось обновить группы прокси</string>
+    <string name="home_meow_forwarding">Передача трафика Meow</string>
+    <string name="home_meow_forwarding_scope">Только для текущего сеанса VPN. При выключении трафик VPN вне ZeroTier блокируется, а не отправляется напрямую.</string>
+    <string name="home_meow_forwarding_requires_zt">Чтобы приостановить Meow, не отключая VPN, сначала подключите ZeroTier.</string>
+    <string name="home_meow_forwarding_failed">Не удалось изменить состояние передачи трафика Meow.</string>
 </resources>

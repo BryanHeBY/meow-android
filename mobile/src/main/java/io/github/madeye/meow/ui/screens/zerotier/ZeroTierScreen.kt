@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.madeye.meow.AppGraph
 import io.github.madeye.meow.R
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.repo.MoonSetting
 import io.github.madeye.meow.repo.OverlaySettings
@@ -56,7 +57,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 private fun isChinese(): Boolean =
@@ -175,13 +175,25 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                 onSaved()
                 info = if (apply) "" else tr("Saved", "已保存")
                 if (apply) {
-                    if (AppGraph.vpn.state.value.canStop) {
-                        AppGraph.vpn.requestStop(context)
-                        val stopped = withTimeoutOrNull(7_000) { AppGraph.vpn.state.first { it == BaseService.State.Stopped } }
-                        if (stopped == null) {
-                            info = tr("VPN did not stop. Restart it from Home to apply.", "VPN 未停止，请从首页重新连接以应用设置。")
-                            return@launch
+                    if (AppGraph.vpn.state.value != BaseService.State.Stopped &&
+                        AppGraph.vpn.state.value != BaseService.State.Idle
+                    ) {
+                        info = when (AppGraph.vpn.applyZeroTier()) {
+                            ForwardingControl.APPLIED, ForwardingControl.STOPPED -> ""
+                            ForwardingControl.REBUILT -> tr(
+                                "VPN forwarding rebuilt; Meow stayed running. Some connections may reconnect.",
+                                "VPN 转发已重建，Meow 内核未重启。部分连接可能重新建立。",
+                            )
+                            ForwardingControl.INDETERMINATE -> tr(
+                                "ZeroTier did not confirm the change. Check its actual status before trying again.",
+                                "ZeroTier 未确认此次变更。请先检查实际连接状态，再重试。",
+                            )
+                            else -> tr(
+                                "Saved, but live apply failed. Check VPN status before retrying.",
+                                "已保存，但应用到运行中的 VPN 失败。重试前请检查 VPN 状态。",
+                            )
                         }
+                        return@launch
                     }
                     if (!normalized.enabled && withContext(Dispatchers.IO) { io.github.madeye.meow.Core.currentProfile == null }) {
                         return@launch

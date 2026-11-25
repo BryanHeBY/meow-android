@@ -473,4 +473,8 @@
     <string name="fault_diagnostics_tun">توقف تمرير TUN بشكل غير متوقع</string>
     <string name="fault_diagnostics_network">تغيرت الشبكة الأساسية</string>
     <string name="fault_diagnostics_groups">تعذر تحديث مجموعات الوكيل</string>
+    <string name="home_meow_forwarding">تمرير حركة المرور عبر Meow</string>
+    <string name="home_meow_forwarding_scope">لهذه الجلسة فقط. عند الإيقاف تُحجب حركة مرور VPN غير المخصصة لـ ZeroTier ولا تمر مباشرة.</string>
+    <string name="home_meow_forwarding_requires_zt">لإيقاف Meow مؤقتًا دون إيقاف VPN، اتصل أولًا بـ ZeroTier.</string>
+    <string name="home_meow_forwarding_failed">تعذّر تغيير حالة تمرير Meow.</string>
 </resources>

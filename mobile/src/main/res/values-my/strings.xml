@@ -416,4 +416,8 @@
     <string name="fault_diagnostics_tun">TUN ပို့ဆောင်မှု မမျှော်လင့်ဘဲ ရပ်သွားသည်</string>
     <string name="fault_diagnostics_network">အခြေခံကွန်ရက် ပြောင်းလဲသွားသည်</string>
     <string name="fault_diagnostics_groups">ပရောက်စီအုပ်စုများကို အသစ်ပြန်ယူမရပါ</string>
+    <string name="home_meow_forwarding">Meow ဒေတာ လမ်းကြောင်း</string>
+    <string name="home_meow_forwarding_scope">ယခု VPN ချိတ်ဆက်မှုအတွက်သာ ဖြစ်သည်။ ပိတ်ထားလျှင် VPN က လက်ခံထားပြီး ZeroTier မသုံးသည့် ဒေတာကို ပိတ်ဆို့မည်၊ တိုက်ရိုက်မပို့ပါ။</string>
+    <string name="home_meow_forwarding_requires_zt">VPN ကို မပိတ်ဘဲ Meow ခေတ္တရပ်ရန် ZeroTier အရင်ချိတ်ပါ။</string>
+    <string name="home_meow_forwarding_failed">Meow ဒေတာ လမ်းကြောင်း အခြေအနေ မပြောင်းနိုင်ပါ။</string>
 </resources>

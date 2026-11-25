@@ -429,4 +429,8 @@
     <string name="fault_diagnostics_tun">انتقال TUN غیرمنتظره متوقف شد</string>
     <string name="fault_diagnostics_network">شبکهٔ زیربنایی تغییر کرد</string>
     <string name="fault_diagnostics_groups">به‌روزرسانی گروه‌های پراکسی ناموفق بود</string>
+    <string name="home_meow_forwarding">ارسال ترافیک Meow</string>
+    <string name="home_meow_forwarding_scope">فقط در این نشست. با خاموش کردن، ترافیک تحت پوشش VPN که از ZeroTier نیست مسدود می‌شود و مستقیم نمی‌رود.</string>
+    <string name="home_meow_forwarding_requires_zt">برای توقف موقت Meow بدون قطع VPN، ابتدا به ZeroTier وصل شوید.</string>
+    <string name="home_meow_forwarding_failed">تغییر وضعیت ارسال ترافیک Meow ممکن نبود.</string>
 </resources>

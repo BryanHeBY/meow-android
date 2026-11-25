@@ -432,4 +432,8 @@
     <string name="fault_diagnostics_tun">TUN forwarding stopped unexpectedly</string>
     <string name="fault_diagnostics_network">Underlying network changed</string>
     <string name="fault_diagnostics_groups">Proxy groups could not refresh</string>
+    <string name="home_meow_forwarding">Meow forwarding</string>
+    <string name="home_meow_forwarding_scope">For this VPN session only. Turning it off blocks non-ZeroTier traffic captured by the VPN; it does not go direct.</string>
+    <string name="home_meow_forwarding_requires_zt">To pause Meow without stopping the VPN, connect ZeroTier first.</string>
+    <string name="home_meow_forwarding_failed">Could not change Meow forwarding.</string>
 </resources>

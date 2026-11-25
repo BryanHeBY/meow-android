@@ -72,6 +72,7 @@ fun HomeScreen(
     state: HomeUiState,
     contentPadding: PaddingValues,
     onToggle: (Boolean) -> Unit,
+    onToggleMeowForwarding: (Boolean) -> Unit,
     onSelectRouteMode: (RouteMode) -> Unit,
     exitIp: ExitIpUiState,
     exitNat: NatUiState,
@@ -102,7 +103,14 @@ fun HomeScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { StatusCard(state = state, onToggle = onToggle, onSelectRouteMode = onSelectRouteMode) }
+        item {
+            StatusCard(
+                state = state,
+                onToggle = onToggle,
+                onToggleMeowForwarding = onToggleMeowForwarding,
+                onSelectRouteMode = onSelectRouteMode,
+            )
+        }
         item { ZeroTierSummary(onOpen = onZeroTier) }
 
         // The switch stays disabled until a profile is selected, and the list
@@ -111,7 +119,7 @@ fun HomeScreen(
             item { NoProfileCard(onAdd = onOpenSubscriptions) }
         }
 
-        if (exitIp != ExitIpUiState.Hidden) {
+        if (exitIp != ExitIpUiState.Hidden && !(state.isConnected && !state.meowForwarding)) {
             item { ExitIpCard(state = exitIp, nat = exitNat, onRefresh = onRefreshExitIp) }
         }
 
@@ -123,16 +131,16 @@ fun HomeScreen(
                     title = stringResource(R.string.proxy_servers_title),
                     icon = Icons.Filled.Dns,
                     onClick = onProxyServers,
-                    enabled = state.isConnected,
-                    subtitle = offlineHint.takeUnless { state.isConnected },
+                    enabled = state.isConnected && state.hasProfile && state.meowForwarding,
+                    subtitle = offlineHint.takeUnless { state.isConnected && state.hasProfile && state.meowForwarding },
                 )
                 androidx.compose.material3.HorizontalDivider(color = MaterialTheme.meow.border)
                 NavRow(
                     title = stringResource(R.string.rules_title),
                     icon = Icons.AutoMirrored.Filled.List,
                     onClick = onRules,
-                    enabled = state.isConnected,
-                    subtitle = offlineHint.takeUnless { state.isConnected },
+                    enabled = state.isConnected && state.hasProfile && state.meowForwarding,
+                    subtitle = offlineHint.takeUnless { state.isConnected && state.hasProfile && state.meowForwarding },
                 )
             }
         }
@@ -162,6 +170,7 @@ fun HomeScreen(
 private fun StatusCard(
     state: HomeUiState,
     onToggle: (Boolean) -> Unit,
+    onToggleMeowForwarding: (Boolean) -> Unit,
     onSelectRouteMode: (RouteMode) -> Unit,
 ) {
     val colors = MaterialTheme.meow
@@ -221,11 +230,41 @@ private fun StatusCard(
                 )
             }
         }
+        if (state.showMeowForwarding) {
+            HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val title = stringResource(R.string.home_meow_forwarding)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = stringResource(
+                            if (state.overlayForwarding) R.string.home_meow_forwarding_scope
+                            else R.string.home_meow_forwarding_requires_zt,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.mutedText,
+                    )
+                }
+                Spacer(Modifier.size(12.dp))
+                if (state.forwardingChangePending) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Switch(
+                        checked = state.meowForwarding,
+                        onCheckedChange = onToggleMeowForwarding,
+                        enabled = state.canToggleMeowForwarding,
+                        modifier = Modifier
+                            .testTag("meow_forwarding_switch")
+                            .semantics { contentDescription = title },
+                    )
+                }
+            }
+        }
         HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 14.dp))
         RouteModePicker(
             mode = state.routeMode,
             // Usable while disconnected too: the pick applies on the next connect.
-            enabled = !state.isBusy,
+            enabled = !state.isBusy && state.hasProfile && state.meowForwarding,
             onSelect = onSelectRouteMode,
         )
     }
