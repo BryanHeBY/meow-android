@@ -54,3 +54,12 @@ if(NOT ANDROID AND BUILD_TESTING)
     target_include_directories(zerotier_client_test SYSTEM PRIVATE "${zt}/node")
     add_test(NAME zerotier_protected_client COMMAND zerotier_client_test)
 endif()
+
+if(NOT ANDROID AND BUILD_TESTING)
+    add_executable(zerotier_network_test network_test.cpp)
+    target_link_libraries(zerotier_network_test PRIVATE meowz_zerotier_core)
+    target_include_directories(zerotier_network_test SYSTEM PRIVATE "${zt}/node" "${zt}/ext"
+        "${prom}/core/include" "${prom}/simpleapi/include" "${prom}/3rdparty/http-client-lite/include")
+    add_test(NAME zerotier_private_network COMMAND zerotier_network_test)
+    set_tests_properties(zerotier_private_network PROPERTIES TIMEOUT 30)
+endif()
