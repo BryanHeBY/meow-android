@@ -148,6 +148,10 @@ class VpnService : BaseVpnService(), BaseService.Interface {
      */
     fun packageForUid(uid: Int): String? = packageManager.getPackagesForUid(uid)?.firstOrNull()
 
+    @androidx.annotation.Keep
+    fun packagesForOverlayUid(uid: Int): Array<String> =
+        packageManager.getPackagesForUid(uid) ?: emptyArray()
+
     private fun startVpn() {
         val builder = Builder()
             .setSession("Meow VPN")

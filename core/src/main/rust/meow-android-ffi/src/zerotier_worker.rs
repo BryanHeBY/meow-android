@@ -5,7 +5,7 @@ use crate::{
 };
 use meow_overlay_policy::{
     bridge::{Bridge, Ethernet},
-    Destination,
+    wire, Destination,
 };
 use serde::Serialize;
 use std::{
@@ -39,6 +39,7 @@ struct Status {
 
 pub(crate) struct Worker {
     pub config: Arc<Config>,
+    decisions: std::collections::HashMap<wire::Flow, (Instant, bool)>,
     ready: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     packets: SyncSender<Vec<u8>>,
@@ -49,7 +50,7 @@ impl Worker {
     pub(crate) fn start(
         config: Config,
         root: PathBuf,
-        tun_out: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+        tun_out: tokio::sync::mpsc::Sender<Vec<u8>>,
     ) -> std::io::Result<Self> {
         let config = Arc::new(config);
         let ready = Arc::new(AtomicBool::new(false));
@@ -66,6 +67,7 @@ impl Worker {
             ready,
             quit,
             packets,
+            decisions: Default::default(),
             task: Some(task),
         })
     }
@@ -75,6 +77,40 @@ impl Worker {
             .policy
             .classify_packet(packet, self.ready.load(Ordering::Acquire))
             .unwrap_or(Destination::DropOverlayUnavailable)
+    }
+
+    pub(crate) async fn permits(&mut self, packet: &[u8]) -> bool {
+        use std::net::{SocketAddr, SocketAddrV4};
+        let Ok(flow) = wire::flow(packet) else {
+            return false;
+        };
+        if self.config.filter.permits_owner(&[]) {
+            return true;
+        }
+        let protocol = match flow.protocol {
+            wire::Transport::Tcp => crate::owner::IPPROTO_TCP,
+            wire::Transport::Udp => crate::owner::IPPROTO_UDP,
+            wire::Transport::Echo => return false,
+        };
+        let now = Instant::now();
+        if let Some((when, allowed)) = self.decisions.get(&flow) {
+            if now.duration_since(*when) < Duration::from_secs(2) {
+                return *allowed;
+            }
+        }
+        let packages = crate::owner::overlay_packages(
+            protocol,
+            SocketAddr::V4(SocketAddrV4::new(flow.src, flow.src_port)),
+            SocketAddr::V4(SocketAddrV4::new(flow.dst, flow.dst_port)),
+        )
+        .await;
+        let refs: Vec<_> = packages.iter().map(String::as_str).collect();
+        let allowed = self.config.filter.permits_owner(&refs);
+        if self.decisions.len() >= 4096 {
+            self.decisions.clear()
+        }
+        self.decisions.insert(flow, (now, allowed));
+        allowed
     }
 
     pub(crate) fn transmit(&self, packet: Vec<u8>) {
@@ -108,7 +144,7 @@ fn run(
     (config, ready, quit): (Arc<Config>, Arc<AtomicBool>, Arc<AtomicBool>),
     root: &Path,
     incoming: mpsc::Receiver<Vec<u8>>,
-    tun_out: &tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    tun_out: &tokio::sync::mpsc::Sender<Vec<u8>>,
 ) {
     let state_path = root.join("state");
     let status_path = root.join("status.json");
@@ -188,7 +224,7 @@ fn run(
                         now,
                     );
                     if let Some(pkt) = incoming.tun {
-                        let _ = tun_out.send(pkt);
+                        let _ = tun_out.try_send(pkt);
                     }
                     for reply in incoming.frames {
                         send(&mut client, network, reply);

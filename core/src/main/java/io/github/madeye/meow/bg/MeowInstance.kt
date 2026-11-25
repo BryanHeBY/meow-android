@@ -167,7 +167,10 @@ class MeowInstance(val profile: ClashProfile) {
     fun tunIpv6(): Boolean = MeowCore.nativeTunIpv6()
 
     fun startTun2Socks(vpnService: android.net.VpnService, fd: Int) {
-        val result = MeowCore.nativeStartTun2Socks(vpnService, fd, 1053)
+        val root = File(Core.deviceStorage.noBackupFilesDir, "zerotier")
+        val configFile = File(root, "settings.json")
+        val config = if (configFile.exists()) configFile.readText() else "{}"
+        val result = MeowCore.nativeStartTun2Socks(vpnService, fd, 1053, root.path, config)
         if (result != 0) {
             throw RuntimeException("Failed to start tun2socks: ${MeowCore.nativeGetLastError()}")
         }

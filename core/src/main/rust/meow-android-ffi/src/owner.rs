@@ -49,6 +49,20 @@ pub async fn lookup(protocol: i32, local: SocketAddr, remote: SocketAddr) -> Opt
     }
 }
 
+/// Resolve all packages for an overlay flow; a shared UID must not inherit access.
+#[cfg(target_os = "android")]
+pub async fn overlay_packages(protocol: i32, local: SocketAddr, remote: SocketAddr) -> Vec<String> {
+    if !inner::installed() {
+        return Vec::new();
+    }
+    let task =
+        tokio::task::spawn_blocking(move || inner::overlay_packages(protocol, local, remote));
+    match tokio::time::timeout(LOOKUP_DEADLINE, task).await {
+        Ok(Ok(packages)) => packages,
+        _ => Vec::new(),
+    }
+}
+
 /// Register the running `VpnService`. Called from `nativeStartTun2Socks`;
 /// safe to call again across VPN restarts.
 pub fn install(env: &mut jni::JNIEnv, service: &jni::objects::JObject) {
@@ -113,7 +127,7 @@ impl PackageCache {
 #[cfg(target_os = "android")]
 mod inner {
     use super::{uid_from_jint, Owner, PackageCache};
-    use jni::objects::{GlobalRef, JObject, JString, JValue};
+    use jni::objects::{GlobalRef, JObject, JObjectArray, JString, JValue};
     use jni::{JNIEnv, JavaVM};
     use parking_lot::RwLock;
     use std::net::{IpAddr, SocketAddr};
@@ -194,6 +208,54 @@ mod inner {
                 clear_pending_exception(&mut env);
                 tracing::debug!("owner: lookup {local} -> {remote} failed: {e}");
                 None
+            }
+        }
+    }
+
+    pub(super) fn overlay_packages(
+        protocol: i32,
+        local: SocketAddr,
+        remote: SocketAddr,
+    ) -> Vec<String> {
+        let Some(lookup) = LOOKUP.read().clone() else {
+            return Vec::new();
+        };
+        let Ok(mut env) = lookup.jvm.attach_current_thread() else {
+            return Vec::new();
+        };
+        let found = env.with_local_frame(72, |env| -> jni::errors::Result<Vec<String>> {
+            let uid = owner_uid(env, &lookup.service, protocol, local, remote)?;
+            if uid < 0 {
+                return Ok(Vec::new());
+            }
+            let raw = env
+                .call_method(
+                    &lookup.service,
+                    "packagesForOverlayUid",
+                    "(I)[Ljava/lang/String;",
+                    &[JValue::Int(uid)],
+                )?
+                .l()?;
+            if raw.is_null() {
+                return Ok(Vec::new());
+            }
+            let array = JObjectArray::from(raw);
+            let length = env.get_array_length(&array)?;
+            if !(1..=64).contains(&length) {
+                return Ok(Vec::new());
+            }
+            (0..length)
+                .map(|i| {
+                    let package = JString::from(env.get_object_array_element(&array, i)?);
+                    env.get_string(&package).map(Into::into)
+                })
+                .collect()
+        });
+        match found {
+            Ok(list) => list,
+            Err(_) => {
+                clear_pending_exception(&mut env);
+                Vec::new()
             }
         }
     }

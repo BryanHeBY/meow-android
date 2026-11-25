@@ -33,7 +33,13 @@ object MeowCore {
      */
     external fun nativeTunIpv6(): Boolean
     external fun nativeStopEngine()
-    external fun nativeStartTun2Socks(vpnService: Any, fd: Int, dnsPort: Int): Int
+    external fun nativeStartTun2Socks(
+        vpnService: Any,
+        fd: Int,
+        dnsPort: Int,
+        overlayRoot: String,
+        overlaySettings: String,
+    ): Int
     external fun nativeIsRunning(): Boolean
     external fun nativeGetUploadTraffic(): Long
     external fun nativeGetDownloadTraffic(): Long

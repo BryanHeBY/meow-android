@@ -75,7 +75,24 @@ fn warn_capped(slot: &AtomicU64, msg: &str) {
     }
 }
 
+#[cfg(any(test, not(target_os = "android")))]
 pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
+    start_inner(
+        fd,
+        #[cfg(target_os = "android")]
+        None,
+    )
+}
+
+#[cfg(target_os = "android")]
+type Overlay = Option<(std::path::PathBuf, crate::zerotier_config::Config)>;
+
+#[cfg(target_os = "android")]
+pub fn start_android(fd: i32, config: Overlay) -> Result<(), String> {
+    start_inner(fd, config)
+}
+
+fn start_inner(fd: i32, #[cfg(target_os = "android")] overlay: Overlay) -> Result<(), String> {
     if TUN2SOCKS_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -93,7 +110,13 @@ pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
 
     let rt = crate::get_runtime();
     let handle = rt.spawn(async move {
-        if let Err(e) = run_tun2socks(fd).await {
+        if let Err(e) = run_tun2socks(
+            fd,
+            #[cfg(target_os = "android")]
+            overlay,
+        )
+        .await
+        {
             logging::bridge_log(&format!("tun2socks error: {}", e));
         }
         TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
@@ -145,7 +168,10 @@ pub fn stop() {
 // Main tun2socks loop
 // ---------------------------------------------------------------------------
 
-async fn run_tun2socks(fd: RawFd) -> io::Result<()> {
+async fn run_tun2socks(
+    fd: RawFd,
+    #[cfg(target_os = "android")] overlay: Overlay,
+) -> io::Result<()> {
     logging::bridge_log("tun2socks: building lwip netstack");
 
     let (mut stack, mut tcp_listener, udp_socket) =
@@ -158,6 +184,17 @@ async fn run_tun2socks(fd: RawFd) -> io::Result<()> {
 
     let (stack_ingress_tx, mut stack_ingress_rx) = mpsc::channel::<AnyIpPktFrame>(256);
     let (egress_tx, mut egress_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    #[cfg(target_os = "android")]
+    let (overlay_out, mut overlay_in) = mpsc::channel::<Vec<u8>>(128);
+    #[cfg(target_os = "android")]
+    let mut overlay = match overlay {
+        Some((root, config)) => Some(crate::zerotier_worker::Worker::start(
+            config,
+            root,
+            overlay_out,
+        )?),
+        None => None,
+    };
     let dns_sem = Arc::new(Semaphore::new(DNS_BURST_CAP));
     let flow_tasks: FlowTasks = Arc::new(Mutex::new(Vec::new()));
 
@@ -238,7 +275,15 @@ async fn run_tun2socks(fd: RawFd) -> io::Result<()> {
     });
 
     let tun_writer_handle = tokio::spawn(async move {
-        while let Some(pkt) = egress_rx.recv().await {
+        loop {
+            #[cfg(not(target_os = "android"))]
+            let next = egress_rx.recv().await;
+            #[cfg(target_os = "android")]
+            let next = tokio::select! {
+                Some(pkt) = overlay_in.recv() => Some(pkt),
+                next = egress_rx.recv() => next,
+            };
+            let Some(pkt) = next else { break };
             let mut retries = 0u32;
             loop {
                 let written = unsafe { libc::write(fd, pkt.as_ptr() as *const c_void, pkt.len()) };
@@ -304,6 +349,23 @@ async fn run_tun2socks(fd: RawFd) -> io::Result<()> {
                 }
                 let n = n as usize;
                 let ip_data = &read_buf[..n];
+
+                // Overlay ownership is decided before DNS, lwIP or Clash
+                // can see any packet for an approved private destination.
+                #[cfg(target_os = "android")]
+                if let Some(overlay) = overlay.as_mut() {
+                    use meow_overlay_policy::Destination;
+                    match overlay.classify(ip_data) {
+                        Destination::Clash => {}
+                        Destination::DropOverlayUnavailable => continue,
+                        Destination::ZeroTier => {
+                            if overlay.permits(ip_data).await {
+                                overlay.transmit(ip_data.to_vec());
+                            }
+                            continue;
+                        }
+                    }
+                }
 
                 // In-process DNS: intercept UDP/53 pre-stack.
                 if parse_udp_packet(ip_data).is_some_and(|p| p.dst_port == 53) {

@@ -32,7 +32,6 @@ mod zerotier;
 #[cfg(any(test, target_os = "android"))]
 mod zerotier_config;
 #[cfg(target_os = "android")]
-#[allow(dead_code)]
 mod zerotier_worker;
 
 use dashmap::DashMap;
@@ -638,6 +637,8 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
     vpn_service: JObject,
     fd: jint,
     dns_port: jint,
+    overlay_root: JString,
+    overlay_settings: JString,
 ) -> jint {
     logging::bridge_log(&format!(
         "nativeStartTun2Socks: fd={}, dns={}",
@@ -656,7 +657,25 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
     // Lets tun2socks tag each connection with the app that opened it.
     owner::install(&mut env, &vpn_service);
 
-    match tun2socks::start(fd, dns_port as u16) {
+    #[cfg(target_os = "android")]
+    let start = (|| -> Result<(), String> {
+        let root: String = env
+            .get_string(&overlay_root)
+            .map_err(|e| e.to_string())?
+            .into();
+        let json: String = env
+            .get_string(&overlay_settings)
+            .map_err(|e| e.to_string())?
+            .into();
+        let config = zerotier_config::parse(json.as_bytes())?;
+        tun2socks::start_android(fd, config.map(|config| (root.into(), config)))
+    })();
+    #[cfg(not(target_os = "android"))]
+    let start = {
+        let _ = (overlay_root, overlay_settings);
+        tun2socks::start(fd, dns_port as u16)
+    };
+    match start {
         Ok(()) => {
             logging::bridge_log("nativeStartTun2Socks: started successfully");
             0
