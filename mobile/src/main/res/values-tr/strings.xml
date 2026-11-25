@@ -395,4 +395,11 @@
     <string name="proxy_groups_refresh_failed">Proxy grupları yüklenemedi.</string>
     <string name="proxy_groups_refresh_stale">Yenileme başarısız. Son bilinen proxy grupları gösteriliyor.</string>
     <string name="proxy_groups_retry">Yeniden dene</string>
+    <string name="zt_apps_title">ZeroTier uygulama yönlendirmesi</string>
+    <string name="zt_apps_mode_all">Tüm uygulamalar kullanabilir</string>
+    <string name="zt_apps_mode_allow">Yalnızca seçili uygulamalar kullanabilir (izin listesi)</string>
+    <string name="zt_apps_mode_exclude">Seçili uygulamalar ZeroTier kullanmaz (engelleme listesi)</string>
+    <string name="zt_apps_scope">Yalnızca ZeroTier rotalarını etkiler; Meow kurallarını değiştirmez.</string>
+    <string name="zt_apps_show_system">Sistem uygulamalarını göster</string>
+    <string name="zt_apps_none_allowed">Uygulama seçilmedi: hiçbir uygulama ZeroTier kullanamaz.</string>
 </resources>

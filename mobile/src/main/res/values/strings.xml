@@ -406,4 +406,11 @@
     <string name="proxy_groups_refresh_failed">Could not load proxy groups.</string>
     <string name="proxy_groups_refresh_stale">Could not refresh. Showing the last known proxy groups.</string>
     <string name="proxy_groups_retry">Retry</string>
+    <string name="zt_apps_title">ZeroTier per-app routing</string>
+    <string name="zt_apps_mode_all">All apps eligible</string>
+    <string name="zt_apps_mode_allow">Only selected apps are eligible (allowlist)</string>
+    <string name="zt_apps_mode_exclude">Selected apps bypass ZeroTier (blocklist)</string>
+    <string name="zt_apps_scope">This affects only traffic eligible for ZeroTier routes, not Meow rules.</string>
+    <string name="zt_apps_show_system">Show system apps</string>
+    <string name="zt_apps_none_allowed">No apps selected: none can use ZeroTier.</string>
 </resources>

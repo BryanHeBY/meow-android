@@ -385,4 +385,11 @@
     <string name="proxy_groups_refresh_failed">无法加载代理分组。</string>
     <string name="proxy_groups_refresh_stale">刷新失败，正在显示上次加载的代理分组。</string>
     <string name="proxy_groups_retry">重试</string>
+    <string name="zt_apps_title">ZeroTier 分应用代理</string>
+    <string name="zt_apps_mode_all">所有应用均可走 ZeroTier</string>
+    <string name="zt_apps_mode_allow">仅所选应用可走 ZeroTier（白名单）</string>
+    <string name="zt_apps_mode_exclude">所选应用不走 ZeroTier（黑名单）</string>
+    <string name="zt_apps_scope">只限制哪些应用可使用 ZeroTier 路由，不改变 Meow 的规则。</string>
+    <string name="zt_apps_show_system">显示系统应用</string>
+    <string name="zt_apps_none_allowed">未选择应用：所有应用都不走 ZeroTier。</string>
 </resources>

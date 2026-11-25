@@ -51,71 +51,94 @@ fun PerAppProxyScreen(
     iconLoader: suspend (String) -> android.graphics.drawable.Drawable?,
     modifier: Modifier = Modifier,
 ) {
+    AppPicker(state, contentPadding, onQueryChange, onToggleApp, iconLoader, modifier) {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            PerAppMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = state.mode == mode,
+                    onClick = { onModeChange(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, PerAppMode.entries.size),
+                ) {
+                    Text(
+                        stringResource(
+                            when (mode) {
+                                PerAppMode.Proxy -> R.string.perapp_mode_proxy
+                                PerAppMode.Bypass -> R.string.perapp_mode_bypass
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = if (state.selected.isEmpty()) {
+                stringResource(R.string.perapp_disabled_hint)
+            } else {
+                stringResource(
+                    R.string.perapp_status,
+                    pluralStringResource(
+                        R.plurals.perapp_selected,
+                        state.selected.size,
+                        state.selected.size,
+                    ),
+                    stringResource(R.string.perapp_restart_required),
+                )
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.meow.mutedText,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+internal fun AppPicker(
+    state: PerAppUiState,
+    contentPadding: PaddingValues,
+    onQueryChange: (String) -> Unit,
+    onToggleApp: (String) -> Unit,
+    iconLoader: suspend (String) -> android.graphics.drawable.Drawable?,
+    modifier: Modifier = Modifier,
+    editing: Boolean = true,
+    showList: Boolean = true,
+    scrollHeader: Boolean = false,
+    header: @Composable () -> Unit,
+) {
     if (state.loading) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         return
     }
-
-    val visible = state.visibleApps
-
+    val controls: @Composable () -> Unit = {
+        Column(modifier = Modifier.padding(horizontal = if (scrollHeader) 0.dp else 16.dp)) {
+            header()
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(top = contentPadding.calculateTopPadding()),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                PerAppMode.entries.forEachIndexed { index, mode ->
-                    SegmentedButton(
-                        selected = state.mode == mode,
-                        onClick = { onModeChange(mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index, PerAppMode.entries.size),
-                    ) {
-                        Text(
-                            stringResource(
-                                when (mode) {
-                                    PerAppMode.Proxy -> R.string.perapp_mode_proxy
-                                    PerAppMode.Bypass -> R.string.perapp_mode_bypass
-                                },
-                            ),
-                        )
-                    }
-                }
+        if (!scrollHeader) controls()
+        val search: @Composable () -> Unit = {
+            Column(modifier = Modifier.padding(horizontal = if (scrollHeader) 0.dp else 16.dp)) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text(stringResource(R.string.perapp_search)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = editing,
+                )
             }
-
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = if (state.selected.isEmpty()) {
-                    stringResource(R.string.perapp_disabled_hint)
-                } else {
-                    stringResource(
-                        R.string.perapp_status,
-                        pluralStringResource(
-                            R.plurals.perapp_selected,
-                            state.selected.size,
-                            state.selected.size,
-                        ),
-                        stringResource(R.string.perapp_restart_required),
-                    )
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.meow.mutedText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                placeholder = { Text(stringResource(R.string.perapp_search)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
 
+        if (showList && !scrollHeader) search()
         LazyColumn(
             contentPadding = PaddingValues(
                 start = 16.dp,
@@ -124,12 +147,21 @@ fun PerAppProxyScreen(
                 bottom = contentPadding.calculateBottomPadding() + 16.dp,
             ),
         ) {
-            items(visible, key = { it.packageName }) { app ->
+            if (scrollHeader) {
+                item("picker_header") {
+                    Column {
+                        controls()
+                        if (showList) search()
+                    }
+                }
+            }
+            if (showList) items(state.visibleApps, key = { it.packageName }) { app ->
                 AppRow(
                     app = app,
                     checked = app.packageName in state.selected,
                     onToggle = { onToggleApp(app.packageName) },
                     iconLoader = iconLoader,
+                    enabled = editing,
                 )
             }
         }
@@ -142,6 +174,7 @@ private fun AppRow(
     checked: Boolean,
     onToggle: () -> Unit,
     iconLoader: suspend (String) -> android.graphics.drawable.Drawable?,
+    enabled: Boolean,
 ) {
     // Loaded per row: resolving every installed app's icon up front costs
     // hundreds of PackageManager round trips.
@@ -184,7 +217,7 @@ private fun AppRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Checkbox(checked = checked, onCheckedChange = { onToggle() })
+        Checkbox(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
     }
 }
 

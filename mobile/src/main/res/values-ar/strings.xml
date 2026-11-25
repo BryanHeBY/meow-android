@@ -447,4 +447,11 @@
     <string name="proxy_groups_refresh_failed">تعذّر تحميل مجموعات الوكيل.</string>
     <string name="proxy_groups_refresh_stale">تعذّر التحديث. تُعرض آخر مجموعات وكيل معروفة.</string>
     <string name="proxy_groups_retry">إعادة المحاولة</string>
+    <string name="zt_apps_title">توجيه التطبيقات عبر ZeroTier</string>
+    <string name="zt_apps_mode_all">كل التطبيقات مؤهلة</string>
+    <string name="zt_apps_mode_allow">التطبيقات المحددة فقط مؤهلة (قائمة السماح)</string>
+    <string name="zt_apps_mode_exclude">تتجاوز التطبيقات المحددة شبكة ZeroTier (قائمة الحظر)</string>
+    <string name="zt_apps_scope">يؤثر هذا في مسارات ZeroTier فقط، ولا يغيّر قواعد Meow.</string>
+    <string name="zt_apps_show_system">عرض تطبيقات النظام</string>
+    <string name="zt_apps_none_allowed">لم تُحدد تطبيقات: لا يمكن لأي تطبيق استخدام ZeroTier.</string>
 </resources>

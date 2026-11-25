@@ -390,4 +390,11 @@
     <string name="proxy_groups_refresh_failed">ပရောက်စီအုပ်စုများကို ဖွင့်မရပါ။</string>
     <string name="proxy_groups_refresh_stale">ပြန်လည်ရယူမရပါ။ နောက်ဆုံးသိထားသော ပရောက်စီအုပ်စုများကို ပြနေသည်။</string>
     <string name="proxy_groups_retry">ထပ်ကြိုးစားရန်</string>
+    <string name="zt_apps_title">ZeroTier အက်ပ်အလိုက် လမ်းကြောင်း</string>
+    <string name="zt_apps_mode_all">အက်ပ်အားလုံး အသုံးပြုနိုင်သည်</string>
+    <string name="zt_apps_mode_allow">ရွေးထားသည့် အက်ပ်များသာ သုံးနိုင်သည် (ခွင့်ပြုစာရင်း)</string>
+    <string name="zt_apps_mode_exclude">ရွေးထားသည့် အက်ပ်များ ZeroTier မသုံးပါ (ပိတ်ပင်စာရင်း)</string>
+    <string name="zt_apps_scope">ZeroTier လမ်းကြောင်းများအတွက်သာ ဖြစ်ပြီး Meow စည်းမျဉ်းများ မပြောင်းပါ။</string>
+    <string name="zt_apps_show_system">စနစ်အက်ပ်များ ပြရန်</string>
+    <string name="zt_apps_none_allowed">အက်ပ်မရွေးထားပါ။ မည်သည့်အက်ပ်မှ ZeroTier မသုံးနိုင်ပါ။</string>
 </resources>

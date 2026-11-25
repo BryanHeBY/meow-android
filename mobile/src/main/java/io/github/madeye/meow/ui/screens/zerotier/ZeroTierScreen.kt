@@ -37,9 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.madeye.meow.AppGraph
+import io.github.madeye.meow.R
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.repo.MoonSetting
@@ -127,18 +129,11 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
     var moonWorld by rememberSaveable { mutableStateOf("") }
     var moonSeed by rememberSaveable { mutableStateOf("") }
     var pendingMoon by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
-    var search by rememberSaveable { mutableStateOf("") }
-    var showSystem by rememberSaveable { mutableStateOf(false) }
-    var showApps by rememberSaveable { mutableStateOf(false) }
+    var appMode by rememberSaveable { mutableStateOf(ZeroTierAppMode.All) }
+    var appSelection by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var loaded by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf("") }
-    val apps = androidx.compose.runtime.produceState(
-        initialValue = emptyList<io.github.madeye.meow.repo.InstalledApp>(),
-        key1 = showApps,
-    ) {
-        if (showApps) value = AppGraph.installedApps.load()
-    }.value
     LaunchedEffect(Unit) {
         runCatching { store.load() }.onSuccess {
             config = it
@@ -324,7 +319,7 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
         "detail" -> tr("Network details", "网络详情")
         "moons" -> tr("Moon orbit", "Moon 入轨")
         "peers" -> tr("Peers", "节点列表")
-        "apps" -> tr("ZeroTier app rules", "ZeroTier 分应用规则")
+        "apps" -> stringResource(R.string.zt_apps_title)
         else -> "ZeroTier"
     }
     MeowScaffold(
@@ -347,16 +342,37 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                         page = "moons"
                         info = ""
                     })
-                    DropdownMenuItem(text = { Text(tr("App rules", "分应用规则")) }, onClick = {
-                        more = false
-                        page = "apps"
-                        info = ""
-                    })
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.zt_apps_title)) },
+                        enabled = loaded && !busy,
+                        onClick = {
+                            more = false
+                            appMode = ZeroTierAppMode.fromStored(config.appMode)
+                            appSelection = ArrayList(config.packages)
+                            page = "apps"
+                            info = ""
+                        },
+                    )
                 }
             }
         },
         bottomBar = { if (page == "networks") bottomBar() },
     ) { padding ->
+        if (page == "apps") {
+            ZeroTierAppRules(
+                mode = appMode,
+                selected = appSelection.toSet(),
+                busy = busy || !loaded,
+                message = info,
+                contentPadding = padding,
+                onModeChange = { appMode = it },
+                onToggle = { appSelection = updateAppSelection(appSelection.toSet(), it) },
+                onSave = {
+                    persist(config.withAppRules(appMode, appSelection.toSet()), false) { up() }
+                },
+            )
+            return@MeowScaffold
+        }
         LazyColumn(
             modifier = Modifier.padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -568,50 +584,6 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                                 moonSeed = ""
                             }
                         }) { Text(tr("Save Moon", "保存 Moon")) }
-                    }
-                }
-            }
-            if (page == "apps") item {
-                GlassCard {
-                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(tr("ZeroTier app rules", "ZeroTier 分应用规则"), style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            for ((value, label) in listOf("allow" to tr("Allow", "白名单"), "exclude" to tr("Exclude", "黑名单"), "all" to tr("All", "全部"))) {
-                                FilterChip(selected = config.appMode == value, enabled = loaded && !busy,
-                                    onClick = { persist(config.copy(appMode = value), false) }, label = { Text(label) })
-                            }
-                        }
-                        TextButton(onClick = { showApps = !showApps }) {
-                            Text(tr("Choose apps", "选择应用") + " (${config.packages.size})")
-                        }
-                        if (showApps) {
-                            OutlinedTextField(search, { search = it }, label = { Text(tr("App or package", "应用或包名")) },
-                                singleLine = true, modifier = Modifier.fillMaxWidth())
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(showSystem, { showSystem = it })
-                                Text(tr("Show system apps", "显示系统应用"))
-                            }
-                        }
-                    }
-                }
-            }
-            if (page == "apps" && showApps) {
-                val query = search.trim()
-                val visible = apps.filter {
-                    if (query.isEmpty()) showSystem || it.hasLauncher || !it.isSystem || it.packageName in config.packages
-                    else it.label.contains(query, true) || it.packageName.contains(query, true)
-                }
-                items(visible, key = { it.packageName }) { app ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        val checked = app.packageName in config.packages
-                        Checkbox(checked, { next ->
-                            val list = if (next) config.packages + app.packageName else config.packages - app.packageName
-                            persist(config.copy(packages = list), false)
-                        }, enabled = loaded && !busy && config.appMode != "all")
-                        Column {
-                            Text(app.label)
-                            Text(app.packageName, style = MaterialTheme.typography.bodySmall)
-                        }
                     }
                 }
             }
