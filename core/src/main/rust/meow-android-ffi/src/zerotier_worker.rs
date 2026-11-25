@@ -40,7 +40,6 @@ struct Status {
 
 pub(crate) struct Worker {
     pub config: Arc<Config>,
-    decisions: std::collections::HashMap<wire::Flow, (Instant, bool)>,
     ready: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     packets: SyncSender<Vec<u8>>,
@@ -68,7 +67,6 @@ impl Worker {
             ready,
             quit,
             packets,
-            decisions: Default::default(),
             task: Some(task),
         })
     }
@@ -80,7 +78,7 @@ impl Worker {
             .unwrap_or(Destination::DropOverlayUnavailable)
     }
 
-    pub(crate) async fn permits(&mut self, packet: &[u8]) -> bool {
+    pub(crate) async fn permits(&self, packet: &[u8]) -> bool {
         use std::net::{SocketAddr, SocketAddrV4};
         let Ok(flow) = wire::flow(packet) else {
             return false;
@@ -93,12 +91,6 @@ impl Worker {
             wire::Transport::Udp => crate::owner::IPPROTO_UDP,
             wire::Transport::Echo => return false,
         };
-        let now = Instant::now();
-        if let Some((when, allowed)) = self.decisions.get(&flow) {
-            if now.duration_since(*when) < Duration::from_secs(2) {
-                return *allowed;
-            }
-        }
         let packages = crate::owner::overlay_packages(
             protocol,
             SocketAddr::V4(SocketAddrV4::new(flow.src, flow.src_port)),
@@ -106,12 +98,7 @@ impl Worker {
         )
         .await;
         let refs: Vec<_> = packages.iter().map(String::as_str).collect();
-        let allowed = self.config.filter.permits_owner(&refs);
-        if self.decisions.len() >= 4096 {
-            self.decisions.clear()
-        }
-        self.decisions.insert(flow, (now, allowed));
-        allowed
+        self.config.filter.permits_owner(&refs)
     }
 
     pub(crate) fn transmit(&self, packet: Vec<u8>) {

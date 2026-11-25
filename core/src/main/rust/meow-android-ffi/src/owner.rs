@@ -55,8 +55,16 @@ pub async fn overlay_packages(protocol: i32, local: SocketAddr, remote: SocketAd
     if !inner::installed() {
         return Vec::new();
     }
-    let task =
-        tokio::task::spawn_blocking(move || inner::overlay_packages(protocol, local, remote));
+    // Restricted policy must not reuse an allow decision after a UDP port
+    // is rebound by another app. Bound JNI jobs instead of caching grants.
+    static LOOKUPS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(64);
+    let Ok(permit) = LOOKUPS.try_acquire() else {
+        return Vec::new();
+    };
+    let task = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        inner::overlay_packages(protocol, local, remote)
+    });
     match tokio::time::timeout(LOOKUP_DEADLINE, task).await {
         Ok(Ok(packages)) => packages,
         _ => Vec::new(),

@@ -159,11 +159,11 @@ class VpnService : BaseVpnService(), BaseService.Interface {
      * Snapshot directly attached IPv4 networks before establishing our own VPN.
      * Default routes and the gateway's remote routes are not local subnets.
      */
-    private fun overlayConfig(): String {
+    private fun overlayConfig(): JSONObject {
         val settings = OverlaySettingsRepository.directory.resolve("settings.json")
-        if (!settings.isFile) return "{}"
+        if (!settings.isFile) return JSONObject()
         val config = JSONObject(settings.readText())
-        if (!config.optBoolean("enabled")) return config.toString()
+        if (!config.optBoolean("enabled")) return config
         val network = connectivity.activeNetwork
         val capabilities = network?.let(connectivity::getNetworkCapabilities)
         val localRoutes = if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true) {
@@ -172,7 +172,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
                 .map { it.destination.toString() }
                 .distinct()
         } else emptyList()
-        return config.put("local_cidrs", JSONArray(localRoutes)).toString()
+        return config.put("local_cidrs", JSONArray(localRoutes))
     }
 
     private fun startVpn() {
@@ -215,28 +215,40 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         // the whole app's uid would also exempt traffic users may want to
         // intercept (e.g. a built-in browser preview) and would shadow the
         // protect path the rest of the stack is designed around.
-        if (perAppPackages.isNotEmpty()) when (PerAppMode.from(perAppMode)) {
-            PerAppMode.Bypass -> {
-                // All apps except selected go through VPN.
-                for (pkg in perAppPackages) {
-                    try { builder.addDisallowedApplication(pkg) }
-                    // Vanished packages plus OEM RuntimeExceptions — one bad
-                    // entry must not abort the whole establish.
-                    catch (_: Exception) { }
-                }
+        val clash = VpnAppCapture.fromClash(PerAppMode.from(perAppMode), perAppPackages)
+        val capture = if (overlayConfig.optBoolean("enabled")) {
+            val mode = overlayConfig.getString("app_mode")
+            require(mode in setOf("all", "allow", "exclude")) { "Invalid ZeroTier app policy" }
+            val overlayPackages = overlayConfig.optJSONArray("packages")?.let { list ->
+                (0 until list.length()).map { list.getString(it) }.toSet()
+            }.orEmpty()
+            val overlay = VpnAppCapture(mode, overlayPackages)
+            check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                    (clash.mode == "all" && (overlay.mode == "all" ||
+                        (overlay.mode == "exclude" && overlay.packages.isEmpty())))) {
+                "Separate VPN app rules need Android 10 or later"
             }
-            PerAppMode.Proxy -> {
-                // Only selected apps go through VPN.
-                for (pkg in perAppPackages) {
-                    try { builder.addAllowedApplication(pkg) }
-                    catch (_: Exception) { }
-                }
+            overlayConfig.put("clash_app_mode", clash.mode)
+                .put("clash_packages", JSONArray(clash.packages))
+            clash.union(overlay)
+        } else clash
+
+        when (capture.mode) {
+            "exclude" -> for (pkg in capture.packages) {
+                try { builder.addDisallowedApplication(pkg) }
+                catch (_: android.content.pm.PackageManager.NameNotFoundException) { }
             }
-            null ->
-                // Only reachable when the legacy prefs key itself is unknown
-                // (the file path is filtered above). Apply no per-app routing
-                // rather than guess: the tunnel covers everything.
-                Timber.w("VpnService: unknown per-app mode '$perAppMode'; routing all apps")
+            "allow" -> {
+                var installed = 0
+                for (pkg in capture.packages) {
+                    try {
+                        builder.addAllowedApplication(pkg)
+                        installed++
+                    } catch (_: android.content.pm.PackageManager.NameNotFoundException) { }
+                }
+                // Android interprets an empty Builder allowlist as all apps.
+                check(installed > 0) { "None of the selected VPN apps are installed" }
+            }
         }
 
         active = true
@@ -267,7 +279,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         } else {
             null
         }
-        data.meowInstance!!.startTun2Socks(this, conn.fd, overlayConfig)
+        data.meowInstance!!.startTun2Socks(this, conn.fd, overlayConfig.toString())
     }
 
     override fun onDestroy() {

@@ -38,6 +38,8 @@ struct RawConfig {
     local_cidrs: Vec<String>,
     app_mode: Mode,
     packages: BTreeSet<String>,
+    clash_app_mode: Option<Mode>,
+    clash_packages: BTreeSet<String>,
     moons: Vec<RawMoon>,
 }
 
@@ -48,6 +50,7 @@ pub(crate) struct Config {
     pub network: NetworkId,
     pub policy: OverlayPolicy,
     pub filter: AppFilter,
+    pub clash_filter: AppFilter,
     pub moons: Vec<MoonOrbit>,
 }
 
@@ -71,6 +74,7 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
     if raw.routes.len() > MAX_ROUTES
         || raw.local_cidrs.len() > MAX_ROUTES
         || raw.packages.len() > MAX_PACKAGES
+        || raw.clash_packages.len() > MAX_PACKAGES
         || raw.moons.len() > MAX_MOONS
     {
         return Err("too many ZeroTier settings entries");
@@ -90,19 +94,24 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
     }
     let policy = OverlayPolicy::new(authorized, &conflicts)
         .map_err(|_| "ZeroTier route is empty, reserved, default, or overlaps a local route")?;
-    if !raw.packages.iter().all(|name| {
+    if !raw.packages.iter().chain(&raw.clash_packages).all(|name| {
         !name.is_empty()
             && name.len() <= 255
             && name
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
     }) {
-        return Err("invalid package in ZeroTier app rules");
+        return Err("invalid package in VPN app rules");
     }
     let filter = match raw.app_mode {
         Mode::All => AppFilter::All,
         Mode::Allow => AppFilter::Allow(raw.packages),
         Mode::Exclude => AppFilter::Exclude(raw.packages),
+    };
+    let clash_filter = match raw.clash_app_mode {
+        None | Some(Mode::All) => AppFilter::All,
+        Some(Mode::Allow) => AppFilter::Allow(raw.clash_packages),
+        Some(Mode::Exclude) => AppFilter::Exclude(raw.clash_packages),
     };
     let mut worlds = BTreeSet::new();
     let mut moons = Vec::with_capacity(raw.moons.len());
@@ -125,6 +134,7 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
         network,
         policy,
         filter,
+        clash_filter,
         moons,
     }))
 }
@@ -161,6 +171,23 @@ mod tests {
             config.policy.classify("1.1.1.1".parse().unwrap(), false),
             Destination::Clash
         );
+    }
+
+    #[test]
+    fn decodes_the_two_app_policies_without_granting_crossover() {
+        let mut input = settings(&["10.8.0.0/24"], &[]);
+        input["clash_app_mode"] = json!("exclude");
+        input["clash_packages"] = json!(["com.example.app"]);
+        let config = parse(input.to_string().as_bytes()).unwrap().unwrap();
+        assert!(config.filter.permits_owner(&["com.example.app"]));
+        assert!(!config.clash_filter.permits_owner(&["com.example.app"]));
+        assert!(!config
+            .clash_filter
+            .permits_owner(&["com.example.app", "other"]));
+        assert!(!config.clash_filter.permits_owner(&[]));
+        assert!(config.clash_filter.permits_owner(&["other"]));
+        input["clash_packages"] = json!(["/invalid"]);
+        assert!(parse(input.to_string().as_bytes()).is_err());
     }
 
     #[test]

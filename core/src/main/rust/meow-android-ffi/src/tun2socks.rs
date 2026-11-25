@@ -14,11 +14,12 @@ use crate::owner;
 use futures::{SinkExt, StreamExt};
 use meow_common::{ConnType, Metadata, Network, ProxyConn};
 use meow_dns::DnsServer;
+use meow_overlay_policy::apps::AppFilter;
 use meow_tunnel::udp::UdpSession;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::os::raw::c_void;
 use std::os::unix::io::RawFd;
 use std::pin::Pin;
@@ -40,6 +41,23 @@ type NatKey = (SocketAddr, SocketAddr);
 /// session (not just the key) lets a replacement session get its own reader
 /// while the evicted one's reader is still winding down.
 type ReplyReaders = Arc<Mutex<HashMap<NatKey, Arc<UdpSession>>>>;
+
+type ClashGate = AppFilter;
+
+async fn clash_permitted(
+    gate: Option<&ClashGate>,
+    _protocol: i32,
+    _src: SocketAddr,
+    _dst: SocketAddr,
+) -> bool {
+    let Some(gate) = gate else { return true };
+    #[cfg(target_os = "android")]
+    let packages = owner::overlay_packages(_protocol, _src, _dst).await;
+    #[cfg(not(target_os = "android"))]
+    let packages: Vec<String> = Vec::new();
+    let refs: Vec<&str> = packages.iter().map(String::as_str).collect();
+    gate.permits_owner(&refs)
+}
 
 static TUN2SOCKS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TUN2SOCKS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -195,6 +213,16 @@ async fn run_tun2socks(
         )?),
         None => None,
     };
+    // Restricted app policy applies independently of the Android capture set.
+    #[cfg(target_os = "android")]
+    let clash_gate = overlay
+        .as_ref()
+        .map(|worker| &worker.config.clash_filter)
+        .filter(|filter| !filter.permits_owner(&[]))
+        .map(|filter| Arc::new(filter.clone()));
+    #[cfg(not(target_os = "android"))]
+    let clash_gate: Option<Arc<ClashGate>> = None;
+    let stack_clash_gate = clash_gate.clone();
     let dns_sem = Arc::new(Semaphore::new(DNS_BURST_CAP));
     let flow_tasks: FlowTasks = Arc::new(Mutex::new(Vec::new()));
 
@@ -238,8 +266,11 @@ async fn run_tun2socks(
                                 drop(stream);
                                 continue;
                             }
+                            let gate = stack_clash_gate.clone();
                             let handle = tokio::spawn(async move {
-                                dispatch_tcp(stream, local_addr, remote_addr).await;
+                                if clash_permitted(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
+                                    dispatch_tcp(stream, local_addr, remote_addr).await;
+                                }
                             });
                             track_flow_task(&flow_tasks_lwip, handle);
                         }
@@ -251,8 +282,11 @@ async fn run_tun2socks(
                         Some((payload, src, dst)) => {
                             let reply_tx = udp_reply_tx_lwip.clone();
                             let readers = reply_readers_lwip.clone();
+                            let gate = stack_clash_gate.clone();
                             let handle = tokio::spawn(async move {
-                                dispatch_udp(payload, src, dst, reply_tx, readers).await;
+                                if clash_permitted(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await {
+                                    dispatch_udp(payload, src, dst, reply_tx, readers).await;
+                                }
                             });
                             track_flow_task(&flow_tasks_lwip, handle);
                         }
@@ -368,7 +402,7 @@ async fn run_tun2socks(
                 }
 
                 // In-process DNS: intercept UDP/53 pre-stack.
-                if parse_udp_packet(ip_data).is_some_and(|p| p.dst_port == 53) {
+                if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
                     let permit = match dns_sem.clone().try_acquire_owned() {
                         Ok(p) => p,
                         Err(_) => {
@@ -381,12 +415,23 @@ async fn run_tun2socks(
                     };
                     let request = ip_data.to_vec();
                     let egress = egress_tx.clone();
+                    let gate = clash_gate.clone();
                     let handle = tokio::spawn(async move {
                         let _permit = permit;
                         let work = async {
                             let Some(parsed) = parse_udp_packet(&request) else {
                                 return;
                             };
+                            if !clash_permitted(
+                                gate.as_deref(),
+                                owner::IPPROTO_UDP,
+                                parsed.src,
+                                parsed.dst,
+                            )
+                            .await
+                            {
+                                return;
+                            }
                             // Every qtype, not just A/AAAA: HTTPS, TXT, MX,
                             // PTR, … then use the upstreams Settings' Built-in
                             // DNS switch picked, and HTTPS/SVCB answers for a
@@ -708,7 +753,8 @@ async fn relay_udp_replies(
 // ---------------------------------------------------------------------------
 
 struct ParsedUdp<'a> {
-    dst_port: u16,
+    src: SocketAddr,
+    dst: SocketAddr,
     payload: &'a [u8],
 }
 
@@ -723,9 +769,11 @@ fn parse_udp_packet(ip_data: &[u8]) -> Option<ParsedUdp<'_>> {
         return None;
     }
     let ihl = (ip_data[0] & 0x0F) as usize * 4;
-    if ip_data.len() < ihl + 8 {
+    let flags = u16::from_be_bytes([ip_data[6], ip_data[7]]);
+    if ihl < 20 || ip_data.len() < ihl + 8 || (flags & 0x3fff) != 0 {
         return None;
     }
+    let src_port = u16::from_be_bytes([ip_data[ihl], ip_data[ihl + 1]]);
     let dst_port = u16::from_be_bytes([ip_data[ihl + 2], ip_data[ihl + 3]]);
     let udp_len = u16::from_be_bytes([ip_data[ihl + 4], ip_data[ihl + 5]]) as usize;
     let start = ihl + 8;
@@ -733,10 +781,44 @@ fn parse_udp_packet(ip_data: &[u8]) -> Option<ParsedUdp<'_>> {
     if start > end {
         return None;
     }
+    let src = Ipv4Addr::new(ip_data[12], ip_data[13], ip_data[14], ip_data[15]);
+    let dst = Ipv4Addr::new(ip_data[16], ip_data[17], ip_data[18], ip_data[19]);
     Some(ParsedUdp {
-        dst_port,
+        src: (src, src_port).into(),
+        dst: (dst, dst_port).into(),
         payload: &ip_data[start..end],
     })
+}
+
+#[cfg(test)]
+mod app_gate_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn a_missing_owner_never_reaches_a_restricted_clash_egress() {
+        let local = "172.19.0.1:54321".parse().unwrap();
+        let remote = "172.19.0.2:53".parse().unwrap();
+        assert!(clash_permitted(None, owner::IPPROTO_UDP, local, remote).await);
+        let gate = AppFilter::Exclude(["com.example.overlay".to_owned()].into());
+        assert!(!clash_permitted(Some(&gate), owner::IPPROTO_UDP, local, remote).await);
+        assert!(!clash_permitted(Some(&gate), owner::IPPROTO_TCP, local, remote).await);
+    }
+
+    #[test]
+    fn parses_dns_owner_tuple_and_refuses_fragments() {
+        let mut packet = vec![0u8; 29];
+        packet[0] = 0x45;
+        packet[2..4].copy_from_slice(&29u16.to_be_bytes());
+        packet[9] = 17;
+        packet[12..20].copy_from_slice(&[172, 19, 0, 1, 172, 19, 0, 2]);
+        packet[20..26].copy_from_slice(&[0xd4, 0x31, 0, 53, 0, 9]);
+        let parsed = parse_udp_packet(&packet).unwrap();
+        assert_eq!(parsed.src, "172.19.0.1:54321".parse().unwrap());
+        assert_eq!(parsed.dst, "172.19.0.2:53".parse().unwrap());
+        packet[6] = 0x20;
+        assert!(parse_udp_packet(&packet).is_none());
+    }
 }
 
 fn build_udp_reply(orig_ip_data: &[u8], reply_payload: &[u8]) -> Option<Vec<u8>> {
