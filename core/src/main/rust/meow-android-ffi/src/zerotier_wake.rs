@@ -2,10 +2,14 @@
 use std::{
     io,
     os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
-pub(super) struct Wake(OwnedFd);
+pub(super) struct Wake {
+    fd: OwnedFd,
+    pending: AtomicBool,
+}
 
 impl Wake {
     pub(super) fn new() -> io::Result<Self> {
@@ -14,14 +18,21 @@ impl Wake {
             return Err(io::Error::last_os_error());
         }
         // SAFETY: eventfd returned a newly owned descriptor.
-        Ok(Self(unsafe { OwnedFd::from_raw_fd(fd) }))
+        Ok(Self {
+            fd: unsafe { OwnedFd::from_raw_fd(fd) },
+            pending: AtomicBool::new(false),
+        })
     }
 
     pub(super) fn signal(&self) {
+        if self.pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let bytes = 1u64.to_ne_bytes();
         loop {
             // SAFETY: bytes is valid for exactly one eventfd write.
-            if unsafe { libc::write(self.0.as_raw_fd(), bytes.as_ptr().cast(), bytes.len()) } >= 0 {
+            if unsafe { libc::write(self.fd.as_raw_fd(), bytes.as_ptr().cast(), bytes.len()) } >= 0
+            {
                 return;
             }
             if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
@@ -32,26 +43,32 @@ impl Wake {
         }
     }
 
+    /// Reset only before sleeping. The consumer must recheck work and
+    /// shutdown after this, because producers enqueue before signaling.
     pub(super) fn clear(&self) -> io::Result<()> {
         let mut bytes = [0u8; 8];
         loop {
             // SAFETY: bytes is valid for exactly one eventfd read.
-            if unsafe { libc::read(self.0.as_raw_fd(), bytes.as_mut_ptr().cast(), bytes.len()) }
+            if unsafe { libc::read(self.fd.as_raw_fd(), bytes.as_mut_ptr().cast(), bytes.len()) }
                 >= 0
             {
-                return Ok(());
+                break;
             }
             let error = io::Error::last_os_error();
             match error.kind() {
-                io::ErrorKind::WouldBlock => return Ok(()),
+                io::ErrorKind::WouldBlock => break,
                 io::ErrorKind::Interrupted => continue,
                 _ => return Err(error),
             }
         }
+        // Drain before resetting: a producer that claims the new epoch
+        // must leave the fd readable, not have its signal consumed here.
+        self.pending.store(false, Ordering::Release);
+        Ok(())
     }
 
     pub(super) fn wait(&self, sockets: [RawFd; 2], delay: Duration) -> io::Result<()> {
-        let mut fds = [self.0.as_raw_fd(), sockets[0], sockets[1]].map(|fd| libc::pollfd {
+        let mut fds = [self.fd.as_raw_fd(), sockets[0], sockets[1]].map(|fd| libc::pollfd {
             fd,
             events: libc::POLLIN,
             revents: 0,
@@ -87,13 +104,34 @@ mod tests {
         wake.signal();
         wake.signal();
         let mut readable = libc::pollfd {
-            fd: wake.0.as_raw_fd(),
+            fd: wake.fd.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
         assert_eq!(unsafe { libc::poll(&mut readable, 1, 0) }, 1);
         wake.clear().unwrap();
         assert_eq!(unsafe { libc::poll(&mut readable, 1, 0) }, 0);
+    }
+
+    #[test]
+    fn a_burst_writes_one_event_and_the_next_epoch_rearms() {
+        let wake = Wake::new().unwrap();
+        for _ in 0..128 {
+            wake.signal();
+        }
+        let mut count = 0u64;
+        // SAFETY: count is a writable eight-byte eventfd counter.
+        let n = unsafe { libc::read(wake.fd.as_raw_fd(), (&mut count as *mut u64).cast(), 8) };
+        assert_eq!(n, 8);
+        assert_eq!(count, 1);
+        wake.clear().unwrap();
+        wake.signal();
+        let mut readable = libc::pollfd {
+            fd: wake.fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        assert_eq!(unsafe { libc::poll(&mut readable, 1, 0) }, 1);
     }
 
     #[test]

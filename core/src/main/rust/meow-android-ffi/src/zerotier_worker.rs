@@ -531,14 +531,21 @@ fn run(
                 while client.receive().is_ok() {}
             }
 
-            // Clear before checking the channel and stop flag: a producer
-            // racing after this point leaves the fd readable for poll().
-            wake.clear()
-                .map_err(|_| "could not clear ZeroTier wake signal")?;
             if quit.load(Ordering::Acquire) {
                 break;
             }
-            match incoming.try_recv() {
+            let mut message = incoming.try_recv();
+            if matches!(message, Err(TryRecvError::Empty)) && !more_frames {
+                // No syscalls while draining a burst. Rearm and recheck
+                // before poll so enqueue or shutdown cannot be lost.
+                wake.clear()
+                    .map_err(|_| "could not clear ZeroTier wake signal")?;
+                if quit.load(Ordering::Acquire) {
+                    break;
+                }
+                message = incoming.try_recv();
+            }
+            match message {
                 Ok(packet) => {
                     let Some(bridge) = bridge.as_mut() else {
                         continue;
