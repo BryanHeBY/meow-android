@@ -21,6 +21,7 @@ use meow_dns::DnsServer;
 use meow_overlay_policy::apps::AppFilter;
 use meow_tunnel::udp::UdpSession;
 use parking_lot::Mutex;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -873,21 +874,57 @@ fn spawn_udp_reply_reader(
     });
 }
 
-// Keep a single in-place read for stream-framed adapters. A full-size buffer
-// avoids both silent truncation and buffer-too-small errors on legal replies.
+const UDP_REPLY_CAPACITY: usize = u16::MAX as usize;
+
+thread_local! {
+    // Allocate lazily on the runtime thread, not for every idle NAT flow.
+    static NATIVE_UDP_REPLY_SCRATCH: RefCell<Vec<u8>> =
+        RefCell::new(vec![0; UDP_REPLY_CAPACITY]);
+}
+
+// Native poll cannot retain a caller buffer across Pending. Copy the
+// completed payload while borrowed; neither the buffer nor its borrow
+// crosses an await, so tasks may migrate between runtime workers.
+fn poll_native_udp_payload(
+    cx: &mut Context<'_>,
+    poll: impl FnOnce(&mut Context<'_>, &mut [u8]) -> Poll<meow_common::Result<(usize, SocketAddr)>>,
+) -> Poll<meow_common::Result<Vec<u8>>> {
+    NATIVE_UDP_REPLY_SCRATCH.with(|scratch| {
+        let mut buf = scratch.borrow_mut();
+        poll(cx, &mut buf).map(|result| result.map(|(n, _)| buf[..n].to_vec()))
+    })
+}
+
 async fn relay_udp_replies(
     session: &UdpSession,
     app_src: SocketAddr,
     app_dst: SocketAddr,
     reply_tx: &mpsc::Sender<UdpMsg>,
 ) {
-    let mut buf = vec![0u8; 65535];
-    while let Ok((n, _from)) = session.read_reply(&mut buf).await {
+    let forward = |payload| {
         // Replies are activity too: refresh the NAT sweeper's idle clock.
         session.touch();
-        let msg: UdpMsg = (buf[..n].to_vec(), app_dst, app_src);
-        if reply_tx.try_send(msg).is_err() {
-            break;
+        reply_tx.try_send((payload, app_dst, app_src)).is_ok()
+    };
+    if let Some(conn) = session.conn.poll_packet_conn_ref() {
+        while let Ok(payload) = std::future::poll_fn(|cx| {
+            poll_native_udp_payload(cx, |cx, buf| conn.poll_read_packet(cx, buf))
+        })
+        .await
+        {
+            if !forward(payload) {
+                break;
+            }
+        }
+    } else {
+        // An asynchronous stream-framed read may keep partial state and
+        // borrow its own buffer across await. Keep it in place and sized
+        // for the full UDP payload, as on the native path.
+        let mut buf = vec![0; UDP_REPLY_CAPACITY];
+        while let Ok((n, _)) = session.conn.read_packet(&mut buf).await {
+            if !forward(buf[..n].to_vec()) {
+                break;
+            }
         }
     }
 }
@@ -1035,6 +1072,39 @@ fn ipv4_header_checksum(h: &[u8]) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn native_reply_scratch_releases_on_pending_and_copies_large_datagrams() {
+        let first = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let second = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let recv = |socket: &tokio::net::UdpSocket, cx: &mut Context<'_>| {
+            poll_native_udp_payload(cx, |cx, bytes| {
+                let mut buf = ReadBuf::new(bytes);
+                socket.poll_recv_from(cx, &mut buf).map(|result| {
+                    result
+                        .map(|addr| (buf.filled().len(), addr))
+                        .map_err(Into::into)
+                })
+            })
+        };
+        // Drive one flow to Pending before a different flow uses the same
+        // thread-local buffer. A legal near-maximum IPv4 UDP reply must fit.
+        let mut first_read = std::future::poll_fn(|cx| recv(&first, cx));
+        assert!(futures::poll!(&mut first_read).is_pending());
+        let payload = vec![0xa5; 65_507];
+        sender
+            .send_to(&payload, second.local_addr().unwrap())
+            .await
+            .unwrap();
+        let got = std::future::poll_fn(|cx| recv(&second, cx)).await.unwrap();
+        sender
+            .send_to(b"next", first.local_addr().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(first_read.await.unwrap(), b"next");
+        assert_eq!(got, payload);
+    }
+
     #[tokio::test]
     async fn full_ingress_queue_does_not_delay_stop() {
         let (tx, mut rx) = mpsc::channel(1);
