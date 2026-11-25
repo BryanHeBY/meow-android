@@ -1,0 +1,19 @@
+name: Per-app picker tests
+
+on:
+  push:
+    branches-ignore: [master, main]
+    paths:
+      - 'core/src/main/java/io/github/madeye/meow/repo/InstalledAppsRepository.kt'
+      - 'mobile/src/main/java/io/github/madeye/meow/ui/screens/perapp/**'
+      - 'mobile/src/test/java/io/github/madeye/meow/ui/screens/perapp/**'
+      - '.github/workflows/per-app-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    uses: ./.github/workflows/tests.yml
+    with:
+      unit_only: true
