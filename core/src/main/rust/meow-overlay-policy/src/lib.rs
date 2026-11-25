@@ -6,6 +6,7 @@
 pub mod apps;
 pub mod membership;
 mod packet;
+pub mod wire;
 pub use packet::PacketError;
 
 use std::net::{IpAddr, Ipv4Addr};
