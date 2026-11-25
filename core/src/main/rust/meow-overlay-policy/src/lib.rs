@@ -3,6 +3,9 @@
 //! A first-pass policy for one explicit IPv4 ZeroTier network.
 //! This module has no VPN, SDK, DNS or socket dependencies.
 
+mod packet;
+pub use packet::PacketError;
+
 use std::net::{IpAddr, Ipv4Addr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
