@@ -4,7 +4,10 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.madeye.meow.AppGraph
 import io.github.madeye.meow.R
@@ -94,19 +98,28 @@ internal fun ZeroTierAppRules(
             color = MaterialTheme.meow.mutedText,
         )
         ZeroTierAppMode.entries.forEach { option ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("zt_app_mode_${option.key}").selectable(
                     selected = mode == option,
-                    onClick = { onModeChange(option) },
                     enabled = !busy,
-                    modifier = Modifier.testTag("zt_app_mode_${option.key}"),
-                )
+                    role = Role.RadioButton,
+                    onClick = { onModeChange(option) },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = mode == option, onClick = null, enabled = !busy, modifier = Modifier.padding(12.dp))
                 Text(stringResource(option.label), style = MaterialTheme.typography.bodyMedium)
             }
         }
         if (mode != ZeroTierAppMode.All) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = showSystem, onCheckedChange = { showSystem = it }, enabled = !busy)
+            Row(
+                modifier = Modifier.fillMaxWidth().toggleable(
+                    value = showSystem, enabled = !busy, role = Role.Checkbox,
+                    onValueChange = { showSystem = it },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = showSystem, onCheckedChange = null, enabled = !busy, modifier = Modifier.padding(12.dp))
                 Text(stringResource(R.string.zt_apps_show_system), style = MaterialTheme.typography.bodyMedium)
             }
             if (mode == ZeroTierAppMode.Allow && selected.isEmpty()) {
