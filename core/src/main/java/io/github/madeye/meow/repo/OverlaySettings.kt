@@ -53,6 +53,18 @@ data class OverlaySettings(
 }
 
 @Serializable
+data class OverlayMoonRootStatus(
+    val address: String,
+    @SerialName("recent_rx") val recentRx: Boolean,
+)
+
+@Serializable
+data class OverlayMoonStatus(
+    val world: String,
+    val roots: List<OverlayMoonRootStatus>,
+)
+
+@Serializable
 data class OverlayStatus(
     val phase: String,
     val network: String,
@@ -60,6 +72,7 @@ data class OverlayStatus(
     val ip: String? = null,
     @SerialName("sdk_status") val sdkStatus: Int? = null,
     val error: String? = null,
+    val moons: List<OverlayMoonStatus> = emptyList(),
 )
 
 class OverlaySettingsRepository(private val root: File = directory) {

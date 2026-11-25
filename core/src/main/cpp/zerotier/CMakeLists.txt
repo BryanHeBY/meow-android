@@ -43,7 +43,9 @@ endif()
 add_library(meowz_zerotier_client STATIC client.cpp)
 target_link_libraries(meowz_zerotier_client PUBLIC meowz_zerotier_core)
 target_include_directories(meowz_zerotier_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_include_directories(meowz_zerotier_client SYSTEM PRIVATE "${zt}/node")
+target_include_directories(meowz_zerotier_client SYSTEM PRIVATE "${zt}/node"
+    "${zt}/ext" "${prom}/core/include" "${prom}/simpleapi/include"
+    "${prom}/3rdparty/http-client-lite/include")
 set_target_properties(meowz_zerotier_client PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(NOT ANDROID AND BUILD_TESTING)

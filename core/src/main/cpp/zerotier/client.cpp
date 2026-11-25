@@ -1,6 +1,7 @@
 #include "client.h"
 #include "ZeroTierOne.h"
 #include "World.hpp"
+#include "Node.hpp"
 
 #include <algorithm>
 #include <array>
@@ -209,6 +210,37 @@ int mzt_join(mzt_client *c, uint64_t network) {
 int mzt_leave(mzt_client *c, uint64_t network) {
     return ZT_Node_leave(c->node, network, nullptr, nullptr);
 }
+size_t mzt_moon_roots(mzt_client *c, uint64_t world, mzt_moon_root *out, size_t capacity) {
+    if (!c || !out || !capacity || !world) return 0;
+    try {
+        // The pinned SDK documents its opaque C node as this C++ instance.
+        const auto worlds = reinterpret_cast<ZeroTier::Node *>(c->node)->moons();
+        const auto found = std::find_if(worlds.begin(), worlds.end(),
+            [world](const auto &w) { return w.id() == world; });
+        if (found == worlds.end()) return 0;
+        const auto count = std::min(capacity, found->roots().size());
+        for (size_t i = 0; i < count; ++i) {
+            out[i] = {found->roots()[i].identity.address().toInt(), 0};
+        }
+        auto *peers = ZT_Node_peers(c->node);
+        if (!peers) return count;
+        for (unsigned long i = 0; i < peers->peerCount; ++i) {
+            const auto &peer = peers->peers[i];
+            if (peer.role != ZT_PEER_ROLE_MOON) continue;
+            const auto root = std::find_if(out, out + count,
+                [&peer](const auto &candidate) { return candidate.address == peer.address; });
+            if (root == out + count) continue;
+            for (unsigned j = 0; j < peer.pathCount && j < ZT_MAX_PEER_NETWORK_PATHS; ++j) {
+                root->last_receive_ms = std::max(root->last_receive_ms, peer.paths[j].lastReceive);
+            }
+        }
+        ZT_Node_freeQueryResult(c->node, peers);
+        return count;
+    } catch (...) {
+        return 0;
+    }
+}
+
 uint64_t mzt_moon_id(const uint8_t *bytes, size_t size) {
     if (!bytes || !size || size > ZT_WORLD_MAX_SERIALIZED_LENGTH) return 0;
     try {

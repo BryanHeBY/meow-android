@@ -29,6 +29,15 @@ typedef struct {
     unsigned prefix;
 } mzt_route;
 
+typedef struct {
+    uint64_t address;
+    uint64_t last_receive_ms; /* zero if no authenticated packets received */
+} mzt_moon_root;
+
+/* Returns the number of roots for a world actually loaded into the node.
+ * A loaded root may have last_receive_ms == 0; loading is not reachability. */
+size_t mzt_moon_roots(mzt_client *client, uint64_t world, mzt_moon_root *out, size_t capacity);
+
 /* Calls must be serialized on the owning worker. The directory must already
  * exist and be private app storage. No socket may send without protect(). */
 mzt_client *mzt_open(const char *directory, mzt_protect protect, mzt_frame frame,

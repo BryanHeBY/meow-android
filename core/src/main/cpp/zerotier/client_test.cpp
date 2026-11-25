@@ -62,6 +62,10 @@ int main() {
     const auto moon_file = std::filesystem::path(tmp) / "moon-000000123456789a";
     require(std::filesystem::exists(moon_file), "stored Moon under canonical file");
     require(mzt_orbit(client, moon_id, 0) == ZT_RESULT_OK, "load stored Moon");
+    mzt_moon_root roots[4]{};
+    require(mzt_moon_roots(client, moon_id, roots, 4) == 1 &&
+            roots[0].address == root.identity.address().toInt() && roots[0].last_receive_ms == 0,
+            "loaded root remains distinct from reachable root");
     const auto address = mzt_address(client);
     require(address != 0, "read node identity");
     const auto private_file = std::filesystem::path(tmp) / "identity.secret";
@@ -81,7 +85,11 @@ int main() {
     client = mzt_open(tmp, protect, nullptr, &permitted, now + 100);
     require(client && mzt_address(client) == address, "same private identity after restart");
     require(mzt_network(client, network, &view) == 0, "left network remains absent");
+    require(mzt_moon_roots(client, moon_id, roots, 4) == 0, "restart does not auto-load Moon");
+    require(mzt_orbit(client, moon_id, 0) == ZT_RESULT_OK &&
+            mzt_moon_roots(client, moon_id, roots, 4) == 1, "restore cached Moon by explicit orbit");
     require(mzt_deorbit(client, moon_id) == ZT_RESULT_OK, "deorbit cached Moon after restart");
+    require(mzt_moon_roots(client, moon_id, roots, 4) == 0, "world no longer loaded after deorbit");
     require(!std::filesystem::exists(moon_file), "deorbit removes cached Moon even if not loaded");
     mzt_close(client);
     client = mzt_open(tmp, protect, nullptr, &permitted, now + 200);

@@ -296,6 +296,19 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                                         if (entry.seed == null) tr("Imported file", "文件导入") else tr("Manual seed", "手动 Seed"),
                                         style = MaterialTheme.typography.bodySmall,
                                     )
+                                    val roots = actual?.moons?.firstOrNull { it.world == entry.world }?.roots.orEmpty()
+                                    if (roots.isEmpty()) {
+                                        Text(tr("World not loaded", "尚未加载 World"), style = MaterialTheme.typography.bodySmall)
+                                    } else for (root in roots) {
+                                        Text(
+                                            root.address + " · " + if (root.recentRx) {
+                                                tr("Recently received", "近期收到数据")
+                                            } else {
+                                                tr("Loaded, no recent packets", "已加载，近期无接收")
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
                                 }
                                 TextButton(enabled = loaded && !busy, onClick = {
                                     persist(config.copy(moons = config.moons.filter { it.world != entry.world }), config.enabled && vpn.canStop)

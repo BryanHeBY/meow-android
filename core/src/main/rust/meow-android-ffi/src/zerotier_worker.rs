@@ -30,6 +30,18 @@ const IDLE_WAKE: Duration = Duration::from_millis(60);
 const MAX_FRAME_BATCH: usize = 128;
 
 #[derive(Clone, Serialize, PartialEq, Eq)]
+struct MoonRootStatus {
+    address: String,
+    recent_rx: bool,
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq)]
+struct MoonStatus {
+    world: String,
+    roots: Vec<MoonRootStatus>,
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq)]
 struct Status {
     phase: &'static str,
     network: String,
@@ -37,6 +49,7 @@ struct Status {
     ip: Option<Ipv4Addr>,
     sdk_status: Option<i32>,
     error: Option<&'static str>,
+    moons: Vec<MoonStatus>,
 }
 
 pub(crate) struct Worker {
@@ -160,6 +173,7 @@ fn run(
         ip: None,
         sdk_status: None,
         error: None,
+        moons: Vec::new(),
     };
     let mut last = None;
     publish(&status_path, &mut last, &status);
@@ -230,6 +244,7 @@ fn run(
         let mut last_expire = Instant::now();
         let mut routes = Vec::new();
         let mut last_routes = None;
+        let mut last_moons = None;
         while !quit.load(Ordering::Acquire) {
             if client.step() != 0 {
                 return Err("native ZeroTier transport stopped");
@@ -267,6 +282,31 @@ fn run(
                 current = next;
             }
             ready.store(bridge.is_some(), Ordering::Release);
+            if last_moons.is_none_or(|then| clock.duration_since(then) >= Duration::from_secs(5)) {
+                let wall = crate::zerotier::now() as u64;
+                status.moons = config
+                    .moons
+                    .iter()
+                    .map(|moon| {
+                        let (world, _) = moon.sdk_args();
+                        let roots = client
+                            .moon_roots(world)
+                            .iter()
+                            .map(|root| MoonRootStatus {
+                                address: format!("{:010x}", root.address),
+                                recent_rx: root.last_receive_ms != 0
+                                    && root.last_receive_ms <= wall
+                                    && wall - root.last_receive_ms <= 120_000,
+                            })
+                            .collect();
+                        MoonStatus {
+                            world: format!("{world:016x}"),
+                            roots,
+                        }
+                    })
+                    .collect();
+                last_moons = Some(clock);
+            }
             status.phase = if bridge.is_some() { "ready" } else { "waiting" };
             status.ip = usable.map(|v| Ipv4Addr::from(v.first_ipv4));
             status.sdk_status = view.map(|v| v.status);
@@ -338,6 +378,7 @@ fn run(
     ready.store(false, Ordering::Release);
     status.phase = if result.is_ok() { "stopped" } else { "failed" };
     status.ip = None;
+    status.moons.clear();
     status.error = result.err();
     publish(&status_path, &mut last, &status);
 }

@@ -34,6 +34,13 @@ struct Route {
     prefix: c_uint,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub(crate) struct MoonRoot {
+    pub address: u64,
+    pub last_receive_ms: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct Frame {
     pub network: u64,
@@ -63,6 +70,12 @@ unsafe extern "C" {
     fn mzt_online(client: *const c_void) -> c_int;
     fn mzt_join(client: *mut c_void, network: u64) -> c_int;
     fn mzt_leave(client: *mut c_void, network: u64) -> c_int;
+    fn mzt_moon_roots(
+        client: *mut c_void,
+        world: u64,
+        roots: *mut MoonRoot,
+        length: usize,
+    ) -> usize;
     fn mzt_moon_id(bytes: *const u8, length: usize) -> u64;
     fn mzt_install_moon(client: *mut c_void, world: u64, bytes: *const u8, length: usize) -> c_int;
     fn mzt_orbit(client: *mut c_void, world: u64, seed: u64) -> c_int;
@@ -122,7 +135,7 @@ unsafe extern "C" fn receive(
     });
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
@@ -177,6 +190,12 @@ impl Client {
     }
     pub fn leave(&mut self, network: u64) -> i32 {
         unsafe { mzt_leave(self.handle.as_ptr(), network) }
+    }
+    pub fn moon_roots(&mut self, world: u64) -> Vec<MoonRoot> {
+        let mut roots = [MoonRoot::default(); 4];
+        let count =
+            unsafe { mzt_moon_roots(self.handle.as_ptr(), world, roots.as_mut_ptr(), roots.len()) };
+        roots[..count.min(roots.len())].to_vec()
     }
     pub fn install_moon(&mut self, world: u64, encoded: &[u8]) -> bool {
         unsafe {
