@@ -208,7 +208,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     private fun overlayConfig(): JSONObject {
         val settings = OverlaySettingsRepository.directory.resolve("settings.json")
         if (!settings.isFile) return JSONObject()
-        val config = JSONObject(settings.readText())
+        val config = JSONObject(settings.readText()).apply { remove("saved_networks") }
         if (!config.optBoolean("enabled")) return config
         val network = connectivity.activeNetwork
         val capabilities = network?.let(connectivity::getNetworkCapabilities)

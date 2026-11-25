@@ -15,6 +15,8 @@ import io.github.madeye.meow.aidl.IMeowServiceCallback
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.database.ClashProfile
+import io.github.madeye.meow.repo.OverlaySettingsRepository
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -327,7 +329,15 @@ object BaseService {
                 return Service.START_NOT_STICKY
             }
 
-            val profile = Core.currentProfile
+            val profile = Core.currentProfile ?: if (OverlaySettingsRepository().hasActiveNetwork()) {
+                // Joining without an imported Clash profile is a legitimate
+                // ZeroTier-only use. Non-overlay traffic stays direct.
+                ClashProfile(
+                    name = "ZeroTier",
+                    yamlContent = "mode: rule\nipv6: false\nrules: ['MATCH,DIRECT']\n",
+                    autoUpdate = false,
+                )
+            } else null
             this as Context
             if (profile == null) {
                 stopRunner(false, "No profile selected")
