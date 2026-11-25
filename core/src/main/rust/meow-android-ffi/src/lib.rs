@@ -27,6 +27,8 @@ mod protect;
 mod test_support;
 mod traffic;
 mod tun2socks;
+#[cfg(target_os = "android")]
+mod zerotier;
 
 use dashmap::DashMap;
 use jni::objects::{JClass, JObject, JString};
