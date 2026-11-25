@@ -22,7 +22,8 @@ impl AppFilter {
     /// merely because one of its packages is allowed.
     pub fn permits_owner(&self, packages: &[&str]) -> bool {
         if packages.is_empty() {
-            return matches!(self, Self::All);
+            return matches!(self, Self::All)
+                || matches!(self, Self::Exclude(list) if list.is_empty());
         }
         packages.iter().all(|package| self.permits(package))
     }
@@ -137,6 +138,7 @@ mod tests {
         assert!(!allow.permits_owner(&[]));
         assert!(!exclude.permits_owner(&[]));
         assert!(AppFilter::All.permits_owner(&[]));
+        assert!(AppFilter::Exclude(names(&[])).permits_owner(&[]));
         assert!(!allow.permits_owner(&["terminal", "browser"]));
         assert!(!exclude.permits_owner(&["terminal", "bank"]));
         assert!(exclude.permits_owner(&["terminal", "browser"]));
