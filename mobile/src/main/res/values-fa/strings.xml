@@ -394,4 +394,9 @@
     <string name="proxy_servers_no_matches">سرور پروکسی مطابقی پیدا نشد.</string>
     <string name="proxy_servers_node_count">%1$d گره</string>
     <string name="proxy_edit_discard_changes">تغییرات ذخیره‌نشده کنار گذاشته شود؟</string>
+    <string name="settings_notifications">اعلان‌ها</string>
+    <string name="settings_vpn_notification_details">جزئیات اعلان VPN</string>
+    <string name="settings_vpn_notification_details_desc">نمایش نمایه و سرعت لحظه‌ای. Android همچنان می‌تواند اعلان ضروری VPN را نشان دهد.</string>
+    <string name="settings_vpn_notification_system">مدیریت اعلان VPN در Android</string>
+    <string name="settings_vpn_notification_failed">ذخیره تنظیمات اعلان ممکن نبود</string>
 </resources>

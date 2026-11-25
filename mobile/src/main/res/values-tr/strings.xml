@@ -386,4 +386,9 @@
     <string name="proxy_servers_no_matches">Eşleşen proxy sunucusu yok.</string>
     <string name="proxy_servers_node_count">%1$d düğüm</string>
     <string name="proxy_edit_discard_changes">Kaydedilmemiş değişiklikler atılsın mı?</string>
+    <string name="settings_notifications">Bildirimler</string>
+    <string name="settings_vpn_notification_details">VPN bildirim ayrıntıları</string>
+    <string name="settings_vpn_notification_details_desc">Profili ve anlık hızı gösterir. Android gerekli VPN bildirimini göstermeye devam edebilir.</string>
+    <string name="settings_vpn_notification_system">Android VPN bildirimini yönet</string>
+    <string name="settings_vpn_notification_failed">Bildirim ayarları kaydedilemedi</string>
 </resources>

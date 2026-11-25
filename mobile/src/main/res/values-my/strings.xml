@@ -381,4 +381,9 @@
     <string name="proxy_servers_no_matches">ကိုက်ညီသော ပရောက်စီဆာဗာ မရှိပါ။</string>
     <string name="proxy_servers_node_count">Node %1$d ခု</string>
     <string name="proxy_edit_discard_changes">မသိမ်းရသေးသော ပြောင်းလဲမှုများကို ပယ်ဖျက်မလား?</string>
+    <string name="settings_notifications">အသိပေးချက်များ</string>
+    <string name="settings_vpn_notification_details">VPN အသိပေးချက် အသေးစိတ်</string>
+    <string name="settings_vpn_notification_details_desc">ပရိုဖိုင်နှင့် လက်ရှိအမြန်နှုန်းကို ပြမည်။ Android က လိုအပ်သော VPN အသိပေးချက်ကို ပြနိုင်သေးသည်။</string>
+    <string name="settings_vpn_notification_system">Android တွင် VPN အသိပေးချက် စီမံရန်</string>
+    <string name="settings_vpn_notification_failed">အသိပေးချက် ဆက်တင် မသိမ်းနိုင်ပါ</string>
 </resources>

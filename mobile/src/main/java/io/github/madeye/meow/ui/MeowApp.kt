@@ -1,5 +1,8 @@
 package io.github.madeye.meow.ui
 
+import android.provider.Settings
+import io.github.madeye.meow.bg.ServiceNotification
+
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -856,6 +859,7 @@ private fun SettingsRoute(
     val upToDateFmt = stringResource(R.string.settings_update_latest)
     val checkFailedFmt = stringResource(R.string.settings_update_failed)
     val dnsFailedFmt = stringResource(R.string.settings_builtin_dns_failed)
+    val notificationFailed = stringResource(R.string.settings_vpn_notification_failed)
     val noApp = stringResource(R.string.settings_update_no_app)
 
     LaunchedEffect(viewModel) {
@@ -863,6 +867,7 @@ private fun SettingsRoute(
             val message = when (event) {
                 is SettingsEvent.UpToDate -> String.format(upToDateFmt, event.version)
                 is SettingsEvent.UpdateCheckFailed -> String.format(checkFailedFmt, event.reason)
+                SettingsEvent.NotificationPreferenceFailed -> notificationFailed
                 is SettingsEvent.BuiltinDnsFailed -> String.format(dnsFailedFmt, event.reason)
             }
             snackbarHost.showSnackbar(message)
@@ -877,6 +882,21 @@ private fun SettingsRoute(
             onShowExitIpChange = viewModel::onShowExitIpChange,
             onBuiltinDnsChange = viewModel::onBuiltinDnsChange,
             onStartOnBootChange = viewModel::onStartOnBootChange,
+            onVpnNotificationDetailsChange = viewModel::onVpnNotificationDetailsChange,
+            onSystemVpnNotificationSettings = {
+                val intent = if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    ServiceNotification.ensureChannel(context)
+                    android.content.Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        .putExtra(Settings.EXTRA_CHANNEL_ID, ServiceNotification.CHANNEL_ID)
+                } else {
+                    android.content.Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(android.net.Uri.fromParts("package", context.packageName, null))
+                }
+                if (runCatching { context.startActivity(intent) }.isFailure) {
+                    scope.launch { snackbarHost.showSnackbar(noApp) }
+                }
+            },
             onThemeModeChange = viewModel::onThemeModeChange,
             onPrivacyPolicy = {
                 if (!context.openUrl("https://meow-rs.github.io/meow-android/privacy-policy.html")) {

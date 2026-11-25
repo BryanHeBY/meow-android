@@ -66,7 +66,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     override val data = BaseService.Data(this)
     override val tag: String get() = "MeowVpnService"
     override fun createNotification(): ServiceNotification =
-        ServiceNotification(this, "service-vpn")
+        ServiceNotification(this)
 
     private var conn: ParcelFileDescriptor? = null
     private var active = false

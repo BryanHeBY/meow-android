@@ -376,4 +376,9 @@
     <string name="proxy_servers_no_matches">Không có máy chủ proxy phù hợp.</string>
     <string name="proxy_servers_node_count">%1$d nút</string>
     <string name="proxy_edit_discard_changes">Bỏ thay đổi chưa lưu?</string>
+    <string name="settings_notifications">Thông báo</string>
+    <string name="settings_vpn_notification_details">Chi tiết thông báo VPN</string>
+    <string name="settings_vpn_notification_details_desc">Hiện cấu hình và tốc độ. Android vẫn có thể hiện thông báo VPN bắt buộc.</string>
+    <string name="settings_vpn_notification_system">Quản lý thông báo VPN trong Android</string>
+    <string name="settings_vpn_notification_failed">Không thể lưu cài đặt thông báo</string>
 </resources>

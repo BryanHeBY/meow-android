@@ -18,6 +18,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.core.R
+import io.github.madeye.meow.preference.VpnNotificationStore
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,11 +41,22 @@ import timber.log.Timber
  */
 class ServiceNotification(
     private val service: Service,
-    channelId: String,
+    channelId: String = CHANNEL_ID,
 ) {
-    private companion object {
-        const val NOTIFICATION_ID = 1
-        const val REFRESH_MILLIS = 1000L
+    companion object {
+        const val CHANNEL_ID = "service-vpn"
+
+        fun ensureChannel(context: Context, channelId: String = CHANNEL_ID) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val manager = context.getSystemService(NotificationManager::class.java)
+                manager.createNotificationChannel(NotificationChannel(
+                    channelId, context.getString(R.string.notification_channel_vpn),
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply { setShowBadge(false) })
+            }
+        }
+        private const val NOTIFICATION_ID = 1
+        private const val REFRESH_MILLIS = 1000L
     }
 
     private val notificationManager = service.getSystemService(NotificationManager::class.java)
@@ -52,6 +64,8 @@ class ServiceNotification(
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var ticker: Job? = null
     private var connected = false
+    private var profileName = ""
+    private var detailsEnabled = VpnNotificationStore.default.detailsEnabled()
 
     private val builder = NotificationCompat.Builder(service, channelId)
         .setSmallIcon(R.drawable.ic_stat_meow)
@@ -94,28 +108,24 @@ class ServiceNotification(
     // Nobody reads the speed with the screen off, so the ticker sleeps rather
     // than wake :vpn and the notification service every second.
     private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = updateTicker()
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Action.NOTIFICATION_CHANGED) {
+                detailsEnabled = VpnNotificationStore.default.detailsEnabled()
+                refreshContent()
+            }
+            updateTicker()
+        }
     }
 
     init {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // The id predates this notification, so existing installs keep the
-            // LOW importance they were created with — an app cannot change
-            // importance afterwards. Re-creating only refreshes the name.
-            notificationManager.createNotificationChannel(
-                NotificationChannel(
-                    channelId,
-                    service.getString(R.string.notification_channel_vpn),
-                    NotificationManager.IMPORTANCE_LOW,
-                ).apply { setShowBadge(false) },
-            )
-        }
+        ensureChannel(service, channelId)
         ContextCompat.registerReceiver(
             service,
             screenReceiver,
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Action.NOTIFICATION_CHANGED)
             },
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
@@ -161,7 +171,18 @@ class ServiceNotification(
 
     /** The profile is only looked up after the start has been answered. */
     fun setProfileName(name: String) {
-        builder.setContentTitle(name.ifEmpty { service.getString(R.string.app_name) })
+        profileName = name
+        refreshContent()
+    }
+
+    private fun refreshContent() {
+        builder.setContentTitle(if (detailsEnabled && profileName.isNotEmpty()) profileName
+            else service.getString(R.string.app_name))
+        when {
+            !connected -> builder.setContentText(service.getText(R.string.notification_connecting))
+            detailsEnabled -> builder.setContentText(Speed.IDLE.text)
+            else -> builder.setContentText(service.getText(R.string.notification_vpn_active))
+        }
         post()
     }
 
@@ -177,7 +198,7 @@ class ServiceNotification(
         connected = nowConnected
         // Replace "Connecting…" even if the screen is off and the ticker will
         // not run until it comes back on.
-        if (connected) show(Speed.IDLE)
+        if (connected) refreshContent()
         updateTicker()
     }
 
@@ -191,7 +212,7 @@ class ServiceNotification(
     }
 
     private fun updateTicker() {
-        val run = connected && power.isInteractive
+        val run = connected && detailsEnabled && power.isInteractive
         if (run == (ticker != null)) return
         if (run) {
             ticker = scope.launch { tick() }

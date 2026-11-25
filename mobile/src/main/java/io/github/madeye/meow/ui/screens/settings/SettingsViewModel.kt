@@ -1,12 +1,16 @@
 package io.github.madeye.meow.ui.screens.settings
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.boot.StartOnBootPreference
 import io.github.madeye.meow.preference.BuiltinDnsPreference
 import io.github.madeye.meow.preference.ExitIpPreference
+import io.github.madeye.meow.preference.VpnNotificationStore
 import io.github.madeye.meow.preference.ThemeMode
+import io.github.madeye.meow.utils.Action
 import io.github.madeye.meow.preference.ThemeModePreference
 import io.github.madeye.meow.ui.util.AppVersions
 import io.github.madeye.meow.update.AppRelease
@@ -32,6 +36,7 @@ data class SettingsUiState(
     val builtinDns: Boolean = true,
     /** Settings' "Start on boot" switch: connect the VPN once the device boots. */
     val startOnBoot: Boolean = false,
+    val vpnNotificationDetails: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /** An update check is waiting on GitHub. */
     val checkingForUpdate: Boolean = false,
@@ -47,6 +52,7 @@ data class SettingsUiState(
 sealed interface SettingsEvent {
     data class UpToDate(val version: String) : SettingsEvent
     data class UpdateCheckFailed(val reason: String) : SettingsEvent
+    data object NotificationPreferenceFailed : SettingsEvent
     data class BuiltinDnsFailed(val reason: String) : SettingsEvent
 }
 
@@ -56,6 +62,7 @@ class SettingsViewModel(
     private val builtinDns: BuiltinDnsPreference,
     private val theme: ThemeModePreference,
     private val startOnBoot: StartOnBootPreference,
+    private val context: Context,
     /**
      * The newest GitHub release. Null in the Play build, which may only
      * update through Play: the route opens the store listing instead.
@@ -66,6 +73,9 @@ class SettingsViewModel(
 
     private val versionPair = MutableStateFlow("" to "")
     private val checking = MutableStateFlow(false)
+    private val notificationDetails = MutableStateFlow(VpnNotificationStore.default.detailsEnabled())
+
+    private data class Switches(val exitIp: Boolean, val builtinDns: Boolean, val onBoot: Boolean, val details: Boolean)
     private val update = MutableStateFlow<AppRelease?>(null)
 
     private val _events = MutableSharedFlow<SettingsEvent>(extraBufferCapacity = 4)
@@ -76,8 +86,9 @@ class SettingsViewModel(
         exitIp.enabled,
         builtinDns.enabled,
         startOnBoot.enabled,
-    ) { showExitIp, builtin, onBoot ->
-        Triple(showExitIp == true, builtin != false, onBoot)
+        notificationDetails,
+    ) { showExitIp, builtin, onBoot, details ->
+        Switches(showExitIp == true, builtin != false, onBoot, details)
     }
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -86,13 +97,14 @@ class SettingsViewModel(
         checking,
         update,
         theme.mode,
-    ) { (app, engine), (showExitIp, builtin, onBoot), isChecking, newer, mode ->
+    ) { (app, engine), (showExitIp, builtin, onBoot, details), isChecking, newer, mode ->
         SettingsUiState(
             appVersion = app,
             engineVersion = engine,
             showExitIp = showExitIp,
             builtinDns = builtin,
             startOnBoot = onBoot,
+            vpnNotificationDetails = details,
             themeMode = mode,
             checkingForUpdate = isChecking,
             update = newer,
@@ -109,6 +121,17 @@ class SettingsViewModel(
     fun onShowExitIpChange(show: Boolean) = exitIp.set(show)
 
     fun onBuiltinDnsChange(enabled: Boolean) = builtinDns.set(enabled)
+
+    fun onVpnNotificationDetailsChange(enabled: Boolean) {
+        try {
+            VpnNotificationStore.default.save(enabled)
+            notificationDetails.value = enabled
+            context.sendBroadcast(Intent(Action.NOTIFICATION_CHANGED).setPackage(context.packageName))
+        } catch (e: IOException) {
+            Timber.w(e, "Cannot save VPN notification mode")
+            _events.tryEmit(SettingsEvent.NotificationPreferenceFailed)
+        }
+    }
 
     fun onThemeModeChange(mode: ThemeMode) = theme.set(mode)
 

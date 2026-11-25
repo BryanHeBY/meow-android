@@ -7,4 +7,5 @@
     <string name="profile_empty">لم يُحدَّد أي ملف تعريف</string>
     <string name="service_failed">حدث خطأ في الخدمة</string>
     <string name="reboot_required">يلزم إعادة تشغيل الجهاز</string>
+    <string name="notification_vpn_active">تم اتصال VPN</string>
 </resources>

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
@@ -65,6 +66,8 @@ fun SettingsScreen(
     onStartOnBootChange: (Boolean) -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onPrivacyPolicy: () -> Unit,
+    onVpnNotificationDetailsChange: (Boolean) -> Unit,
+    onSystemVpnNotificationSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val unavailable = stringResource(R.string.settings_version_unavailable)
@@ -144,6 +147,25 @@ fun SettingsScreen(
                 checked = state.showExitIp,
                 onCheckedChange = onShowExitIpChange,
                 modifier = Modifier.testTag("settings_show_exit_ip"),
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        SectionHeader(stringResource(R.string.settings_notifications))
+        GlassCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            SwitchRow(
+                icon = Icons.Filled.Notifications,
+                title = stringResource(R.string.settings_vpn_notification_details),
+                subtitle = stringResource(R.string.settings_vpn_notification_details_desc),
+                checked = state.vpnNotificationDetails,
+                onCheckedChange = onVpnNotificationDetailsChange,
+                modifier = Modifier.testTag("settings_vpn_notification_details"),
+            )
+            HorizontalDivider(color = MaterialTheme.meow.border)
+            NavRow(
+                icon = Icons.Filled.Notifications,
+                title = stringResource(R.string.settings_vpn_notification_system),
+                onClick = onSystemVpnNotificationSettings,
             )
         }
 

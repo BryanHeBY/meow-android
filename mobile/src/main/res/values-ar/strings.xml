@@ -438,4 +438,9 @@
     <string name="proxy_servers_no_matches">لا توجد خوادم وكيلة مطابقة.</string>
     <string name="proxy_servers_node_count">%1$d عقد</string>
     <string name="proxy_edit_discard_changes">هل تريد تجاهل التغييرات غير المحفوظة؟</string>
+    <string name="settings_notifications">الإشعارات</string>
+    <string name="settings_vpn_notification_details">تفاصيل إشعار VPN</string>
+    <string name="settings_vpn_notification_details_desc">عرض الملف والسرعة الحالية. قد يستمر Android في عرض إشعار VPN الإلزامي.</string>
+    <string name="settings_vpn_notification_system">إدارة إشعار VPN في Android</string>
+    <string name="settings_vpn_notification_failed">تعذّر حفظ إعدادات الإشعار</string>
 </resources>

@@ -206,6 +206,7 @@ object AppGraph {
                     builtinDns,
                     themeMode,
                     startOnBoot,
+                    appContext,
                     // Independently signed builds cannot install official Meow updates.
                     latestRelease = null,
                     installedVersion = BuildConfig.VERSION_NAME,

@@ -406,4 +406,9 @@
     <string name="proxy_servers_no_matches">Подходящие прокси-серверы не найдены.</string>
     <string name="proxy_servers_node_count">Узлов: %1$d</string>
     <string name="proxy_edit_discard_changes">Отменить несохранённые изменения?</string>
+    <string name="settings_notifications">Уведомления</string>
+    <string name="settings_vpn_notification_details">Детали уведомления VPN</string>
+    <string name="settings_vpn_notification_details_desc">Показывать профиль и скорость. Android может показывать обязательное уведомление VPN и без деталей.</string>
+    <string name="settings_vpn_notification_system">Настроить уведомление VPN в Android</string>
+    <string name="settings_vpn_notification_failed">Не удалось сохранить настройки уведомлений</string>
 </resources>

@@ -7,4 +7,5 @@
     <string name="profile_empty">Chưa chọn cấu hình</string>
     <string name="service_failed">Dịch vụ gặp lỗi</string>
     <string name="reboot_required">Cần khởi động lại</string>
+    <string name="notification_vpn_active">Đã kết nối VPN</string>
 </resources>

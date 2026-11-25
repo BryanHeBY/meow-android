@@ -7,4 +7,5 @@
     <string name="profile_empty">No profile selected</string>
     <string name="service_failed">Service failed</string>
     <string name="reboot_required">Reboot required</string>
+    <string name="notification_vpn_active">VPN connected</string>
 </resources>

@@ -376,4 +376,9 @@
     <string name="proxy_servers_no_matches">没有匹配的代理服务器。</string>
     <string name="proxy_servers_node_count">%1$d 个节点</string>
     <string name="proxy_edit_discard_changes">放弃未保存的更改？</string>
+    <string name="settings_notifications">通知</string>
+    <string name="settings_vpn_notification_details">VPN 常驻通知详情</string>
+    <string name="settings_vpn_notification_details_desc">显示当前配置和实时速度。关闭后 VPN 继续运行，Android 仍可显示必要的 VPN 通知。</string>
+    <string name="settings_vpn_notification_system">在系统设置中管理 VPN 通知</string>
+    <string name="settings_vpn_notification_failed">无法保存通知设置</string>
 </resources>

@@ -7,4 +7,5 @@
     <string name="profile_empty">هیچ پروفایلی انتخاب نشده است</string>
     <string name="service_failed">سرویس با خطا مواجه شد</string>
     <string name="reboot_required">راه‌اندازی مجدد دستگاه لازم است</string>
+    <string name="notification_vpn_active">اتصال VPN برقرار است</string>
 </resources>
