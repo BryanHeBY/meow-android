@@ -4,6 +4,7 @@
 //! This module has no VPN, SDK, DNS or socket dependencies.
 
 pub mod apps;
+pub mod bridge;
 pub mod membership;
 mod packet;
 pub mod wire;
