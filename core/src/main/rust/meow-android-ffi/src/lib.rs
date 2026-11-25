@@ -375,7 +375,12 @@ async fn start_engine_async(
     // in both directions, which TUN netstack flows need since keepalive
     // never reaches them.
     tunnel.set_tcp_idle_timeout(config.general.tcp_idle_timeout);
-    tunnel.update_routing(config.proxies, config.rules, config.dialer_registry);
+    tunnel.update_routing(
+        config.proxies,
+        config.rules,
+        config.sub_rules,
+        config.dialer_registry,
+    );
     // The UDP NAT sweeper: evicts sessions idle in both directions (the
     // tun2socks reply readers touch the same clock on every reply).
     tunnel.spawn_background_tasks();
@@ -423,8 +428,9 @@ async fn start_engine_async(
     if let Some(api_addr) = config.api.external_controller {
         let api_server = ApiServer::new(
             tunnel.clone(),
-            api_addr,
+            Some(api_addr),
             config.api.secret.clone(),
+            meow_config::ApiCorsConfig::default(),
             // No config path: the app restarts the engine to apply a config,
             // and `PUT /configs` must not persist into the stripped copy.
             None,
@@ -440,6 +446,8 @@ async fn start_engine_async(
             None,
             dns_server,
             config.provider_dialer_registry.clone(),
+            // No embedded NTP supervisor in the Android service.
+            None,
         );
         handles.push(tokio::spawn(async move {
             if let Err(e) = api_server.run().await {
@@ -834,15 +842,35 @@ mod tests {
     use super::ENGINE_VERSION;
 
     #[test]
-    fn the_engine_version_is_the_pinned_release() {
-        let version = ENGINE_VERSION.strip_prefix("meow-rs ").unwrap();
-        let pin = match version.split_once('+') {
-            Some((_, rev)) => format!("rev = \"{rev}"),
-            None => format!("tag = \"{version}\""),
-        };
-        assert!(
-            include_str!("../Cargo.toml").contains(&pin),
-            "{ENGINE_VERSION} is not what Cargo.toml pins",
-        );
+    fn the_engine_version_identifies_the_pinned_fork() {
+        let version = ENGINE_VERSION.strip_prefix("meow-rs v").unwrap();
+        let kernel =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../../vendor/meow-rs");
+        assert!(kernel.join("crates/meow-tunnel/Cargo.toml").is_file());
+        let published_version = include_str!("../Cargo.lock")
+            .split("[[package]]")
+            .find(|package| package.contains("\nname = \"meow-tunnel\"\n"))
+            .and_then(|package| {
+                package
+                    .lines()
+                    .find_map(|line| line.strip_prefix("version = "))
+            })
+            .map(|field| field.trim_matches('"'))
+            .unwrap();
+        if kernel.join(".git").exists() {
+            let result = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&kernel)
+                .args(["rev-parse", "--verify", "HEAD"])
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{result:?}");
+            let pinned = std::str::from_utf8(&result.stdout).unwrap().trim();
+            let (printed_version, printed_revision) = version.split_once('+').unwrap();
+            assert_eq!(printed_version, published_version);
+            assert!(printed_revision.len() >= 7 && pinned.starts_with(printed_revision));
+        } else {
+            assert_eq!(version, published_version);
+        }
     }
 }

@@ -1335,7 +1335,9 @@ checksum = "2c3e324da4c95177d6291d4c8730197c0d1822f8a9766814a4a44fa5ab797c9c"
 dependencies = [
  "atomic-waker",
  "bytes",
+ "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -1516,6 +1518,9 @@ name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "ipnetwork"
@@ -1709,9 +1714,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.38.2"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "cc",
  "pkg-config",
@@ -1899,7 +1904,6 @@ dependencies = [
 [[package]]
 name = "meow-anytls"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1922,11 +1926,11 @@ dependencies = [
 [[package]]
 name = "meow-api"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "boring",
  "dashmap",
  "futures",
  "hickory-proto",
@@ -1942,24 +1946,27 @@ dependencies = [
  "serde",
  "serde_json",
  "smol_str",
+ "socket2 0.5.10",
  "subtle",
  "sysinfo",
  "time",
  "tokio",
+ "tokio-boring",
  "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "meow-common"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures",
  "httparse",
  "ipnet",
  "libc",
@@ -1982,7 +1989,6 @@ dependencies = [
 [[package]]
 name = "meow-config"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2005,6 +2011,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha2",
  "smol_str",
  "tokio",
  "tracing",
@@ -2014,12 +2021,14 @@ dependencies = [
 [[package]]
 name = "meow-dns"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "async-trait",
+ "bytes",
  "dashmap",
  "futures",
+ "h2",
  "hickory-proto",
+ "http",
  "ipnet",
  "lru 0.18.5",
  "maxminddb",
@@ -2045,7 +2054,6 @@ version = "0.1.0"
 [[package]]
 name = "meow-proxy"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "aes 0.8.4",
  "argon2",
@@ -2083,7 +2091,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "webpki-root-certs",
  "x25519-dalek",
  "yamux",
 ]
@@ -2091,7 +2098,6 @@ dependencies = [
 [[package]]
 name = "meow-rules"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "ipnet",
  "maxminddb",
@@ -2107,7 +2113,6 @@ dependencies = [
 [[package]]
 name = "meow-transport"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm 0.10.3",
@@ -2153,14 +2158,13 @@ dependencies = [
 [[package]]
 name = "meow-trie"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 
 [[package]]
 name = "meow-tunnel"
 version = "0.29.0"
-source = "git+https://github.com/meow-rs/meow-rs.git?tag=v0.29.0#de176935fedf00c98c6580109cd0034bf67801a8"
 dependencies = [
  "async-trait",
+ "bytes",
  "dashmap",
  "ipnet",
  "libc",
@@ -2174,8 +2178,10 @@ dependencies = [
  "serde",
  "smallvec",
  "smol_str",
+ "socket2 0.5.10",
  "time",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -2779,9 +2785,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.40.2"
+version = "0.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
+checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
 dependencies = [
  "bitflags",
  "fallible-iterator",

@@ -196,6 +196,15 @@ cargo {
     }
 }
 
+// The Rust Gradle plugin only watches the FFI module by default. Declare the
+// vendored workspace too so switching the gitlink cannot leave a stale .so.
+val pinnedKernel = rootProject.layout.projectDirectory.dir("vendor/meow-rs")
+tasks.matching { it.name.startsWith("cargoBuild") }.configureEach {
+    inputs.files(fileTree(pinnedKernel.asFile) {
+        include("Cargo.toml", "Cargo.lock", "crates/**")
+    }).withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+}
+
 tasks.whenTaskAdded {
     when (name) {
         "mergeDebugJniLibFolders", "mergeReleaseJniLibFolders" -> {

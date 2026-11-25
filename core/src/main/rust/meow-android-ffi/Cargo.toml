@@ -32,13 +32,13 @@ meow-overlay-policy = { path = "../meow-overlay-policy" }
 # uTLS fingerprints built in; hysteria2's quiche links the same copy).
 # boring-sys vendors BoringSSL (~few MB per ABI, needs cmake + NDK C++ at
 # build time).
-meow-tunnel = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0" }
-meow-config = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0", features = ["ss", "trojan", "vless", "vless-vision", "vless-encryption", "vmess", "snell", "hysteria2", "anytls", "ech-tls-tunnel", "mux", "kcptun", "shadow-tls", "restls", "jls", "gost-plugin"] }
-meow-dns = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0" }
-meow-api = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0" }
-meow-common = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0", features = ["logbook", "traffic-ledger"] }
-meow-transport = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0", features = ["tls", "ws", "grpc", "h2", "httpupgrade", "xhttp", "reality"] }
-meow-proxy = { git = "https://github.com/meow-rs/meow-rs.git", tag = "v0.29.0", features = ["ss", "trojan", "vless", "vless-vision", "vless-encryption", "vmess", "snell", "hysteria2", "anytls", "ech-tls-tunnel", "mux", "kcptun", "shadow-tls", "restls", "jls", "gost-plugin", "public-suffix"] }
+meow-tunnel = { path = "../../../../../vendor/meow-rs/crates/meow-tunnel" }
+meow-config = { path = "../../../../../vendor/meow-rs/crates/meow-config", features = ["ss", "trojan", "vless", "vless-vision", "vless-encryption", "vmess", "snell", "hysteria2", "anytls", "ech-tls-tunnel", "mux", "kcptun", "shadow-tls", "restls", "jls", "gost-plugin"] }
+meow-dns = { path = "../../../../../vendor/meow-rs/crates/meow-dns" }
+meow-api = { path = "../../../../../vendor/meow-rs/crates/meow-api" }
+meow-common = { path = "../../../../../vendor/meow-rs/crates/meow-common", features = ["logbook", "traffic-ledger"] }
+meow-transport = { path = "../../../../../vendor/meow-rs/crates/meow-transport", features = ["tls", "ws", "grpc", "h2", "httpupgrade", "xhttp", "reality"] }
+meow-proxy = { path = "../../../../../vendor/meow-rs/crates/meow-proxy", features = ["ss", "trojan", "vless", "vless-vision", "vless-encryption", "vmess", "snell", "hysteria2", "anytls", "ech-tls-tunnel", "mux", "kcptun", "shadow-tls", "restls", "jls", "gost-plugin", "public-suffix"] }
 
 # Explicit pin (transitive through meow-tunnel; surfaced here because
 # engine startup builds DashMap<String, Arc<ProxyProvider>> for ApiServer::new

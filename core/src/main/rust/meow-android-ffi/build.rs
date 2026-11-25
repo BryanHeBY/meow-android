@@ -5,9 +5,46 @@ use std::{
 };
 
 fn main() {
-    let lock = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("Cargo.lock");
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let lock = manifest.join("Cargo.lock");
     println!("cargo:rerun-if-changed={}", lock.display());
-    println!("cargo:rustc-env=MEOW_RS_VERSION={}", meow_rs_version(&lock));
+    let kernel = manifest.join("../../../../../vendor/meow-rs");
+    let git_file = kernel.join(".git");
+    let revision = if git_file.exists() {
+        println!("cargo:rerun-if-changed={}", git_file.display());
+        let git = |args: &[&str]| {
+            let result = Command::new("git")
+                .arg("-C")
+                .arg(&kernel)
+                .args(args)
+                .output()
+                .ok()?;
+            if !result.status.success() {
+                return None;
+            }
+            Some(String::from_utf8(result.stdout).ok()?.trim().to_owned())
+        };
+        if let Some(head) = git(&["rev-parse", "--path-format=absolute", "--git-path", "HEAD"]) {
+            println!("cargo:rerun-if-changed={head}");
+        }
+        if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
+            if let Some(path) = git(&[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                &reference,
+            ]) {
+                println!("cargo:rerun-if-changed={path}");
+            }
+        }
+        git(&["rev-parse", "--short=7", "HEAD"])
+    } else {
+        None
+    };
+    println!(
+        "cargo:rustc-env=MEOW_RS_VERSION={}",
+        meow_rs_version(&lock, revision.as_deref())
+    );
 
     // boring-sys links libc++ statically (BORING_BSSL_RUST_CPPLIB=c++_static,
     // exported by core/build.gradle.kts) so the APK doesn't have to package
@@ -90,12 +127,8 @@ fn build_zerotier() {
     println!("cargo:rustc-link-lib=static=meowz_zerotier_core");
 }
 
-/// The meow-rs release the engine is built from, as Cargo.lock resolved it
-/// (every meow-* crate carries the release's version), so the version
-/// Settings shows follows the pin instead of a hand-edited string. A pin to
-/// a commit (`rev = "…"`) between releases reads as the version plus the
-/// commit's first seven digits: `0.28.0+cfe355a`.
-fn meow_rs_version(lock: &Path) -> String {
+/// Display both the workspace version and the exact fork submodule revision.
+fn meow_rs_version(lock: &Path, revision: Option<&str>) -> String {
     let lock = fs::read_to_string(lock).expect("reading Cargo.lock");
     let pkg = lock
         .split("[[package]]")
@@ -109,8 +142,7 @@ fn meow_rs_version(lock: &Path) -> String {
         })
     };
     let version = field("version").expect("meow-tunnel's version in Cargo.lock");
-    let rev = field("source").and_then(|source| source.split_once("?rev=")?.1.get(..7));
-    match rev {
+    match revision {
         Some(rev) => format!("{version}+{rev}"),
         None => version.to_string(),
     }

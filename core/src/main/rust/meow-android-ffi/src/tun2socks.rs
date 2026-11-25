@@ -788,7 +788,7 @@ async fn relay_udp_replies(
     reply_tx: &mpsc::Sender<UdpMsg>,
 ) {
     let mut buf = vec![0u8; 65535];
-    while let Ok((n, _from)) = session.conn.read_packet(&mut buf).await {
+    while let Ok((n, _from)) = session.read_reply(&mut buf).await {
         // Replies are activity too: refresh the NAT sweeper's idle clock.
         session.touch();
         let msg: UdpMsg = (buf[..n].to_vec(), app_dst, app_src);

@@ -132,3 +132,16 @@ test-e2e-http.sh                End-to-end test script (HTTP proxy)
 ## License
 
 [MIT](LICENSE) - Max Lv <max.c.lv@gmail.com>
+
+### Pinned MeowZ kernel
+
+Initialize the fork submodule after cloning (or after updating the app):
+
+```sh
+git submodule update --init --recursive
+```
+
+The Android FFI builds the Rust dependencies from `vendor/meow-rs`; the
+Git link pins the exact kernel revision. Treat the submodule and Cargo
+lockfile as one update. For the Android build, continue to use the app's
+documented Gradle/NDK setup.
