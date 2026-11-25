@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Quick Settings tile icon: a cat face with cut-out eyes and nose. SystemUI
-     tints tile icons per state, so only the shape (alpha) matters. -->
+<!-- SystemUI supplies the color. Keep the cheek silhouette and the
+     Meow-style slanted eyes legible in a small monochrome tile. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -9,5 +9,5 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
-        android:pathData="M3.5,3L8.6,7.3C10.3,6.7 13.7,6.7 15.4,7.3L20.5,3V12.5C20.5,17.2 16.7,21 12,21C7.3,21 3.5,17.2 3.5,12.5Z M7.4,13a1.4,1.4 0,1 0,2.8 0a1.4,1.4 0,1 0,-2.8 0Z M13.8,13a1.4,1.4 0,1 0,2.8 0a1.4,1.4 0,1 0,-2.8 0Z M10.8,16h2.4l-1.2,1.4Z" />
+        android:pathData="M2.2,11.9 C2.0,9.1 2.35,5.5 3.45,3.65 C4.1,2.6 5.3,3.1 6.45,4.15 L8.75,6.23 C10.67,5.59 13.33,5.59 15.25,6.23 L17.55,4.15 C18.7,3.1 19.9,2.6 20.55,3.65 C21.65,5.5 22.0,9.1 21.8,11.9 C22.25,13.14 22.2,14.75 21.7,16.05 C20.48,19.5 17.03,21.24 12,21.24 C6.97,21.24 3.52,19.5 2.3,16.05 C1.8,14.75 1.75,13.14 2.2,11.9 Z M6.35,11.74 C6.7,11.13 8.48,11.92 9.49,13.05 C10,13.65 9.61,14.02 9.14,13.97 C7.79,13.81 6.08,12.32 6.35,11.74 Z M17.65,11.74 C17.3,11.13 15.52,11.92 14.51,13.05 C14,13.65 14.39,14.02 14.86,13.97 C16.21,13.81 17.92,12.32 17.65,11.74 Z M10.9,15.7 C11.12,15.36 12.88,15.36 13.1,15.7 C13.31,16.02 12.34,16.94 12,16.94 C11.66,16.94 10.69,16.02 10.9,15.7 Z" />
 </vector>
