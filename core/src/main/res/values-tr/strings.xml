@@ -8,4 +8,7 @@
     <string name="service_failed">Hizmet hatası</string>
     <string name="reboot_required">Yeniden başlatma gerekli</string>
     <string name="notification_vpn_active">VPN bağlandı</string>
+    <string name="notification_compact_traffic">%1$s · Toplam %2$s</string>
+    <string name="notification_meow_totals">Meow toplamı ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">Bağlantı süresi: %1$s</string>
 </resources>

@@ -8,4 +8,7 @@
     <string name="service_failed">سرویس با خطا مواجه شد</string>
     <string name="reboot_required">راه‌اندازی مجدد دستگاه لازم است</string>
     <string name="notification_vpn_active">اتصال VPN برقرار است</string>
+    <string name="notification_compact_traffic">%1$s · مجموع %2$s</string>
+    <string name="notification_meow_totals">مجموع Meow ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">مدت اتصال %1$s</string>
 </resources>

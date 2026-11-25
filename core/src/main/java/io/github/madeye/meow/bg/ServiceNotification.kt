@@ -31,7 +31,7 @@ import timber.log.Timber
 
 /**
  * The ongoing notification that makes the VPN a foreground service: profile
- * name, live ↑/↓ speed, a Stop action, and a tap that opens the app.
+ * name, live ↑/↓ speed and session totals, a Stop action, and a tap that opens the app.
  *
  * Owned by [BaseService] and only touched from the main thread: created and
  * put in the foreground at the top of the first start, told about state
@@ -64,6 +64,8 @@ class ServiceNotification(
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var ticker: Job? = null
     private var connected = false
+    private var connectedAt = 0L
+    private var traffic: NotificationTraffic? = null
     private var profileName = ""
     private var detailsEnabled = VpnNotificationStore.default.detailsEnabled()
 
@@ -178,27 +180,46 @@ class ServiceNotification(
     private fun refreshContent() {
         builder.setContentTitle(if (detailsEnabled && profileName.isNotEmpty()) profileName
             else service.getString(R.string.app_name))
-        when {
-            !connected -> builder.setContentText(service.getText(R.string.notification_connecting))
-            detailsEnabled -> builder.setContentText(Speed.IDLE.text)
-            else -> builder.setContentText(service.getText(R.string.notification_vpn_active))
+        val snapshot = traffic
+        if (connected && detailsEnabled && snapshot != null) {
+            val totals = service.getString(
+                R.string.notification_meow_totals, snapshot.uploaded, snapshot.downloaded,
+            )
+            builder.setContentText(service.getString(
+                R.string.notification_compact_traffic, snapshot.speed, snapshot.combined,
+            ))
+                .setSubText(totals)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(
+                    "${snapshot.speed}\n$totals\n" +
+                        service.getString(R.string.notification_connected_duration, snapshot.elapsed),
+                ))
+        } else {
+            builder.setSubText(null).setStyle(null)
+            when {
+                !connected -> builder.setContentText(service.getText(R.string.notification_connecting))
+                detailsEnabled -> builder.setContentText(Speed.IDLE.text)
+                else -> builder.setContentText(service.getText(R.string.notification_vpn_active))
+            }
         }
         post()
     }
 
-    /** A restart is underway: the speed would be stale until it connects. */
+    /** A restart is underway: neither speed nor the old session totals apply. */
     fun showConnecting() {
-        builder.setContentText(service.getText(R.string.notification_connecting))
-        post()
+        connected = false
+        traffic = null
+        updateTicker()
+        refreshContent()
     }
 
     fun onStateChanged(state: BaseService.State) {
         val nowConnected = state == BaseService.State.Connected
         if (nowConnected == connected) return
         connected = nowConnected
-        // Replace "Connecting…" even if the screen is off and the ticker will
-        // not run until it comes back on.
-        if (connected) refreshContent()
+        connectedAt = if (connected) SystemClock.elapsedRealtime() else 0L
+        traffic = null
+        // Do not leave stale totals after a stop or restart.
+        refreshContent()
         updateTicker()
     }
 
@@ -225,18 +246,17 @@ class ServiceNotification(
     private suspend fun tick() {
         val meter = SpeedMeter()
         while (true) {
-            meter.sample(
-                tx = MeowCore.nativeGetUploadTraffic(),
-                rx = MeowCore.nativeGetDownloadTraffic(),
-                nowMillis = SystemClock.elapsedRealtime(),
-            )?.let(::show)
+            val tx = MeowCore.nativeGetUploadTraffic()
+            val rx = MeowCore.nativeGetDownloadTraffic()
+            val now = SystemClock.elapsedRealtime()
+            val speed = meter.sample(tx = tx, rx = rx, nowMillis = now)
+            val sample = NotificationTraffic.from(speed ?: Speed.IDLE, tx, rx, now - connectedAt)
+            if (sample != traffic) {
+                traffic = sample
+                refreshContent()
+            }
             delay(REFRESH_MILLIS)
         }
-    }
-
-    private fun show(speed: Speed) {
-        builder.setContentText(speed.text)
-        post()
     }
 
     private fun post() {

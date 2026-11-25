@@ -8,4 +8,7 @@
     <string name="service_failed">Сбой службы</string>
     <string name="reboot_required">Требуется перезагрузка</string>
     <string name="notification_vpn_active">VPN подключён</string>
+    <string name="notification_compact_traffic">%1$s · Всего %2$s</string>
+    <string name="notification_meow_totals">Всего Meow ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">Время подключения: %1$s</string>
 </resources>

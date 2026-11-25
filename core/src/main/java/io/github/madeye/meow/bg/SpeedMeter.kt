@@ -71,15 +71,41 @@ internal data class Speed(val up: Long, val down: Long) {
          * :core cannot reach — the notification and Home must not disagree
          * about the same number.
          */
-        fun rate(bytesPerSecond: Long): String {
-            var amount = abs(bytesPerSecond).toDouble()
+        fun rate(bytesPerSecond: Long): String = "${amount(bytesPerSecond)}/s"
+
+        fun amount(bytes: Long): String {
+            var amount = abs(bytes.toDouble())
             var unit = 0
             while (amount >= 1024 && unit < UNITS.lastIndex) {
                 amount /= 1024
                 unit++
             }
             val digits = if (unit == 0 || amount >= 100) 0 else 1
-            return String.format(Locale.US, "%.${digits}f %s/s", amount, UNITS[unit])
+            return String.format(Locale.US, "%.${digits}f %s", amount, UNITS[unit])
+        }
+    }
+}
+
+/** A display snapshot; changes below the displayed precision need no re-post. */
+internal data class NotificationTraffic(
+    val speed: String,
+    val uploaded: String,
+    val downloaded: String,
+    val combined: String,
+    val elapsed: String,
+) {
+    companion object {
+        fun from(speed: Speed, tx: Long, rx: Long, elapsedMillis: Long): NotificationTraffic {
+            val mins = elapsedMillis.coerceAtLeast(0) / 60_000
+            val up = tx.coerceAtLeast(0)
+            val down = rx.coerceAtLeast(0)
+            return NotificationTraffic(
+                speed.text,
+                Speed.amount(up),
+                Speed.amount(down),
+                Speed.amount(up + down.coerceAtMost(Long.MAX_VALUE - up)),
+                String.format(Locale.US, "%d:%02d", mins / 60, mins % 60),
+            )
         }
     }
 }

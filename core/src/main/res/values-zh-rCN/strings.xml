@@ -8,4 +8,7 @@
     <string name="service_failed">服务启动失败</string>
     <string name="reboot_required">需要重启设备</string>
     <string name="notification_vpn_active">VPN 已连接</string>
+    <string name="notification_compact_traffic">%1$s · 累计 %2$s</string>
+    <string name="notification_meow_totals">Meow 累计 ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">已连接 %1$s</string>
 </resources>

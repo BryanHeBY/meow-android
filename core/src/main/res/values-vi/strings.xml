@@ -8,4 +8,7 @@
     <string name="service_failed">Dịch vụ gặp lỗi</string>
     <string name="reboot_required">Cần khởi động lại</string>
     <string name="notification_vpn_active">Đã kết nối VPN</string>
+    <string name="notification_compact_traffic">%1$s · Tổng %2$s</string>
+    <string name="notification_meow_totals">Tổng Meow ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">Thời gian kết nối: %1$s</string>
 </resources>

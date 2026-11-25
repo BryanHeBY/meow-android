@@ -8,4 +8,7 @@
     <string name="service_failed">ဝန်ဆောင်မှု မအောင်မြင်ပါ</string>
     <string name="reboot_required">ပြန်လည်စတင်ရန် လိုအပ်သည်</string>
     <string name="notification_vpn_active">VPN ချိတ်ဆက်ပြီး</string>
+    <string name="notification_compact_traffic">%1$s · စုစုပေါင်း %2$s</string>
+    <string name="notification_meow_totals">Meow စုစုပေါင်း ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">ချိတ်ဆက်ချိန် %1$s</string>
 </resources>

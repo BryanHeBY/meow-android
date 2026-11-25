@@ -8,4 +8,7 @@
     <string name="service_failed">Service failed</string>
     <string name="reboot_required">Reboot required</string>
     <string name="notification_vpn_active">VPN connected</string>
+    <string name="notification_compact_traffic">%1$s · Total %2$s</string>
+    <string name="notification_meow_totals">Meow total ↑ %1$s  ↓ %2$s</string>
+    <string name="notification_connected_duration">Connected %1$s</string>
 </resources>
