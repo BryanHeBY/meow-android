@@ -4,6 +4,7 @@
 //! This module has no VPN, SDK, DNS or socket dependencies.
 
 pub mod apps;
+pub mod membership;
 mod packet;
 pub use packet::PacketError;
 
