@@ -128,6 +128,8 @@ pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
         fd,
         #[cfg(target_os = "android")]
         None,
+        #[cfg(target_os = "android")]
+        None,
     )
 }
 
@@ -135,11 +137,19 @@ pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
 type Overlay = Option<(std::path::PathBuf, crate::zerotier_config::Config)>;
 
 #[cfg(target_os = "android")]
-pub fn start_android(fd: i32, config: Overlay) -> Result<(), String> {
-    start_inner(fd, config)
+pub fn start_android(
+    fd: i32,
+    config: Overlay,
+    report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
+) -> Result<(), String> {
+    start_inner(fd, config, report_exit)
 }
 
-fn start_inner(fd: i32, #[cfg(target_os = "android")] overlay: Overlay) -> Result<(), String> {
+fn start_inner(
+    fd: i32,
+    #[cfg(target_os = "android")] overlay: Overlay,
+    #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
+) -> Result<(), String> {
     if TUN2SOCKS_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -157,17 +167,31 @@ fn start_inner(fd: i32, #[cfg(target_os = "android")] overlay: Overlay) -> Resul
 
     let rt = crate::get_runtime();
     let handle = rt.spawn(async move {
-        if let Err(e) = run_tun2socks(
+        let run = run_tun2socks(
             fd,
             #[cfg(target_os = "android")]
             overlay,
-        )
-        .await
-        {
-            logging::bridge_log(&format!("tun2socks error: {}", e));
-        }
-        TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+        );
+        let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(run)).await;
+        let reason = match result {
+            Ok(Ok(())) => 1, // unexpectedly completed without an explicit shutdown
+            Ok(Err(e)) => {
+                logging::bridge_log(&format!("tun2socks error: {e}"));
+                2
+            }
+            Err(_) => {
+                logging::bridge_log("tun2socks supervisor panicked");
+                3
+            }
+        };
+        let requested = TUN2SOCKS_STOP_REQUESTED.swap(false, Ordering::SeqCst);
         TUN2SOCKS_ACTIVE.store(false, Ordering::SeqCst);
+        #[cfg(target_os = "android")]
+        if let Some(report) = report_exit.filter(|_| !requested || reason != 1) {
+            report(reason);
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = (requested, reason);
         logging::bridge_log("tun2socks exited");
     });
     *TUN2SOCKS_TASK.lock() = Some(handle);
@@ -376,7 +400,7 @@ async fn run_tun2socks(
         let stopped = TUN2SOCKS_STOP_NOTIFY.notified();
         tokio::pin!(stopped);
         if TUN2SOCKS_STOP_REQUESTED.load(Ordering::SeqCst) {
-            return;
+            return Ok(());
         }
         let mut read_buf = vec![0u8; 65535];
         let ingress = ClashIngress {
@@ -414,15 +438,14 @@ async fn run_tun2socks(
                 )
             });
 
-        'reader: loop {
+        let result = 'reader: loop {
             let mut ready = tokio::select! {
                 biased;
-                _ = &mut stopped => break,
+                _ = &mut stopped => break Ok(()),
                 ready = tun.readable() => match ready {
                     Ok(ready) => ready,
                     Err(e) => {
-                        logging::bridge_log(&format!("tun2socks: TUN poll error: {}", e));
-                        break;
+                        break Err(e);
                     }
                 },
             };
@@ -432,12 +455,19 @@ async fn run_tun2socks(
             for _ in 0..64 {
                 let n =
                     unsafe { libc::read(fd, read_buf.as_mut_ptr() as *mut c_void, read_buf.len()) };
-                if n <= 0 {
-                    // EAGAIN: drained. Any other failure also waits for the
-                    // next packet rather than retrying at once, which would
-                    // spin.
-                    ready.clear_ready();
-                    break;
+                if n == 0 {
+                    break 'reader Err(io::ErrorKind::UnexpectedEof.into());
+                }
+                if n < 0 {
+                    let error = io::Error::last_os_error();
+                    match error.kind() {
+                        io::ErrorKind::WouldBlock => {
+                            ready.clear_ready();
+                            break;
+                        }
+                        io::ErrorKind::Interrupted => continue,
+                        _ => break 'reader Err(error),
+                    }
                 }
                 let n = n as usize;
                 let ip_data = &read_buf[..n];
@@ -483,18 +513,19 @@ async fn run_tun2socks(
                     continue;
                 }
                 if !send_ingress(&ingress.stack, ip_data.to_vec(), &mut stopped).await {
-                    break 'reader;
+                    break 'reader Ok(());
                 }
             }
             tokio::task::yield_now().await;
-        }
+        };
         #[cfg(target_os = "android")]
         if let Some(lanes) = owner_lanes {
             lanes.shutdown().await;
         }
+        result
     });
 
-    let _ = tun_reader_handle.await;
+    let reader = tun_reader_handle.await;
 
     abort_flow_tasks(&flow_tasks).await;
     drop(udp_reply_tx);
@@ -510,7 +541,7 @@ async fn run_tun2socks(
         overlay_stats.summary()
     ));
     logging::bridge_log("tun2socks: exiting");
-    Ok(())
+    reader.map_err(io::Error::other)?
 }
 
 #[cfg(target_os = "android")]
@@ -1473,6 +1504,32 @@ mod tests {
             from_the_profile_nameserver(&reply[28..]),
             "the answer did not come from the profile's nameserver"
         );
+    }
+
+    #[test]
+    fn a_closed_tun_peer_returns_an_error_after_cleanup() {
+        use std::os::fd::AsRawFd;
+        let _serial = SERIAL.lock();
+        // Match start_inner's initial state; earlier tests may have called stop().
+        TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+        let (socket, peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        set_nonblocking(socket.as_raw_fd()).unwrap();
+        drop(peer);
+        let error = crate::get_runtime()
+            .block_on(async {
+                tokio::time::timeout(
+                    Duration::from_secs(2),
+                    run_tun2socks(
+                        socket.as_raw_fd(),
+                        #[cfg(target_os = "android")]
+                        None,
+                    ),
+                )
+                .await
+            })
+            .expect("closed reader must not leave background tasks waiting")
+            .expect_err("EOF must be observable as an error");
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
     }
 
     /// With the reader asleep on an idle fd, stop() has to wake it rather

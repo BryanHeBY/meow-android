@@ -11,6 +11,9 @@ import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.Core
+import io.github.madeye.meow.diagnostics.FaultDiagnostics
+import io.github.madeye.meow.diagnostics.FaultKind
+import io.github.madeye.meow.diagnostics.FaultProcess
 import io.github.madeye.meow.preference.DataStore
 import io.github.madeye.meow.preference.PerAppConfigStore
 import io.github.madeye.meow.repo.OverlaySettingsRepository
@@ -88,6 +91,12 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     override fun onBind(intent: Intent) = when (intent.action) {
         SERVICE_INTERFACE -> super<BaseVpnService>.onBind(intent)
         else -> super<BaseService.Interface>.onBind(intent)
+    }
+
+    /** Native worker stopped without a shutdown request. Do not forward exception text. */
+    @androidx.annotation.Keep
+    fun recordUnexpectedTunExit(code: Int) {
+        FaultDiagnostics.record(FaultProcess.VPN, FaultKind.TUN_EXIT, code)
     }
 
     override fun onRevoke() = stopRunner()

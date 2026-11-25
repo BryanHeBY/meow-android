@@ -392,4 +392,23 @@
     <string name="zt_apps_scope">Chỉ ảnh hưởng đến các tuyến ZeroTier, không thay đổi quy tắc Meow.</string>
     <string name="zt_apps_show_system">Hiện ứng dụng hệ thống</string>
     <string name="zt_apps_none_allowed">Chưa chọn ứng dụng: không ứng dụng nào có thể dùng ZeroTier.</string>
+    <string name="fault_diagnostics_title">Chẩn đoán sự cố</string>
+    <string name="fault_diagnostics_local">Thiết bị lưu tối đa 128 sự kiện và không tự động tải lên.</string>
+    <string name="fault_diagnostics_legacy">Android trước phiên bản 11 không có lịch sử thoát tiến trình.</string>
+    <string name="fault_diagnostics_refresh">Làm mới</string>
+    <string name="fault_diagnostics_export">Chia sẻ</string>
+    <string name="fault_diagnostics_clear">Xóa</string>
+    <string name="fault_diagnostics_read_failed">Không thể đọc nhật ký chẩn đoán.</string>
+    <string name="fault_diagnostics_empty">Chưa ghi nhận sự kiện nào.</string>
+    <string name="fault_diagnostics_code">Mã: %1$d</string>
+    <string name="fault_diagnostics_clear_title">Xóa nhật ký chẩn đoán trên thiết bị?</string>
+    <string name="fault_diagnostics_jvm">Sự cố Java hoặc Kotlin</string>
+    <string name="fault_diagnostics_native">Sự cố mã gốc</string>
+    <string name="fault_diagnostics_anr">Ứng dụng không phản hồi</string>
+    <string name="fault_diagnostics_memory">Tiến trình bị dừng do thiếu bộ nhớ</string>
+    <string name="fault_diagnostics_exit">Tiến trình đã thoát</string>
+    <string name="fault_diagnostics_binder">Mất kết nối với dịch vụ VPN</string>
+    <string name="fault_diagnostics_tun">Chuyển tiếp TUN dừng bất ngờ</string>
+    <string name="fault_diagnostics_network">Mạng nền đã thay đổi</string>
+    <string name="fault_diagnostics_groups">Không thể làm mới nhóm proxy</string>
 </resources>

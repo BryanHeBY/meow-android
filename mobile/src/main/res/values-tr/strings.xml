@@ -402,4 +402,23 @@
     <string name="zt_apps_scope">Yalnızca ZeroTier rotalarını etkiler; Meow kurallarını değiştirmez.</string>
     <string name="zt_apps_show_system">Sistem uygulamalarını göster</string>
     <string name="zt_apps_none_allowed">Uygulama seçilmedi: hiçbir uygulama ZeroTier kullanamaz.</string>
+    <string name="fault_diagnostics_title">Hata tanılama</string>
+    <string name="fault_diagnostics_local">Bu cihazda en fazla 128 olay saklanır. Otomatik yükleme yapılmaz.</string>
+    <string name="fault_diagnostics_legacy">Android 11 öncesi sürümlerde işlem çıkışı geçmişi yoktur.</string>
+    <string name="fault_diagnostics_refresh">Yenile</string>
+    <string name="fault_diagnostics_export">Paylaş</string>
+    <string name="fault_diagnostics_clear">Temizle</string>
+    <string name="fault_diagnostics_read_failed">Tanılama kayıtları okunamadı.</string>
+    <string name="fault_diagnostics_empty">Kayıtlı olay yok.</string>
+    <string name="fault_diagnostics_code">Kod: %1$d</string>
+    <string name="fault_diagnostics_clear_title">Yerel tanılama kayıtları temizlensin mi?</string>
+    <string name="fault_diagnostics_jvm">Java veya Kotlin çökmesi</string>
+    <string name="fault_diagnostics_native">Yerel kod çökmesi</string>
+    <string name="fault_diagnostics_anr">Uygulama yanıt vermiyor</string>
+    <string name="fault_diagnostics_memory">Yetersiz bellek nedeniyle işlem sonlandırıldı</string>
+    <string name="fault_diagnostics_exit">İşlem sonlandı</string>
+    <string name="fault_diagnostics_binder">VPN hizmeti bağlantısı kesildi</string>
+    <string name="fault_diagnostics_tun">TUN iletimi beklenmedik şekilde durdu</string>
+    <string name="fault_diagnostics_network">Alt ağ değişti</string>
+    <string name="fault_diagnostics_groups">Proxy grupları yenilenemedi</string>
 </resources>

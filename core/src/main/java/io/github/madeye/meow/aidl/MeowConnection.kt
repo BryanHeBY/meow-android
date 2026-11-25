@@ -7,6 +7,9 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.diagnostics.FaultDiagnostics
+import io.github.madeye.meow.diagnostics.FaultKind
+import io.github.madeye.meow.diagnostics.FaultProcess
 import java.io.IOException
 import timber.log.Timber
 
@@ -81,6 +84,7 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
 
     @Synchronized
     override fun onServiceDisconnected(name: ComponentName?) {
+        if (bindContext != null) FaultDiagnostics.record(FaultProcess.UI, FaultKind.VPN_BINDER_LOST)
         callbackRegistered = false
         service = null
         bound = false

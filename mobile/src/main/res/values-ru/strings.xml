@@ -422,4 +422,23 @@
     <string name="zt_apps_scope">Настройка касается только маршрутов ZeroTier и не меняет правила Meow.</string>
     <string name="zt_apps_show_system">Показывать системные приложения</string>
     <string name="zt_apps_none_allowed">Приложения не выбраны: ни одно не может использовать ZeroTier.</string>
+    <string name="fault_diagnostics_title">Диагностика сбоев</string>
+    <string name="fault_diagnostics_local">На устройстве хранится до 128 событий. Автоматической отправки нет.</string>
+    <string name="fault_diagnostics_legacy">В версиях Android ниже 11 история завершения процессов недоступна.</string>
+    <string name="fault_diagnostics_refresh">Обновить</string>
+    <string name="fault_diagnostics_export">Поделиться</string>
+    <string name="fault_diagnostics_clear">Очистить</string>
+    <string name="fault_diagnostics_read_failed">Не удалось прочитать журнал диагностики.</string>
+    <string name="fault_diagnostics_empty">Нет записанных событий.</string>
+    <string name="fault_diagnostics_code">Код: %1$d</string>
+    <string name="fault_diagnostics_clear_title">Очистить локальный журнал диагностики?</string>
+    <string name="fault_diagnostics_jvm">Сбой Java или Kotlin</string>
+    <string name="fault_diagnostics_native">Сбой нативного кода</string>
+    <string name="fault_diagnostics_anr">Приложение не отвечает</string>
+    <string name="fault_diagnostics_memory">Процесс завершён из-за нехватки памяти</string>
+    <string name="fault_diagnostics_exit">Процесс завершён</string>
+    <string name="fault_diagnostics_binder">Связь со службой VPN потеряна</string>
+    <string name="fault_diagnostics_tun">Пересылка TUN неожиданно остановилась</string>
+    <string name="fault_diagnostics_network">Базовая сеть изменилась</string>
+    <string name="fault_diagnostics_groups">Не удалось обновить группы прокси</string>
 </resources>

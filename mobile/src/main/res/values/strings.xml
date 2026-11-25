@@ -413,4 +413,23 @@
     <string name="zt_apps_scope">This affects only traffic eligible for ZeroTier routes, not Meow rules.</string>
     <string name="zt_apps_show_system">Show system apps</string>
     <string name="zt_apps_none_allowed">No apps selected: none can use ZeroTier.</string>
+    <string name="fault_diagnostics_title">Fault diagnostics</string>
+    <string name="fault_diagnostics_local">Up to 128 events are kept on this device. Nothing is uploaded automatically.</string>
+    <string name="fault_diagnostics_legacy">Android versions below 11 do not provide process exit history.</string>
+    <string name="fault_diagnostics_refresh">Refresh</string>
+    <string name="fault_diagnostics_export">Share</string>
+    <string name="fault_diagnostics_clear">Clear</string>
+    <string name="fault_diagnostics_read_failed">Could not read fault diagnostics.</string>
+    <string name="fault_diagnostics_empty">No fault events recorded.</string>
+    <string name="fault_diagnostics_code">Code: %1$d</string>
+    <string name="fault_diagnostics_clear_title">Clear local fault diagnostics?</string>
+    <string name="fault_diagnostics_jvm">Java or Kotlin crash</string>
+    <string name="fault_diagnostics_native">Native crash</string>
+    <string name="fault_diagnostics_anr">App not responding</string>
+    <string name="fault_diagnostics_memory">Process killed for low memory</string>
+    <string name="fault_diagnostics_exit">Process exited</string>
+    <string name="fault_diagnostics_binder">VPN service connection lost</string>
+    <string name="fault_diagnostics_tun">TUN forwarding stopped unexpectedly</string>
+    <string name="fault_diagnostics_network">Underlying network changed</string>
+    <string name="fault_diagnostics_groups">Proxy groups could not refresh</string>
 </resources>

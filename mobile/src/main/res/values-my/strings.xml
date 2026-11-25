@@ -397,4 +397,23 @@
     <string name="zt_apps_scope">ZeroTier လမ်းကြောင်းများအတွက်သာ ဖြစ်ပြီး Meow စည်းမျဉ်းများ မပြောင်းပါ။</string>
     <string name="zt_apps_show_system">စနစ်အက်ပ်များ ပြရန်</string>
     <string name="zt_apps_none_allowed">အက်ပ်မရွေးထားပါ။ မည်သည့်အက်ပ်မှ ZeroTier မသုံးနိုင်ပါ။</string>
+    <string name="fault_diagnostics_title">ချို့ယွင်းချက် စစ်ဆေးခြင်း</string>
+    <string name="fault_diagnostics_local">စက်တွင် ဖြစ်ရပ် ၁၂၈ ခုအထိ သိမ်းထားပြီး အလိုအလျောက် မပို့ပါ။</string>
+    <string name="fault_diagnostics_legacy">Android 11 မတိုင်မီ ဗားရှင်းများတွင် လုပ်ငန်းစဉ် ပိတ်သည့် မှတ်တမ်းမရှိပါ။</string>
+    <string name="fault_diagnostics_refresh">ပြန်လည်ရယူရန်</string>
+    <string name="fault_diagnostics_export">မျှဝေရန်</string>
+    <string name="fault_diagnostics_clear">ရှင်းရန်</string>
+    <string name="fault_diagnostics_read_failed">စစ်ဆေးမှုမှတ်တမ်းကို ဖတ်မရပါ။</string>
+    <string name="fault_diagnostics_empty">ဖြစ်ရပ်မှတ်တမ်း မရှိပါ။</string>
+    <string name="fault_diagnostics_code">ကုဒ်: %1$d</string>
+    <string name="fault_diagnostics_clear_title">စက်ရှိ စစ်ဆေးမှုမှတ်တမ်းကို ရှင်းမလား။</string>
+    <string name="fault_diagnostics_jvm">Java သို့မဟုတ် Kotlin ပျက်ကျခြင်း</string>
+    <string name="fault_diagnostics_native">မူလကုဒ် ပျက်ကျခြင်း</string>
+    <string name="fault_diagnostics_anr">အက်ပ် မတုံ့ပြန်ပါ</string>
+    <string name="fault_diagnostics_memory">မှတ်ဉာဏ်မလုံလောက်၍ လုပ်ငန်းစဉ် ပိတ်သွားသည်</string>
+    <string name="fault_diagnostics_exit">လုပ်ငန်းစဉ် ပိတ်သွားသည်</string>
+    <string name="fault_diagnostics_binder">VPN ဝန်ဆောင်မှု ချိတ်ဆက်မှုပြတ်သွားသည်</string>
+    <string name="fault_diagnostics_tun">TUN ပို့ဆောင်မှု မမျှော်လင့်ဘဲ ရပ်သွားသည်</string>
+    <string name="fault_diagnostics_network">အခြေခံကွန်ရက် ပြောင်းလဲသွားသည်</string>
+    <string name="fault_diagnostics_groups">ပရောက်စီအုပ်စုများကို အသစ်ပြန်ယူမရပါ</string>
 </resources>

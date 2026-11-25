@@ -454,4 +454,23 @@
     <string name="zt_apps_scope">يؤثر هذا في مسارات ZeroTier فقط، ولا يغيّر قواعد Meow.</string>
     <string name="zt_apps_show_system">عرض تطبيقات النظام</string>
     <string name="zt_apps_none_allowed">لم تُحدد تطبيقات: لا يمكن لأي تطبيق استخدام ZeroTier.</string>
+    <string name="fault_diagnostics_title">تشخيص الأعطال</string>
+    <string name="fault_diagnostics_local">يُحفظ ما يصل إلى 128 حدثًا على هذا الجهاز دون رفع تلقائي.</string>
+    <string name="fault_diagnostics_legacy">لا تعرض إصدارات Android الأقدم من 11 سجل خروج العمليات.</string>
+    <string name="fault_diagnostics_refresh">تحديث</string>
+    <string name="fault_diagnostics_export">مشاركة</string>
+    <string name="fault_diagnostics_clear">مسح</string>
+    <string name="fault_diagnostics_read_failed">تعذرت قراءة تشخيص الأعطال.</string>
+    <string name="fault_diagnostics_empty">لا توجد أحداث مسجلة.</string>
+    <string name="fault_diagnostics_code">الرمز: %1$d</string>
+    <string name="fault_diagnostics_clear_title">هل تريد مسح سجل التشخيص المحلي؟</string>
+    <string name="fault_diagnostics_jvm">تعطل Java أو Kotlin</string>
+    <string name="fault_diagnostics_native">تعطل التعليمات الأصلية</string>
+    <string name="fault_diagnostics_anr">التطبيق لا يستجيب</string>
+    <string name="fault_diagnostics_memory">أُغلقت العملية بسبب نقص الذاكرة</string>
+    <string name="fault_diagnostics_exit">انتهت العملية</string>
+    <string name="fault_diagnostics_binder">انقطع اتصال خدمة VPN</string>
+    <string name="fault_diagnostics_tun">توقف تمرير TUN بشكل غير متوقع</string>
+    <string name="fault_diagnostics_network">تغيرت الشبكة الأساسية</string>
+    <string name="fault_diagnostics_groups">تعذر تحديث مجموعات الوكيل</string>
 </resources>

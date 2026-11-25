@@ -68,6 +68,8 @@ sealed interface Dest {
 
     @Serializable data object Logs : Dest
 
+    @Serializable data object FaultDiagnostics : Dest
+
     @Serializable data object Dns : Dest
 
     @Serializable data object Statistics : Dest

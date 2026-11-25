@@ -701,7 +701,28 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
             .map_err(|e| e.to_string())?
             .into();
         let config = zerotier_config::parse(json.as_bytes())?;
-        tun2socks::start_android(fd, config.map(|config| (root.into(), config)))
+        // Capture this exact service instance, not a process-global pointer
+        // that a newer session can replace while the old task exits.
+        let report_exit = env.get_java_vm().ok().and_then(|jvm| {
+            env.new_global_ref(&vpn_service).ok().map(|service| {
+                Box::new(move |code: i32| {
+                    if let Ok(mut env) = jvm.attach_current_thread() {
+                        if env
+                            .call_method(
+                                service.as_obj(),
+                                "recordUnexpectedTunExit",
+                                "(I)V",
+                                &[jni::objects::JValue::Int(code)],
+                            )
+                            .is_err()
+                        {
+                            let _ = env.exception_clear();
+                        }
+                    }
+                }) as Box<dyn FnOnce(i32) + Send>
+            })
+        });
+        tun2socks::start_android(fd, config.map(|config| (root.into(), config)), report_exit)
     })();
     #[cfg(not(target_os = "android"))]
     let start = {

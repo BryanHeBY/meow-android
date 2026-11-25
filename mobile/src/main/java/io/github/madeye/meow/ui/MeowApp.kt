@@ -247,6 +247,7 @@ private fun MeowNavHost(
                 onDns = { navController.navigate(Dest.Dns) },
                 onStatistics = { navController.navigate(Dest.Statistics) },
                 onLogbook = { navController.navigate(Dest.Logbook) },
+                onFaultDiagnostics = { navController.navigate(Dest.FaultDiagnostics) },
                 bottomBar = { BottomBar(navController, onTab) },
             )
         }
@@ -331,6 +332,14 @@ private fun MeowNavHost(
         composable<Dest.Logs> { LogsRoute(onBack = navController::popBackStack) }
         composable<Dest.Dns> { DnsRoute(onBack = navController::popBackStack) }
         composable<Dest.Statistics> { StatisticsRoute(onBack = navController::popBackStack) }
+        composable<Dest.FaultDiagnostics> {
+            MeowScaffold(
+                title = stringResource(R.string.fault_diagnostics_title),
+                navigationIcon = { BackButton(navController::popBackStack) },
+            ) { padding ->
+                io.github.madeye.meow.ui.screens.diagnostics.FaultDiagnosticsScreen(padding)
+            }
+        }
         composable<Dest.Logbook> { LogbookRoute(onBack = navController::popBackStack) }
         composable<Dest.ProxyDetail> { ProxyDetailRoute(onBack = navController::popBackStack) }
     }
@@ -752,6 +761,7 @@ private fun UtilityRoute(
     onDns: () -> Unit,
     onStatistics: () -> Unit,
     onLogbook: () -> Unit,
+    onFaultDiagnostics: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     val vpnState by AppGraph.vpn.state.collectAsStateWithLifecycle()
@@ -766,6 +776,7 @@ private fun UtilityRoute(
             onStatistics = onStatistics,
             onLogs = onLogs,
             onLogbook = onLogbook,
+            onFaultDiagnostics = onFaultDiagnostics,
         )
     }
 }

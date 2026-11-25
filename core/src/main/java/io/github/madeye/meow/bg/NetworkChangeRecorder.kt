@@ -9,6 +9,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.diagnostics.FaultDiagnostics
+import io.github.madeye.meow.diagnostics.FaultKind
+import io.github.madeye.meow.diagnostics.FaultProcess
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -131,6 +134,7 @@ internal class NetworkChangeRecorder(context: Context) {
         }
         if (snapshot == last) return
         last = snapshot
+        FaultDiagnostics.record(FaultProcess.VPN, FaultKind.NETWORK_CHANGE, if (snapshot.warning) 1 else 0)
         val message = snapshot.message
         Timber.i("NetworkChangeRecorder: $message")
         val fields = snapshot.fields(deviceIdle = power.isDeviceIdleMode)

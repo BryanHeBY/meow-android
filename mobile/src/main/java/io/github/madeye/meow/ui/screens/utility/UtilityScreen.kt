@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Pets
@@ -45,6 +46,7 @@ fun UtilityScreen(
     onStatistics: () -> Unit,
     onLogs: () -> Unit,
     onLogbook: () -> Unit,
+    onFaultDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val offlineHint = stringResource(R.string.settings_engine_offline)
@@ -108,6 +110,13 @@ fun UtilityScreen(
                 icon = Icons.Filled.Pets,
                 onClick = onLogbook,
                 modifier = Modifier.testTag("utility_logbook"),
+            )
+            HorizontalDivider(color = MaterialTheme.meow.border)
+            NavRow(
+                title = stringResource(R.string.fault_diagnostics_title),
+                icon = Icons.Filled.BugReport,
+                onClick = onFaultDiagnostics,
+                modifier = Modifier.testTag("utility_fault_diagnostics"),
             )
         }
     }

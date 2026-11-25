@@ -9,6 +9,9 @@ import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.RouteMode
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.diagnostics.FaultDiagnostics
+import io.github.madeye.meow.diagnostics.FaultKind
+import io.github.madeye.meow.diagnostics.FaultProcess
 import io.github.madeye.meow.repo.ProfileRepository
 import io.github.madeye.meow.ui.screens.home.RouteChanges
 import io.github.madeye.meow.vpn.VpnStateRepository
@@ -229,6 +232,14 @@ class ProxyGroupsViewModel(
                 }
             } catch (e: MeowApiException) {
                 Timber.w(e, "loading proxy groups failed")
+                if (!refresh.snapshot.failed) {
+                    val code = when (e) {
+                        is MeowApiException.Http -> e.code
+                        is MeowApiException.Decode -> 2
+                        is MeowApiException.Unreachable -> 1
+                    }
+                    FaultDiagnostics.record(FaultProcess.UI, FaultKind.PROXY_GROUP_REFRESH, code)
+                }
                 null
             }
             if (vpn.state.value == BaseService.State.Connected && selectedId.value == session &&

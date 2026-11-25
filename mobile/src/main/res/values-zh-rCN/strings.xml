@@ -392,4 +392,23 @@
     <string name="zt_apps_scope">只限制哪些应用可使用 ZeroTier 路由，不改变 Meow 的规则。</string>
     <string name="zt_apps_show_system">显示系统应用</string>
     <string name="zt_apps_none_allowed">未选择应用：所有应用都不走 ZeroTier。</string>
+    <string name="fault_diagnostics_title">故障诊断</string>
+    <string name="fault_diagnostics_local">最多保留 128 条本机记录，不会自动上传。</string>
+    <string name="fault_diagnostics_legacy">Android 11 以下无法读取系统进程退出记录。</string>
+    <string name="fault_diagnostics_refresh">刷新</string>
+    <string name="fault_diagnostics_export">分享</string>
+    <string name="fault_diagnostics_clear">清除</string>
+    <string name="fault_diagnostics_read_failed">无法读取故障诊断。</string>
+    <string name="fault_diagnostics_empty">暂无故障记录。</string>
+    <string name="fault_diagnostics_code">代码：%1$d</string>
+    <string name="fault_diagnostics_clear_title">清除本机故障诊断记录？</string>
+    <string name="fault_diagnostics_jvm">Java 或 Kotlin 崩溃</string>
+    <string name="fault_diagnostics_native">原生代码崩溃</string>
+    <string name="fault_diagnostics_anr">应用无响应</string>
+    <string name="fault_diagnostics_memory">内存不足导致进程退出</string>
+    <string name="fault_diagnostics_exit">进程退出</string>
+    <string name="fault_diagnostics_binder">VPN 服务连接断开</string>
+    <string name="fault_diagnostics_tun">TUN 转发异常退出</string>
+    <string name="fault_diagnostics_network">底层网络变化</string>
+    <string name="fault_diagnostics_groups">代理分组刷新失败</string>
 </resources>
