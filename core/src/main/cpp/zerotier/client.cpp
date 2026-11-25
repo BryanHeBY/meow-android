@@ -371,6 +371,12 @@ size_t mzt_dns_ipv4(const mzt_client *c, uint64_t network, uint32_t *out, size_t
     ZT_Node_freeQueryResult(c->node, const_cast<ZT_VirtualNetworkConfig *>(view));
     return count;
 }
+void mzt_poll_state(const mzt_client *c, int *ipv4, int *ipv6, int64_t *deadline) {
+    *ipv4 = c->ipv4;
+    *ipv6 = c->ipv6;
+    *deadline = c->next_deadline;
+}
+
 int mzt_step(mzt_client *c, int64_t now) {
     if (c->storage_error) return -1;
     std::array<uint8_t, 4096> packet{};

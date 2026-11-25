@@ -67,6 +67,9 @@ int mzt_deorbit(mzt_client *client, uint64_t world);
 int mzt_network(const mzt_client *client, uint64_t network, mzt_network_view *result);
 size_t mzt_routes(const mzt_client *client, uint64_t network, mzt_route *out, size_t capacity);
 size_t mzt_dns_ipv4(const mzt_client *client, uint64_t network, uint32_t *out, size_t capacity);
+/* Borrowed, nonblocking UDP sockets and SDK deadline, only on the owner thread. */
+void mzt_poll_state(const mzt_client *client, int *ipv4, int *ipv6, int64_t *deadline);
+
 /* Drain a bounded amount of UDP I/O and service deadlines. Zero means OK. */
 int mzt_step(mzt_client *client, int64_t now);
 int mzt_ipv4_frame(mzt_client *client, int64_t now, uint64_t network, uint64_t from,

@@ -126,6 +126,18 @@ impl Bridge {
         Some(self.arp_request(next_hop))
     }
 
+    /// Earliest useful retry, excluding entries that expire before it.
+    pub fn next_arp_retry(&self, now: Instant) -> Option<Instant> {
+        self.pending
+            .values()
+            .filter_map(|pending| {
+                let retry = pending.last_request + ARP_RETRY;
+                (retry < pending.created + ARP_WAIT && now < pending.created + ARP_WAIT)
+                    .then_some(retry)
+            })
+            .min()
+    }
+
     /// Retry discovery without depending on the application to send again.
     pub fn retry_arp(&mut self, now: Instant) -> Vec<Ethernet> {
         let targets: Vec<_> = self
@@ -322,6 +334,8 @@ mod tests {
             .transmit(udp(TUN, PEER, [1234, 443]), None, now)
             .is_some());
         assert!(bridge.retry_arp(now).is_empty());
+        assert_eq!(bridge.next_arp_retry(now), Some(now + ARP_RETRY));
+        assert!(bridge.next_arp_retry(now + ARP_WAIT).is_none());
         let retry = bridge.retry_arp(now + ARP_RETRY);
         assert_eq!(retry.len(), 1);
         assert_eq!(Arp::parse(&retry[0].payload).unwrap().target, PEER);

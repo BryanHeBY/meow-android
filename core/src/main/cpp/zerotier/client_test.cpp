@@ -43,6 +43,14 @@ int main() {
     Protector permitted{true};
     auto *client = mzt_open(tmp, protect, nullptr, &permitted, now);
     require(client && permitted.calls >= 1, "create node with protected UDP");
+    int ipv4 = -1, ipv6 = -1;
+    int64_t deadline = -1;
+    mzt_poll_state(client, &ipv4, &ipv6, &deadline);
+    require(ipv4 >= 0 && deadline == 0, "expose the initial protected UDP and startup deadline");
+    require((fcntl(ipv4, F_GETFL) & O_NONBLOCK) != 0, "borrowed UDP descriptor must not block");
+    if (ipv6 >= 0) {
+        require((fcntl(ipv6, F_GETFL) & O_NONBLOCK) != 0, "borrowed IPv6 UDP descriptor must not block");
+    }
     constexpr uint64_t moon_id = 0x123456789a;
     ZeroTier::Identity identity;
     identity.generate();

@@ -33,6 +33,8 @@ mod tun2socks;
 mod zerotier;
 #[cfg(any(test, target_os = "android"))]
 mod zerotier_config;
+#[cfg(any(target_os = "android", all(test, target_os = "linux")))]
+mod zerotier_wake;
 #[cfg(target_os = "android")]
 mod zerotier_worker;
 

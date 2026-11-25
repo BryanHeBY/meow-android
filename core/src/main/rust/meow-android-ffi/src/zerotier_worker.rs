@@ -2,6 +2,7 @@
 use crate::{
     zerotier::{Client, Frame},
     zerotier_config::{Config, DnsMode},
+    zerotier_wake::Wake,
 };
 use meow_overlay_policy::{
     bridge::{Bridge, Ethernet},
@@ -17,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, RecvTimeoutError, SyncSender},
+        mpsc::{self, SyncSender, TryRecvError},
         Arc, RwLock,
     },
     thread::{self, JoinHandle},
@@ -29,7 +30,7 @@ const MAX_DNS_FLOWS: usize = 128;
 const TUN_IP: Ipv4Addr = Ipv4Addr::new(172, 19, 0, 1);
 // ZT_VirtualNetworkStatus::ZT_NETWORK_STATUS_OK in the pinned SDK.
 const NETWORK_STATUS_OK: i32 = 1;
-const IDLE_WAKE: Duration = Duration::from_millis(60);
+const MAINTENANCE: Duration = Duration::from_secs(1);
 const MAX_FRAME_BATCH: usize = 128;
 
 #[derive(Clone, Serialize, PartialEq, Eq)]
@@ -81,6 +82,7 @@ pub(crate) struct Worker {
     managed: ManagedPolicy,
     quit: Arc<AtomicBool>,
     packets: SyncSender<Vec<u8>>,
+    wake: Arc<Wake>,
     task: Option<JoinHandle<()>>,
 }
 
@@ -95,11 +97,13 @@ impl Worker {
         let quit = Arc::new(AtomicBool::new(false));
         let managed = Arc::new(RwLock::new(OverlayPolicy::membership_only()));
         let (packets, incoming) = mpsc::sync_channel(128);
+        let wake = Arc::new(Wake::new()?);
+        let worker_wake = Arc::clone(&wake);
         let thread_state = (config.clone(), ready.clone(), quit.clone(), managed.clone());
         let task = thread::Builder::new()
             .name("meowz-zerotier".into())
             .spawn(move || {
-                run(thread_state, &root, incoming, &tun_out);
+                run(thread_state, &root, incoming, &tun_out, &worker_wake);
             })?;
         Ok(Self {
             config,
@@ -107,6 +111,7 @@ impl Worker {
             managed,
             quit,
             packets,
+            wake,
             task: Some(task),
         })
     }
@@ -156,7 +161,9 @@ impl Worker {
     }
 
     pub(crate) fn transmit(&self, packet: Vec<u8>) {
-        let _ = self.packets.try_send(packet);
+        if self.packets.try_send(packet).is_ok() {
+            self.wake.signal();
+        }
     }
 }
 
@@ -164,6 +171,7 @@ impl Drop for Worker {
     fn drop(&mut self) {
         self.ready.store(false, Ordering::Release);
         self.quit.store(true, Ordering::Release);
+        self.wake.signal();
         if let Some(task) = self.task.take() {
             let _ = task.join();
         }
@@ -243,6 +251,7 @@ fn run(
     root: &Path,
     incoming: mpsc::Receiver<Vec<u8>>,
     tun_out: &tokio::sync::mpsc::Sender<Vec<u8>>,
+    wake: &Wake,
 ) {
     let state_path = root.join("state");
     let status_path = root.join("status.json");
@@ -478,6 +487,7 @@ fn run(
 
             publish(&status_path, &mut last, &status);
 
+            let mut more_frames = false;
             if let Some(bridge) = bridge.as_mut() {
                 let now = Instant::now();
                 if now.duration_since(last_expire) >= Duration::from_secs(1) {
@@ -488,8 +498,9 @@ fn run(
                 for request in bridge.retry_arp(now) {
                     send(&mut client, network, request);
                 }
-                for _ in 0..MAX_FRAME_BATCH {
+                for i in 0..MAX_FRAME_BATCH {
                     let Ok(frame) = client.receive() else { break };
+                    more_frames = i + 1 == MAX_FRAME_BATCH;
                     if frame.network != network {
                         continue;
                     }
@@ -520,7 +531,14 @@ fn run(
                 while client.receive().is_ok() {}
             }
 
-            match incoming.recv_timeout(IDLE_WAKE) {
+            // Clear before checking the channel and stop flag: a producer
+            // racing after this point leaves the fd readable for poll().
+            wake.clear()
+                .map_err(|_| "could not clear ZeroTier wake signal")?;
+            if quit.load(Ordering::Acquire) {
+                break;
+            }
+            match incoming.try_recv() {
                 Ok(packet) => {
                     let Some(bridge) = bridge.as_mut() else {
                         continue;
@@ -568,8 +586,19 @@ fn run(
                         send(&mut client, network, frame);
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+                Err(TryRecvError::Empty) if !more_frames => {
+                    let (sockets, sdk_wait) = client.poll_state();
+                    let bridge_wait = bridge
+                        .as_ref()
+                        .and_then(|bridge| bridge.next_arp_retry(Instant::now()))
+                        .map_or(MAINTENANCE, |at| {
+                            at.saturating_duration_since(Instant::now())
+                        });
+                    wake.wait(sockets, sdk_wait.min(MAINTENANCE).min(bridge_wait))
+                        .map_err(|_| "could not wait for ZeroTier socket readiness")?;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => break,
             }
         }
         Ok(())

@@ -11,7 +11,7 @@ use std::{
     path::Path,
     ptr::NonNull,
     sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const MAX_FRAME: usize = 1500;
@@ -114,6 +114,12 @@ unsafe extern "C" {
     ) -> usize;
     fn mzt_peers(client: *const c_void, out: *mut Peer, capacity: usize) -> usize;
     fn mzt_dns_ipv4(client: *const c_void, network: u64, out: *mut u32, capacity: usize) -> usize;
+    fn mzt_poll_state(
+        client: *const c_void,
+        ipv4: *mut c_int,
+        ipv6: *mut c_int,
+        deadline: *mut i64,
+    );
     fn mzt_step(client: *mut c_void, now: i64) -> c_int;
     fn mzt_ipv4_frame(
         client: *mut c_void,
@@ -282,6 +288,14 @@ impl Client {
             .map(Ipv4Addr::from)
             .collect()
     }
+    pub fn poll_state(&self) -> ([c_int; 2], Duration) {
+        let (mut ipv4, mut ipv6, mut deadline) = (-1, -1, 0);
+        // These descriptors are borrowed only for the next wait on this worker.
+        unsafe { mzt_poll_state(self.handle.as_ptr(), &mut ipv4, &mut ipv6, &mut deadline) };
+        let millis = deadline.saturating_sub(now()).max(1) as u64;
+        ([ipv4, ipv6], Duration::from_millis(millis))
+    }
+
     pub fn step(&mut self) -> i32 {
         unsafe { mzt_step(self.handle.as_ptr(), now()) }
     }
