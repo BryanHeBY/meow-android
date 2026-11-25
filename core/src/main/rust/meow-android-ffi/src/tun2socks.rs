@@ -8,6 +8,10 @@
 //! synthesis, other qtypes forwarded over the same upstreams. No loopback
 //! DNS server socket exists.
 
+#[cfg(any(test, target_os = "android"))]
+#[path = "tun_owner_ingress.rs"]
+mod tun_owner_ingress;
+
 use crate::engine;
 use crate::logging;
 use crate::owner;
@@ -234,12 +238,12 @@ async fn run_tun2socks(
     #[cfg(target_os = "android")]
     let (overlay_out, mut overlay_in, overlay_stats) = crate::tun_egress::channel(128, 512 * 1024);
     #[cfg(target_os = "android")]
-    let mut overlay = match overlay {
-        Some((root, config)) => Some(crate::zerotier_worker::Worker::start(
+    let overlay = match overlay {
+        Some((root, config)) => Some(Arc::new(crate::zerotier_worker::Worker::start(
             config,
             root,
             overlay_out,
-        )?),
+        )?)),
         None => None,
     };
     // Restricted app policy applies independently of the Android capture set.
@@ -374,9 +378,44 @@ async fn run_tun2socks(
             return;
         }
         let mut read_buf = vec![0u8; 65535];
+        let ingress = ClashIngress {
+            stack: stack_ingress_tx,
+            dns_sem,
+            tasks: flow_tasks_dns,
+            egress: egress_tx,
+            gate: clash_gate,
+        };
+        #[cfg(target_os = "android")]
+        let owner_lanes = overlay
+            .as_ref()
+            .filter(|o| !o.config.filter.permits_owner(&[]))
+            .map(|overlay| {
+                let overlay = Arc::clone(overlay);
+                let ingress = ingress.clone();
+                tun_owner_ingress::Lanes::new(
+                    8,
+                    16,
+                    512 * 1024,
+                    move |(packet, initial): (Vec<u8>, _)| {
+                        let overlay = Arc::clone(&overlay);
+                        let ingress = ingress.clone();
+                        async move {
+                            match overlay_exit(&overlay, initial, &packet).await {
+                                OverlayExit::Transmit => overlay.transmit(packet),
+                                OverlayExit::Drop => (),
+                                OverlayExit::Clash if ingress.spawn_dns(&packet) => (),
+                                OverlayExit::Clash => {
+                                    let _ = ingress.stack.send(packet).await;
+                                }
+                            }
+                        }
+                    },
+                )
+            });
 
-        loop {
+        'reader: loop {
             let mut ready = tokio::select! {
+                biased;
                 _ = &mut stopped => break,
                 ready = tun.readable() => match ready {
                     Ok(ready) => ready,
@@ -387,7 +426,9 @@ async fn run_tun2socks(
                 },
             };
 
-            loop {
+            // Bound each drain batch: with active lanes and a perpetually
+            // readable fd, a synchronous enqueue loop must yield to workers.
+            for _ in 0..64 {
                 let n =
                     unsafe { libc::read(fd, read_buf.as_mut_ptr() as *mut c_void, read_buf.len()) };
                 if n <= 0 {
@@ -400,111 +441,55 @@ async fn run_tun2socks(
                 let n = n as usize;
                 let ip_data = &read_buf[..n];
 
-                // Overlay ownership is decided before DNS, lwIP or Clash
-                // can see any packet for an approved private destination.
                 #[cfg(target_os = "android")]
-                if let Some(overlay) = overlay.as_mut() {
-                    use meow_overlay_policy::Destination;
-                    if overlay.wants_dns(ip_data) && overlay.permits(ip_data).await {
-                        overlay.transmit(ip_data.to_vec());
-                        continue;
-                    }
-                    match overlay.classify(ip_data) {
-                        Destination::Clash => {}
-                        Destination::DropOverlayUnavailable => continue,
-                        Destination::ZeroTierDefault => {
-                            if overlay.permits(ip_data).await {
-                                overlay.transmit(ip_data.to_vec());
-                                continue;
-                            }
-                            // Default routing is an opt-in by this app's filter,
-                            // not a reason to break other apps' Clash traffic.
-                        }
-                        Destination::ZeroTier => {
-                            if overlay.permits(ip_data).await {
-                                overlay.transmit(ip_data.to_vec());
+                if let Some(overlay) = &overlay {
+                    let initial = overlay.classify(ip_data);
+                    let unrestricted = owner_lanes.is_none();
+                    if let Some(lanes) = &owner_lanes {
+                        if let Ok(flow) = meow_overlay_policy::wire::flow(ip_data) {
+                            // Keep even immediate Clash packets on this lane: the
+                            // route can change while an earlier packet awaits JNI.
+                            if !lanes.enqueue(flow, n as u32, || (ip_data.to_vec(), initial)) {
+                                warn_capped(
+                                    &OWNER_CAP_LOG_LAST_MS,
+                                    "tun2socks: app-owner queue full, dropping packet",
+                                );
                             }
                             continue;
                         }
+                    }
+                    // No binder calls or queueing on the unrestricted fast
+                    // path. Invalid flows also cannot authorize overlay use.
+                    let dns = overlay.wants_dns(ip_data);
+                    let permitted = unrestricted
+                        && (dns
+                            || matches!(
+                                initial,
+                                Destination::ZeroTier | Destination::ZeroTierDefault
+                            ))
+                        && meow_overlay_policy::wire::flow(ip_data).is_ok();
+                    match overlay_route(initial, initial, dns, permitted) {
+                        OverlayExit::Transmit => {
+                            overlay.transmit(ip_data.to_vec());
+                            continue;
+                        }
+                        OverlayExit::Drop => continue,
+                        OverlayExit::Clash => {}
                     }
                 }
 
-                // In-process DNS: intercept UDP/53 pre-stack.
-                if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
-                    let permit = match dns_sem.clone().try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => {
-                            warn_capped(
-                                &DNS_CAP_LOG_LAST_MS,
-                                "tun2socks: DNS burst cap reached, dropping query",
-                            );
-                            continue;
-                        }
-                    };
-                    let request = ip_data.to_vec();
-                    let egress = egress_tx.clone();
-                    let gate = clash_gate.clone();
-                    let handle = tokio::spawn(async move {
-                        let _permit = permit;
-                        let work = async {
-                            let Some(parsed) = parse_udp_packet(&request) else {
-                                return;
-                            };
-                            let response_payload = match flow_exit(
-                                gate.as_deref(),
-                                owner::IPPROTO_UDP,
-                                parsed.src,
-                                parsed.dst,
-                            )
-                            .await
-                            {
-                                FlowExit::Clash => {
-                                    // Preserve the configured resolver and all DNS qtypes.
-                                    let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
-                                        return;
-                                    };
-                                    let Ok(bytes) =
-                                        DnsServer::handle_query(parsed.payload, &resolver).await
-                                    else {
-                                        return;
-                                    };
-                                    bytes
-                                }
-                                #[cfg(target_os = "android")]
-                                FlowExit::Direct(_)
-                                    if parsed.dst.ip() == Ipv4Addr::new(172, 19, 0, 2) =>
-                                {
-                                    let Some(bytes) =
-                                        crate::direct_exit::system_dns(parsed.payload).await
-                                    else {
-                                        return;
-                                    };
-                                    bytes
-                                }
-                                _ => return,
-                            };
-                            let Some(reply_pkt) = build_udp_reply(&request, &response_payload)
-                            else {
-                                return;
-                            };
-                            egress.enqueue(reply_pkt);
-                        };
-                        if tokio::time::timeout(DNS_TASK_TIMEOUT, work).await.is_err() {
-                            trace!(
-                                "tun2socks: DNS task exceeded {:?}, aborting",
-                                DNS_TASK_TIMEOUT
-                            );
-                        }
-                    });
-                    track_flow_task(&flow_tasks_dns, handle);
+                if ingress.spawn_dns(ip_data) {
                     continue;
                 }
-
-                let frame: AnyIpPktFrame = ip_data.to_vec();
-                if !send_ingress(&stack_ingress_tx, frame, &mut stopped).await {
-                    return;
+                if !send_ingress(&ingress.stack, ip_data.to_vec(), &mut stopped).await {
+                    break 'reader;
                 }
             }
+            tokio::task::yield_now().await;
+        }
+        #[cfg(target_os = "android")]
+        if let Some(lanes) = owner_lanes {
+            lanes.shutdown().await;
         }
     });
 
@@ -519,9 +504,131 @@ async fn run_tun2socks(
 
     logging::bridge_log(&format!("tun2socks: egress {}", egress_stats.summary()));
     #[cfg(target_os = "android")]
-    logging::bridge_log(&format!("tun2socks: ZeroTier egress {}", overlay_stats.summary()));
+    logging::bridge_log(&format!(
+        "tun2socks: ZeroTier egress {}",
+        overlay_stats.summary()
+    ));
     logging::bridge_log("tun2socks: exiting");
     Ok(())
+}
+
+#[cfg(target_os = "android")]
+use meow_overlay_policy::Destination;
+#[cfg(target_os = "android")]
+use tun_owner_ingress::{overlay_route, route_history, OverlayExit};
+
+#[cfg(target_os = "android")]
+static OWNER_CAP_LOG_LAST_MS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_os = "android")]
+async fn overlay_exit(
+    overlay: &crate::zerotier_worker::Worker,
+    initial: Destination,
+    packet: &[u8],
+) -> OverlayExit {
+    let dns = overlay.wants_dns(packet);
+    let current = overlay.classify(packet);
+    let allowed = if dns
+        || matches!(
+            current,
+            Destination::ZeroTier | Destination::ZeroTierDefault
+        ) {
+        // One fresh lookup per packet, never cached by tuple. Echo and
+        // unparsable packets cannot block here; Worker::permits rejects them
+        // without querying the binder under a restricted filter.
+        overlay.permits(packet).await
+    } else {
+        return overlay_route(initial, current, dns, false);
+    };
+    // Runtime membership can change while owner resolution is in flight.
+    overlay_route(
+        route_history(initial, current),
+        overlay.classify(packet),
+        dns,
+        allowed,
+    )
+}
+
+#[derive(Clone)]
+struct ClashIngress {
+    stack: mpsc::Sender<AnyIpPktFrame>,
+    dns_sem: Arc<Semaphore>,
+    tasks: FlowTasks,
+    egress: crate::tun_egress::Tx,
+    gate: Option<Arc<ClashGate>>,
+}
+
+impl ClashIngress {
+    // The DNS handler keeps its original per-request concurrency and deadline.
+    fn spawn_dns(&self, ip_data: &[u8]) -> bool {
+        // In-process DNS: intercept UDP/53 pre-stack.
+        if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
+            let permit = match self.dns_sem.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => {
+                    warn_capped(
+                        &DNS_CAP_LOG_LAST_MS,
+                        "tun2socks: DNS burst cap reached, dropping query",
+                    );
+                    return true;
+                }
+            };
+            let request = ip_data.to_vec();
+            let egress = self.egress.clone();
+            let gate = self.gate.clone();
+            let handle = tokio::spawn(async move {
+                let _permit = permit;
+                let work = async {
+                    let Some(parsed) = parse_udp_packet(&request) else {
+                        return;
+                    };
+                    let response_payload = match flow_exit(
+                        gate.as_deref(),
+                        owner::IPPROTO_UDP,
+                        parsed.src,
+                        parsed.dst,
+                    )
+                    .await
+                    {
+                        FlowExit::Clash => {
+                            // Preserve the configured resolver and all DNS qtypes.
+                            let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
+                                return;
+                            };
+                            let Ok(bytes) =
+                                DnsServer::handle_query(parsed.payload, &resolver).await
+                            else {
+                                return;
+                            };
+                            bytes
+                        }
+                        #[cfg(target_os = "android")]
+                        FlowExit::Direct(_) if parsed.dst.ip() == Ipv4Addr::new(172, 19, 0, 2) => {
+                            let Some(bytes) = crate::direct_exit::system_dns(parsed.payload).await
+                            else {
+                                return;
+                            };
+                            bytes
+                        }
+                        _ => return,
+                    };
+                    let Some(reply_pkt) = build_udp_reply(&request, &response_payload) else {
+                        return;
+                    };
+                    egress.enqueue(reply_pkt);
+                };
+                if tokio::time::timeout(DNS_TASK_TIMEOUT, work).await.is_err() {
+                    trace!(
+                        "tun2socks: DNS task exceeded {:?}, aborting",
+                        DNS_TASK_TIMEOUT
+                    );
+                }
+            });
+            track_flow_task(&self.tasks, handle);
+            return true;
+        }
+        false
+    }
 }
 
 async fn send_ingress(
