@@ -16,7 +16,7 @@ use std::{
 
 const MAX_FRAME: usize = 1500;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct NetworkView {
     pub mac: u64,

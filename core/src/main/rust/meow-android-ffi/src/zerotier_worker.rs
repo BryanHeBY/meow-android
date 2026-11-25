@@ -1,6 +1,6 @@
 //! Runs one native node on a dedicated thread for the lifetime of one VPN.
 use crate::{
-    zerotier::{Client, Frame},
+    zerotier::{Client, Frame, NetworkView},
     zerotier_config::{Config, DnsMode},
     zerotier_wake::Wake,
 };
@@ -59,19 +59,57 @@ struct Status {
     network: String,
     node: Option<String>,
     ip: Option<Ipv4Addr>,
-    sdk_status: Option<i32>,
     error: Option<&'static str>,
     moons: Vec<MoonStatus>,
     managed_routes: Vec<String>,
     effective_routes: Vec<String>,
+    nameservers: Vec<Ipv4Addr>,
+    #[serde(flatten)]
+    network_view: NetworkPresentation,
+    peers: Vec<PeerStatus>,
+}
+
+/// Display fields only: route and ready decisions consume the live SDK view
+/// before this cache is consulted.
+#[derive(Clone, Default, Serialize, PartialEq, Eq)]
+struct NetworkPresentation {
+    sdk_status: Option<i32>,
     mac: Option<String>,
     mtu: Option<u32>,
-    nameservers: Vec<Ipv4Addr>,
     name: Option<String>,
     public: Option<bool>,
     broadcast: Option<bool>,
     bridging: Option<bool>,
-    peers: Vec<PeerStatus>,
+}
+
+impl NetworkPresentation {
+    fn update(&mut self, previous: &mut Option<NetworkView>, view: Option<NetworkView>) {
+        if *previous == view {
+            return;
+        }
+        *previous = view;
+        let Some(view) = view else {
+            *self = Self::default();
+            return;
+        };
+        let [_, _, a, b, c, d, e, f] = view.mac.to_be_bytes();
+        let name_len = view
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(view.name.len());
+        let confirmed = view.status == NETWORK_STATUS_OK;
+        *self = Self {
+            sdk_status: Some(view.status),
+            mac: Some(format!("{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")),
+            mtu: (view.mtu != 0).then_some(view.mtu),
+            name: (name_len != 0)
+                .then(|| String::from_utf8_lossy(&view.name[..name_len]).into_owned()),
+            public: confirmed.then_some(view.flags & 1 != 0),
+            broadcast: confirmed.then_some(view.flags & 2 != 0),
+            bridging: confirmed.then_some(view.flags & 4 != 0),
+        };
+    }
 }
 
 type ManagedPolicy = Arc<RwLock<OverlayPolicy>>;
@@ -260,18 +298,12 @@ fn run(
         network: config.network.to_string(),
         node: None,
         ip: None,
-        sdk_status: None,
         error: None,
         moons: Vec::new(),
         managed_routes: Vec::new(),
         effective_routes: Vec::new(),
-        mac: None,
-        mtu: None,
         nameservers: Vec::new(),
-        name: None,
-        public: None,
-        broadcast: None,
-        bridging: None,
+        network_view: NetworkPresentation::default(),
         peers: Vec::new(),
     };
     let mut last = None;
@@ -346,6 +378,7 @@ fn run(
         let mut last_moons = None;
         let mut dns = Vec::new();
         let mut dns_flows = HashMap::new();
+        let mut last_network_view = None;
         while !quit.load(Ordering::Acquire) {
             if client.step() != 0 {
                 return Err("native ZeroTier transport stopped");
@@ -466,24 +499,7 @@ fn run(
             }
             status.phase = if bridge.is_some() { "ready" } else { "waiting" };
             status.ip = usable.map(|v| Ipv4Addr::from(v.first_ipv4));
-            status.sdk_status = view.map(|v| v.status);
-            status.mac = view.map(|v| {
-                let bytes = v.mac.to_be_bytes();
-                bytes[2..]
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<Vec<_>>()
-                    .join(":")
-            });
-            status.mtu = view.map(|v| v.mtu).filter(|mtu| *mtu != 0);
-            status.name = view.and_then(|v| {
-                let len = v.name.iter().position(|x| *x == 0).unwrap_or(v.name.len());
-                (len != 0).then(|| String::from_utf8_lossy(&v.name[..len]).into_owned())
-            });
-            let confirmed = view.filter(|v| v.status == NETWORK_STATUS_OK);
-            status.public = confirmed.map(|v| v.flags & 1 != 0);
-            status.broadcast = confirmed.map(|v| v.flags & 2 != 0);
-            status.bridging = confirmed.map(|v| v.flags & 4 != 0);
+            status.network_view.update(&mut last_network_view, view);
 
             publish(&status_path, &mut last, &status);
 
@@ -629,4 +645,53 @@ fn send(client: &mut Client, network: u64, frame: Ethernet) {
         kind: frame.kind,
         data: frame.payload,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_view_reuses_display_strings_and_removal_clears_them() {
+        let mut status = NetworkPresentation::default();
+        let mut previous = None;
+        let mut view = NetworkView {
+            status: NETWORK_STATUS_OK,
+            mac: 0xabcd_ef01_2345,
+            mtu: 1400,
+            flags: 3,
+            ..NetworkView::default()
+        };
+        view.name[..4].copy_from_slice(b"test");
+
+        status.update(&mut previous, Some(view));
+        assert_eq!(status.mac.as_deref(), Some("ab:cd:ef:01:23:45"));
+        assert_eq!(status.name.as_deref(), Some("test"));
+        assert_eq!(status.mtu, Some(1400));
+        assert_eq!(status.public, Some(true));
+        assert_eq!(status.broadcast, Some(true));
+        assert_eq!(status.bridging, Some(false));
+        let mac = status.mac.as_ref().unwrap().as_ptr();
+        let name = status.name.as_ref().unwrap().as_ptr();
+
+        status.update(&mut previous, Some(view));
+        assert_eq!(status.mac.as_ref().unwrap().as_ptr(), mac);
+        assert_eq!(status.name.as_ref().unwrap().as_ptr(), name);
+
+        view.status = 2;
+        view.name = [0; 128];
+        view.mtu = 0;
+        status.update(&mut previous, Some(view));
+        assert_eq!(status.sdk_status, Some(2));
+        assert_eq!(status.name, None);
+        assert_eq!(status.mtu, None);
+        assert_eq!(status.public, None);
+        assert_eq!(status.broadcast, None);
+        assert_eq!(status.bridging, None);
+
+        status.update(&mut previous, None);
+        assert_eq!(status.sdk_status, None);
+        assert_eq!(status.mac, None);
+        assert_eq!(previous, None);
+    }
 }
