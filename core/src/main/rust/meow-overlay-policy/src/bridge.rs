@@ -11,7 +11,9 @@ const MAX_FLOWS: usize = 4096;
 const MAX_PENDING: usize = 128;
 const NEIGHBOR_TTL: Duration = Duration::from_secs(60);
 const FLOW_TTL: Duration = Duration::from_secs(180);
-const ARP_RETRY: Duration = Duration::from_secs(1);
+const ARP_RETRY: Duration = Duration::from_millis(500);
+const ARP_WAIT: Duration = Duration::from_millis(2500);
+const ARP_RETRY_BATCH: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ethernet {
@@ -28,7 +30,8 @@ pub struct Inbound {
 }
 
 struct Pending {
-    at: Instant,
+    created: Instant,
+    last_request: Instant,
     packets: Vec<Vec<u8>>,
 }
 
@@ -67,7 +70,7 @@ impl Bridge {
 
     pub fn expire(&mut self, now: Instant) {
         self.pending
-            .retain(|_, v| now.duration_since(v.at) < ARP_RETRY);
+            .retain(|_, v| now.duration_since(v.created) < ARP_WAIT);
         self.neighbors
             .retain(|_, (_, at)| now.duration_since(*at) < NEIGHBOR_TTL);
         self.flows
@@ -101,12 +104,13 @@ impl Bridge {
 
         // In-flight ARP is rate-limited per next-hop, queue is globally bounded.
         if let Some(pending) = self.pending.get_mut(&next_hop) {
-            if now.duration_since(pending.at) < ARP_RETRY {
+            if now.duration_since(pending.created) < ARP_WAIT {
                 if pending.packets.len() < 3 {
                     pending.packets.push(packet);
                 }
                 return None;
             }
+            self.pending.remove(&next_hop);
         }
         if self.pending.len() >= MAX_PENDING {
             return None;
@@ -114,11 +118,39 @@ impl Bridge {
         self.pending.insert(
             next_hop,
             Pending {
-                at: now,
+                created: now,
+                last_request: now,
                 packets: vec![packet],
             },
         );
-        Some(self.arp_to(
+        Some(self.arp_request(next_hop))
+    }
+
+    /// Retry discovery without depending on the application to send again.
+    pub fn retry_arp(&mut self, now: Instant) -> Vec<Ethernet> {
+        let targets: Vec<_> = self
+            .pending
+            .iter_mut()
+            .filter_map(|(&target, pending)| {
+                if now.duration_since(pending.created) < ARP_WAIT
+                    && now.duration_since(pending.last_request) >= ARP_RETRY
+                {
+                    pending.last_request = now;
+                    Some(target)
+                } else {
+                    None
+                }
+            })
+            .take(ARP_RETRY_BATCH)
+            .collect();
+        targets
+            .into_iter()
+            .map(|target| self.arp_request(target))
+            .collect()
+    }
+
+    fn arp_request(&self, next_hop: Ipv4Addr) -> Ethernet {
+        self.arp_to(
             BROADCAST_MAC,
             Arp {
                 reply: false,
@@ -127,7 +159,7 @@ impl Bridge {
                 target_mac: 0,
                 target: next_hop,
             },
-        ))
+        )
     }
 
     pub fn receive(&mut self, frame: Ethernet, now: Instant) -> Inbound {
@@ -196,7 +228,7 @@ impl Bridge {
         let Some(pending) = self.pending.remove(&arp.sender) else {
             return Inbound::default();
         };
-        if now.duration_since(pending.at) >= ARP_RETRY {
+        if now.duration_since(pending.created) >= ARP_WAIT {
             return Inbound::default();
         }
         if self.neighbors.len() >= MAX_NEIGHBORS && !self.neighbors.contains_key(&arp.sender) {
@@ -280,6 +312,44 @@ mod tests {
             kind,
             payload,
         }
+    }
+
+    #[test]
+    fn late_arp_preserves_the_first_datagram_and_retries_without_app_traffic() {
+        let now = Instant::now();
+        let mut bridge = Bridge::new(TUN, LOCAL, LOCAL_MAC, 1500).unwrap();
+        assert!(bridge
+            .transmit(udp(TUN, PEER, [1234, 443]), None, now)
+            .is_some());
+        assert!(bridge.retry_arp(now).is_empty());
+        let retry = bridge.retry_arp(now + ARP_RETRY);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(Arp::parse(&retry[0].payload).unwrap().target, PEER);
+        assert!(bridge.retry_arp(now + ARP_RETRY).is_empty());
+        let late = now + ARP_RETRY * 3;
+        bridge.expire(late);
+        let arp = Arp {
+            reply: true,
+            sender_mac: PEER_MAC,
+            sender: PEER,
+            target_mac: LOCAL_MAC,
+            target: LOCAL,
+        };
+        let out = bridge.receive(reply(PEER_MAC, arp.encode().to_vec(), ETHER_ARP), late);
+        assert_eq!(out.frames.len(), 1);
+        assert_eq!(wire::flow(&out.frames[0].payload).unwrap().src_port, 1234);
+        assert!(bridge.retry_arp(late + ARP_RETRY).is_empty());
+
+        let mut bridge = Bridge::new(TUN, LOCAL, LOCAL_MAC, 1500).unwrap();
+        assert!(bridge
+            .transmit(udp(TUN, PEER, [1234, 443]), None, now)
+            .is_some());
+        assert!(bridge.retry_arp(now + ARP_WAIT).is_empty());
+        let expired = bridge.receive(
+            reply(PEER_MAC, arp.encode().to_vec(), ETHER_ARP),
+            now + ARP_WAIT,
+        );
+        assert!(expired.frames.is_empty());
     }
 
     #[test]

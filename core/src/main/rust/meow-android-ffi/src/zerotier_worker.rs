@@ -4,9 +4,10 @@ use crate::{
     zerotier_config::Config,
 };
 use meow_overlay_policy::{
+    Destination, Prefix,
     bridge::{Bridge, Ethernet},
-    routes::{next_hop, NextHop},
-    wire, Destination, Prefix,
+    routes::{NextHop, next_hop},
+    wire,
 };
 use serde::Serialize;
 use std::{
@@ -15,9 +16,9 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError, SyncSender},
-        Arc,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -317,6 +318,9 @@ fn run(
                 if now.duration_since(last_expire) >= Duration::from_secs(1) {
                     bridge.expire(now);
                     last_expire = now;
+                }
+                for request in bridge.retry_arp(now) {
+                    send(&mut client, network, request);
                 }
                 for _ in 0..MAX_FRAME_BATCH {
                     let Ok(frame) = client.receive() else { break };
