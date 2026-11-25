@@ -218,16 +218,47 @@ int mzt_network(const mzt_client *c, uint64_t network, mzt_network_view *result)
     if (!result) return 0;
     const auto *view = ZT_Node_networkConfig(c->node, network);
     if (!view) return 0;
-    *result = {view->mac, 0, static_cast<int>(view->status), view->mtu};
+    *result = {view->mac, 0, static_cast<int>(view->status), view->mtu, 0};
     for (unsigned i = 0; i < view->assignedAddressCount; ++i) {
         const auto &a = view->assignedAddresses[i];
         if (a.ss_family == AF_INET) {
-            result->first_ipv4 = ntohl(reinterpret_cast<const sockaddr_in &>(a).sin_addr.s_addr);
-            if (result->first_ipv4) break;
+            const auto &ip = reinterpret_cast<const sockaddr_in &>(a);
+            const auto address = ntohl(ip.sin_addr.s_addr);
+            const auto bits = ntohs(ip.sin_port);
+            if (address && bits > 0 && bits <= 32) {
+                result->first_ipv4 = address;
+                result->first_ipv4_prefix = bits;
+                break;
+            }
         }
     }
     ZT_Node_freeQueryResult(c->node, const_cast<ZT_VirtualNetworkConfig *>(view));
     return 1;
+}
+size_t mzt_routes(const mzt_client *c, uint64_t network, mzt_route *out, size_t capacity) {
+    if (!out || !capacity) return 0;
+    const auto *view = ZT_Node_networkConfig(c->node, network);
+    if (!view) return 0;
+    size_t count = 0;
+    if (view->status == ZT_NETWORK_STATUS_OK) {
+        for (unsigned i = 0; i < view->routeCount && i < ZT_MAX_NETWORK_ROUTES && count < capacity; ++i) {
+            const auto &route = view->routes[i];
+            if (route.target.ss_family != AF_INET) continue;
+            const auto &target = reinterpret_cast<const sockaddr_in &>(route.target);
+            const auto bits = ntohs(target.sin_port);
+            if (!bits || bits > 32) continue;
+            uint32_t via = 0;
+            if (route.via.ss_family == AF_INET) {
+                via = ntohl(reinterpret_cast<const sockaddr_in &>(route.via).sin_addr.s_addr);
+                if (!via) continue;
+            } else if (route.via.ss_family != AF_UNSPEC) {
+                continue;
+            }
+            out[count++] = {ntohl(target.sin_addr.s_addr), via, bits};
+        }
+    }
+    ZT_Node_freeQueryResult(c->node, const_cast<ZT_VirtualNetworkConfig *>(view));
+    return count;
 }
 int mzt_step(mzt_client *c, int64_t now) {
     if (c->storage_error) return -1;

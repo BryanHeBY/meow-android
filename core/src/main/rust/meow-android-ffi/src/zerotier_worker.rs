@@ -5,7 +5,8 @@ use crate::{
 };
 use meow_overlay_policy::{
     bridge::{Bridge, Ethernet},
-    wire, Destination,
+    routes::{next_hop, NextHop},
+    wire, Destination, Prefix,
 };
 use serde::Serialize;
 use std::{
@@ -178,6 +179,8 @@ fn run(
         let mut bridge = None;
         let mut current = None;
         let mut last_expire = Instant::now();
+        let mut routes = Vec::new();
+        let mut last_routes = None;
         while !quit.load(Ordering::Acquire) {
             if client.step() != 0 {
                 return Err("native ZeroTier transport stopped");
@@ -186,9 +189,26 @@ fn run(
             let online = client.online();
             let usable =
                 view.filter(|v| online && v.status == NETWORK_STATUS_OK && v.first_ipv4 != 0);
-            let next = usable.map(|v| (Ipv4Addr::from(v.first_ipv4), v.mac, v.mtu as usize));
-            if next != current {
-                bridge = next.and_then(|(ip, mac, mtu)| {
+            let next = usable.and_then(|v| {
+                let ip = Ipv4Addr::from(v.first_ipv4);
+                let subnet = Prefix::new(ip, v.first_ipv4_prefix.try_into().ok()?)?;
+                Some((ip, subnet, v.mac, v.mtu as usize))
+            });
+            let clock = Instant::now();
+            let mut routing_changed = false;
+            if next.is_none() {
+                routes.clear();
+                last_routes = None;
+            } else if next != current
+                || last_routes.is_none_or(|t| clock.duration_since(t) >= Duration::from_secs(1))
+            {
+                let updated = client.routes(network);
+                routing_changed = updated != routes;
+                routes = updated;
+                last_routes = Some(clock);
+            }
+            if next != current || routing_changed {
+                bridge = next.and_then(|(ip, _, mac, mtu)| {
                     if client.subscribe_arp(network, u32::from(ip)) != 0 {
                         None
                     } else {
@@ -247,7 +267,16 @@ fn run(
                     {
                         continue;
                     }
-                    if let Some(frame) = bridge.transmit(packet, None, Instant::now()) {
+                    let (Some((local, subnet, _, _)), Ok(flow)) = (current, wire::flow(&packet))
+                    else {
+                        continue;
+                    };
+                    let gateway = match next_hop(local, subnet, &routes, flow.dst) {
+                        Some(NextHop::OnLink) => None,
+                        Some(NextHop::Gateway(ip)) => Some(ip),
+                        None => continue,
+                    };
+                    if let Some(frame) = bridge.transmit(packet, gateway, Instant::now()) {
                         send(&mut client, network, frame);
                     }
                 }

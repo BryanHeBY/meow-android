@@ -7,6 +7,7 @@ pub mod apps;
 pub mod bridge;
 pub mod membership;
 mod packet;
+pub mod routes;
 pub mod wire;
 pub use packet::PacketError;
 

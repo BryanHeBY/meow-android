@@ -3,8 +3,10 @@
 // The worker and TUN adapter consume this interface once the runtime owns a node.
 #![allow(dead_code)]
 
+use meow_overlay_policy::{routes::ManagedRoute, Prefix};
 use std::{
     ffi::{c_char, c_int, c_uint, c_void, CString},
+    net::Ipv4Addr,
     os::unix::ffi::OsStrExt,
     path::Path,
     ptr::NonNull,
@@ -21,6 +23,15 @@ pub(crate) struct NetworkView {
     pub first_ipv4: u32,
     pub status: c_int,
     pub mtu: c_uint,
+    pub first_ipv4_prefix: c_uint,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+struct Route {
+    target: u32,
+    via: u32,
+    prefix: c_uint,
 }
 
 #[derive(Debug)]
@@ -55,6 +66,12 @@ unsafe extern "C" {
     fn mzt_orbit(client: *mut c_void, world: u64, seed: u64) -> c_int;
     fn mzt_deorbit(client: *mut c_void, world: u64) -> c_int;
     fn mzt_network(client: *const c_void, network: u64, view: *mut NetworkView) -> c_int;
+    fn mzt_routes(
+        client: *const c_void,
+        network: u64,
+        routes: *mut Route,
+        capacity: usize,
+    ) -> usize;
     fn mzt_step(client: *mut c_void, now: i64) -> c_int;
     fn mzt_ipv4_frame(
         client: *mut c_void,
@@ -163,6 +180,27 @@ impl Client {
     pub fn network(&self, network: u64) -> Option<NetworkView> {
         let mut view = NetworkView::default();
         (unsafe { mzt_network(self.handle.as_ptr(), network, &mut view) } == 1).then_some(view)
+    }
+    pub fn routes(&self, network: u64) -> Vec<ManagedRoute> {
+        let mut routes = [Route::default(); 128];
+        let len = unsafe {
+            mzt_routes(
+                self.handle.as_ptr(),
+                network,
+                routes.as_mut_ptr(),
+                routes.len(),
+            )
+        };
+        routes
+            .iter()
+            .take(len)
+            .filter_map(|r| {
+                Some(ManagedRoute {
+                    target: Prefix::new(Ipv4Addr::from(r.target), r.prefix.try_into().ok()?)?,
+                    via: (r.via != 0).then(|| Ipv4Addr::from(r.via)),
+                })
+            })
+            .collect()
     }
     pub fn step(&mut self) -> i32 {
         unsafe { mzt_step(self.handle.as_ptr(), now()) }
