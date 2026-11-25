@@ -34,13 +34,18 @@ data class PerAppUiState(
 ) {
     /** Filtering happens here so the list and the list-scoped bulk actions share one scope. */
     val visibleApps: List<InstalledApp>
-        get() = apps.filter { app ->
-            (showSystemApps || !app.isSystem || app.packageName in selected) &&
-                (
-                    query.isBlank() ||
-                        app.label.contains(query, ignoreCase = true) ||
-                        app.packageName.contains(query, ignoreCase = true)
-                    )
+        get() {
+            val search = query.trim()
+            return apps.filter { app ->
+                if (search.isNotEmpty()) {
+                    // An explicit search may find a system package even if the
+                    // user keeps the unfiltered list focused on ordinary apps.
+                    app.label.contains(search, ignoreCase = true) ||
+                        app.packageName.contains(search, ignoreCase = true)
+                } else {
+                    showSystemApps || !app.isSystem || app.hasLauncher || app.packageName in selected
+                }
+            }
         }
 }
 

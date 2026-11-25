@@ -1,6 +1,7 @@
 package io.github.madeye.meow.repo
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -14,6 +15,7 @@ data class InstalledApp(
     val packageName: String,
     val label: String,
     val isSystem: Boolean,
+    val hasLauncher: Boolean = false,
 )
 
 /**
@@ -36,6 +38,19 @@ class InstalledAppsRepository(private val context: Context) {
             Timber.w(e, "installed-app enumeration failed")
             return@withContext emptyList()
         }
+        val launcherPackages = try {
+            val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val activities = if (Build.VERSION.SDK_INT >= 33) {
+                packageManager.queryIntentActivities(launcher, PackageManager.ResolveInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.queryIntentActivities(launcher, 0)
+            }
+            activities.mapNotNullTo(HashSet()) { it.activityInfo?.packageName }
+        } catch (e: Exception) {
+            Timber.w(e, "launcher activity enumeration failed")
+            emptySet()
+        }
         infos.asSequence()
             // An app with no launcher entry and no internet permission cannot
             // generate tunnelled traffic, but filtering on that is unreliable
@@ -49,6 +64,7 @@ class InstalledAppsRepository(private val context: Context) {
                         info.packageName
                     },
                     isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                    hasLauncher = info.packageName in launcherPackages,
                 )
             }
             .sortedBy { it.label.lowercase() }
