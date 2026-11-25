@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
     <string name="notification_channel_vpn">VPN အခြေအနေ</string>
     <string name="notification_connecting">ချိတ်ဆက်နေသည်…</string>
     <string name="notification_stop">ရပ်ရန်</string>

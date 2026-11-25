@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
     <string name="notification_channel_vpn">VPN 状态</string>
     <string name="notification_connecting">连接中…</string>
     <string name="notification_stop">停止</string>

@@ -12,7 +12,7 @@
   quantities (zero, one, two, few, many, other).
 -->
 <resources>
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
 
     <!-- Tabs -->
     <string name="tab_home">الرئيسية</string>
@@ -46,7 +46,7 @@
     <string name="home_top_traffic">الأعلى استهلاكًا</string>
     <string name="home_vpn_toggle">تشغيل VPN أو إيقافه</string>
     <!-- Quick Settings tile: it mirrors the switch above and reuses the home_* status strings. -->
-    <string name="tile_label">Meow VPN</string>
+    <string name="tile_label">MeowZ VPN</string>
     <string name="home_route_mode">وضع التوجيه</string>
     <string name="route_mode_rule">قواعد</string>
     <string name="route_mode_global">شامل</string>

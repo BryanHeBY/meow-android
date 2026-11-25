@@ -59,7 +59,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.madeye.meow.AppGraph
-import io.github.madeye.meow.BuildConfig
 import io.github.madeye.meow.R
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.traffic.TrafficGroup
@@ -100,7 +99,6 @@ import io.github.madeye.meow.ui.screens.rules.RulesViewModel
 import io.github.madeye.meow.ui.screens.settings.SettingsEvent
 import io.github.madeye.meow.ui.screens.settings.SettingsScreen
 import io.github.madeye.meow.ui.screens.settings.SettingsViewModel
-import io.github.madeye.meow.ui.screens.settings.UpdateDialog
 import io.github.madeye.meow.ui.screens.statistics.StatisticsScreen
 import io.github.madeye.meow.ui.screens.statistics.StatisticsViewModel
 import io.github.madeye.meow.ui.screens.subscribe.InstallConfigDialog
@@ -126,7 +124,6 @@ import io.github.madeye.meow.ui.screens.yaml.YamlEditorScreen
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorViewModel
 import io.github.madeye.meow.ui.screens.yaml.rememberSoraEditorHandle
 import io.github.madeye.meow.ui.theme.meow
-import io.github.madeye.meow.ui.util.openPlayListing
 import io.github.madeye.meow.ui.util.openUrl
 import io.github.madeye.meow.ui.util.readText
 import io.github.madeye.meow.ui.util.rememberClipboardText
@@ -885,29 +882,6 @@ private fun SettingsRoute(
                 if (!context.openUrl("https://meow-rs.github.io/meow-android/privacy-policy.html")) {
                     scope.launch { snackbarHost.showSnackbar(noApp) }
                 }
-            },
-            onCheckForUpdates = {
-                // Play policy lets a Play build update only through Play, so
-                // it just opens the listing. The flag is a constant, so R8
-                // drops the GitHub path from that build altogether.
-                if (BuildConfig.PLAY_STORE) {
-                    if (!context.openPlayListing()) scope.launch { snackbarHost.showSnackbar(noApp) }
-                } else {
-                    viewModel.checkForUpdates()
-                }
-            },
-        )
-    }
-    // Never set in the Play build, but behind the flag too, so R8 drops the
-    // dialog and its APK download link from that build as well.
-    val release = state.update
-    if (!BuildConfig.PLAY_STORE && release != null) {
-        UpdateDialog(
-            release = release,
-            onDismiss = viewModel::onUpdateDialogClosed,
-            onOpen = { url ->
-                viewModel.onUpdateDialogClosed()
-                if (!context.openUrl(url)) scope.launch { snackbarHost.showSnackbar(noApp) }
             },
         )
     }

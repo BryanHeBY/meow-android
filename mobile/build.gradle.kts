@@ -38,7 +38,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.madeye.meow"
+        applicationId = "io.github.bryanheby.meowz"
+        manifestPlaceholders["analyticsEnabled"] = "false"
+        if (project.findProperty("TARGET_ABI") == "arm64") {
+            ndk.abiFilters += "arm64-v8a"
+        }
     }
 
     // Only the locales the app translates. Without this, AndroidX drags in ~70

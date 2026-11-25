@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
 
     <!-- Tabs -->
     <string name="tab_home">Ana sayfa</string>
@@ -34,7 +34,7 @@
     <string name="home_top_traffic">En Çok Trafik</string>
     <string name="home_vpn_toggle">VPN bağlantısını aç veya kapat</string>
     <!-- Quick Settings tile: it mirrors the switch above and reuses the home_* status strings. -->
-    <string name="tile_label">Meow VPN</string>
+    <string name="tile_label">MeowZ VPN</string>
     <string name="home_route_mode">Yönlendirme modu</string>
     <string name="route_mode_rule">Kural</string>
     <string name="route_mode_global">Global</string>

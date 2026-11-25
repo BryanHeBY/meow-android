@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
 
     <!-- Tabs -->
     <string name="tab_home">首页</string>
@@ -34,7 +34,7 @@
     <string name="home_top_traffic">流量排行</string>
     <string name="home_vpn_toggle">开关 VPN</string>
     <!-- Quick Settings tile: it mirrors the switch above and reuses the home_* status strings. -->
-    <string name="tile_label">Meow VPN</string>
+    <string name="tile_label">MeowZ VPN</string>
     <string name="home_route_mode">路由模式</string>
     <string name="route_mode_rule">规则</string>
     <string name="route_mode_global">全局</string>

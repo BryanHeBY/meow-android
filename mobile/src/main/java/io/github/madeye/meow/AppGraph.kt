@@ -57,7 +57,6 @@ import io.github.madeye.meow.ui.screens.trafficdetails.TrafficFilter
 import io.github.madeye.meow.ui.screens.trafficdetails.TrafficPeriod
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorViewModel
 import io.github.madeye.meow.ui.util.AppVersions
-import io.github.madeye.meow.update.GitHubReleases
 import io.github.madeye.meow.vpn.ConfigReloader
 import io.github.madeye.meow.vpn.VpnStateRepository
 import kotlinx.coroutines.CoroutineScope
@@ -207,14 +206,8 @@ object AppGraph {
                     builtinDns,
                     themeMode,
                     startOnBoot,
-                    // Null in the Play build, which may only update through
-                    // Play. Built here, not in a lazy property: that delegate
-                    // is created with AppGraph, so R8 would keep the client.
-                    latestRelease = if (BuildConfig.PLAY_STORE) {
-                        null
-                    } else {
-                        GitHubReleases(userAgent = "meow-android/${BuildConfig.VERSION_NAME}")::latest
-                    },
+                    // Independently signed builds cannot install official Meow updates.
+                    latestRelease = null,
                     installedVersion = BuildConfig.VERSION_NAME,
                 )
 

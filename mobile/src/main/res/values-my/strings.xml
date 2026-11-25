@@ -5,7 +5,7 @@
   so literal digits are written as Myanmar digits too (၃၀).
 -->
 <resources>
-    <string name="app_name">Meow</string>
+    <string name="app_name">MeowZ</string>
 
     <!-- Tabs -->
     <string name="tab_home">ပင်မ</string>
@@ -39,7 +39,7 @@
     <string name="home_top_traffic">ဒေတာ အများဆုံး</string>
     <string name="home_vpn_toggle">VPN ဖွင့်/ပိတ်ရန်</string>
     <!-- Quick Settings tile: it mirrors the switch above and reuses the home_* status strings. -->
-    <string name="tile_label">Meow VPN</string>
+    <string name="tile_label">MeowZ VPN</string>
     <string name="home_route_mode">လမ်းကြောင်းမုဒ်</string>
     <string name="route_mode_rule">စည်းမျဉ်း</string>
     <string name="route_mode_global">Global</string>
