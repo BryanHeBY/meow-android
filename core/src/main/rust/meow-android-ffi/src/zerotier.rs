@@ -16,7 +16,7 @@ use std::{
 
 const MAX_FRAME: usize = 1500;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub(crate) struct NetworkView {
     pub mac: u64,
@@ -24,6 +24,31 @@ pub(crate) struct NetworkView {
     pub status: c_int,
     pub mtu: c_uint,
     pub first_ipv4_prefix: c_uint,
+    pub flags: c_uint,
+    pub name: [u8; 128],
+}
+
+impl Default for NetworkView {
+    fn default() -> Self {
+        Self {
+            mac: 0,
+            first_ipv4: 0,
+            status: 0,
+            mtu: 0,
+            first_ipv4_prefix: 0,
+            flags: 0,
+            name: [0; 128],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub(crate) struct Peer {
+    pub address: u64,
+    pub last_receive_ms: u64,
+    pub role: u32,
+    pub latency_ms: i32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -87,6 +112,8 @@ unsafe extern "C" {
         routes: *mut Route,
         capacity: usize,
     ) -> usize;
+    fn mzt_peers(client: *const c_void, out: *mut Peer, capacity: usize) -> usize;
+    fn mzt_dns_ipv4(client: *const c_void, network: u64, out: *mut u32, capacity: usize) -> usize;
     fn mzt_step(client: *mut c_void, now: i64) -> c_int;
     fn mzt_ipv4_frame(
         client: *mut c_void,
@@ -231,6 +258,28 @@ impl Client {
                     via: (r.via != 0).then(|| Ipv4Addr::from(r.via)),
                 })
             })
+            .collect()
+    }
+    pub fn peers(&self) -> Vec<Peer> {
+        let mut rows = [Peer::default(); 128];
+        let count = unsafe { mzt_peers(self.handle.as_ptr(), rows.as_mut_ptr(), rows.len()) };
+        rows[..count.min(rows.len())].to_vec()
+    }
+    pub fn dns_ipv4(&self, network: u64) -> Vec<Ipv4Addr> {
+        let mut servers = [0_u32; 4];
+        let count = unsafe {
+            mzt_dns_ipv4(
+                self.handle.as_ptr(),
+                network,
+                servers.as_mut_ptr(),
+                servers.len(),
+            )
+        };
+        servers
+            .iter()
+            .take(count)
+            .copied()
+            .map(Ipv4Addr::from)
             .collect()
     }
     pub fn step(&mut self) -> i32 {

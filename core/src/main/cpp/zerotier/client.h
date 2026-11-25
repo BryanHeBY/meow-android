@@ -21,6 +21,8 @@ typedef struct {
     int status;          /* native ZT_VirtualNetworkStatus */
     unsigned mtu;
     unsigned first_ipv4_prefix;
+    unsigned flags;
+    char name[128];
 } mzt_network_view;
 
 typedef struct {
@@ -33,6 +35,14 @@ typedef struct {
     uint64_t address;
     uint64_t last_receive_ms; /* zero if no authenticated packets received */
 } mzt_moon_root;
+
+typedef struct {
+    uint64_t address;
+    uint64_t last_receive_ms;
+    uint32_t role; /* 0 leaf, 1 moon, 2 planet */
+    int32_t latency_ms;
+} mzt_peer_view;
+size_t mzt_peers(const mzt_client *client, mzt_peer_view *out, size_t capacity);
 
 /* Returns the number of roots for a world actually loaded into the node.
  * A loaded root may have last_receive_ms == 0; loading is not reachability. */
@@ -56,6 +66,7 @@ int mzt_orbit(mzt_client *client, uint64_t world, uint64_t seed);
 int mzt_deorbit(mzt_client *client, uint64_t world);
 int mzt_network(const mzt_client *client, uint64_t network, mzt_network_view *result);
 size_t mzt_routes(const mzt_client *client, uint64_t network, mzt_route *out, size_t capacity);
+size_t mzt_dns_ipv4(const mzt_client *client, uint64_t network, uint32_t *out, size_t capacity);
 /* Drain a bounded amount of UDP I/O and service deadlines. Zero means OK. */
 int mzt_step(mzt_client *client, int64_t now);
 int mzt_ipv4_frame(mzt_client *client, int64_t now, uint64_t network, uint64_t from,

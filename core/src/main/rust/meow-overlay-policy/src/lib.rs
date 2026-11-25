@@ -37,6 +37,10 @@ impl Prefix {
         })
     }
 
+    pub fn is_default(self) -> bool {
+        self.length == 0
+    }
+
     pub fn contains(self, address: Ipv4Addr) -> bool {
         u32::from(address) & self.mask == self.network
     }
@@ -44,6 +48,12 @@ impl Prefix {
     pub fn overlaps(self, other: Self) -> bool {
         let mask = self.mask & other.mask;
         self.network & mask == other.network & mask
+    }
+}
+
+impl std::fmt::Display for Prefix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", Ipv4Addr::from(self.network), self.length)
     }
 }
 
@@ -58,6 +68,7 @@ pub enum PolicyError {
 pub enum Destination {
     Clash,
     ZeroTier,
+    ZeroTierDefault,
     DropOverlayUnavailable,
 }
 
@@ -66,6 +77,17 @@ pub struct OverlayPolicy {
 }
 
 impl OverlayPolicy {
+    /// A node may join and negotiate membership before it owns any route.
+    pub fn membership_only() -> Self {
+        Self {
+            approved: Vec::new(),
+        }
+    }
+
+    pub fn prefixes(&self) -> &[Prefix] {
+        &self.approved
+    }
+
     /// Only explicitly authorized overlay prefixes are accepted. The caller supplies
     /// the active local LAN, VPN-interface and fake-IP IPv4 ranges as conflicts.
     pub fn new(approved: Vec<Prefix>, conflicts: &[Prefix]) -> Result<Self, PolicyError> {
@@ -75,21 +97,26 @@ impl OverlayPolicy {
         if approved.iter().any(|p| p.length == 0) {
             return Err(PolicyError::DefaultRoute);
         }
+        if approved.iter().any(|p| !Self::allows_prefix(*p, conflicts)) {
+            return Err(PolicyError::ReservedOrConflictingRoute);
+        }
+        Ok(Self { approved })
+    }
+
+    pub fn allows_prefix(prefix: Prefix, conflicts: &[Prefix]) -> bool {
+        if prefix.is_default() {
+            return false;
+        }
         let reserved = [
             Prefix::new(Ipv4Addr::new(0, 0, 0, 0), 8).unwrap(),
             Prefix::new(Ipv4Addr::new(127, 0, 0, 0), 8).unwrap(),
             Prefix::new(Ipv4Addr::new(169, 254, 0, 0), 16).unwrap(),
             Prefix::new(Ipv4Addr::new(224, 0, 0, 0), 3).unwrap(),
         ];
-        if approved.iter().any(|p| {
-            reserved
-                .iter()
-                .chain(conflicts)
-                .any(|other| p.overlaps(*other))
-        }) {
-            return Err(PolicyError::ReservedOrConflictingRoute);
-        }
-        Ok(Self { approved })
+        !reserved
+            .iter()
+            .chain(conflicts)
+            .any(|other| prefix.overlaps(*other))
     }
 
     /// Keep routing intent across reconnects: an unavailable overlay is not

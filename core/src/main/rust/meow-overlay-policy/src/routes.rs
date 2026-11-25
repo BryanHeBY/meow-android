@@ -22,6 +22,17 @@ pub fn next_hop(
     advertised: &[ManagedRoute],
     destination: Ipv4Addr,
 ) -> Option<NextHop> {
+    next_hop_with_default(local, attached, advertised, destination, false)
+}
+
+/// An explicitly selected exit uses only a real, unambiguous on-link gateway.
+pub fn next_hop_with_default(
+    local: Ipv4Addr,
+    attached: Prefix,
+    advertised: &[ManagedRoute],
+    destination: Ipv4Addr,
+    allow_default: bool,
+) -> Option<NextHop> {
     if destination == local {
         return None;
     }
@@ -30,7 +41,9 @@ pub fn next_hop(
         .then_some((attached.length, Some(NextHop::OnLink)));
     for route in advertised {
         let length = route.target.length;
-        if length == 0 || !route.target.contains(destination) {
+        if (length == 0 && (!allow_default || route.via.is_none()))
+            || !route.target.contains(destination)
+        {
             continue;
         }
         // An explicit link route still works outside the node's address mask.
@@ -106,6 +119,43 @@ mod tests {
         ] {
             assert_eq!(next_hop(local, attached, &routes, ip(addr)), expect);
         }
+    }
+
+    #[test]
+    fn explicitly_enabled_exit_requires_one_real_gateway() {
+        let local = ip("10.12.0.4");
+        let attached = prefix("10.12.0.4", 24);
+        let default = ManagedRoute {
+            target: prefix("0.0.0.0", 0),
+            via: Some(ip("10.12.0.1")),
+        };
+        let destination = ip("1.1.1.1");
+        assert_eq!(next_hop(local, attached, &[default], destination), None);
+        assert_eq!(
+            next_hop_with_default(local, attached, &[default], destination, true),
+            Some(NextHop::Gateway(ip("10.12.0.1")))
+        );
+        assert_eq!(
+            next_hop_with_default(
+                local,
+                attached,
+                &[ManagedRoute {
+                    via: None,
+                    ..default
+                }],
+                destination,
+                true
+            ),
+            None
+        );
+        let other = ManagedRoute {
+            via: Some(ip("10.12.0.2")),
+            ..default
+        };
+        assert_eq!(
+            next_hop_with_default(local, attached, &[default, other], destination, true),
+            None
+        );
     }
 
     #[test]

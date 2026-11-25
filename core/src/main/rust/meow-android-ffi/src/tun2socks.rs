@@ -421,9 +421,21 @@ async fn run_tun2socks(
                 #[cfg(target_os = "android")]
                 if let Some(overlay) = overlay.as_mut() {
                     use meow_overlay_policy::Destination;
+                    if overlay.wants_dns(ip_data) && overlay.permits(ip_data).await {
+                        overlay.transmit(ip_data.to_vec());
+                        continue;
+                    }
                     match overlay.classify(ip_data) {
                         Destination::Clash => {}
                         Destination::DropOverlayUnavailable => continue,
+                        Destination::ZeroTierDefault => {
+                            if overlay.permits(ip_data).await {
+                                overlay.transmit(ip_data.to_vec());
+                                continue;
+                            }
+                            // Default routing is an opt-in by this app's filter,
+                            // not a reason to break other apps' Clash traffic.
+                        }
                         Destination::ZeroTier => {
                             if overlay.permits(ip_data).await {
                                 overlay.transmit(ip_data.to_vec());

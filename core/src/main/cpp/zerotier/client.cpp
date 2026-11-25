@@ -210,6 +210,24 @@ int mzt_join(mzt_client *c, uint64_t network) {
 int mzt_leave(mzt_client *c, uint64_t network) {
     return ZT_Node_leave(c->node, network, nullptr, nullptr);
 }
+size_t mzt_peers(const mzt_client *c, mzt_peer_view *out, size_t capacity) {
+    if (!c || !out || !capacity) return 0;
+    auto *peers = ZT_Node_peers(c->node);
+    if (!peers) return 0;
+    size_t count = 0;
+    for (size_t i = 0; i < peers->peerCount && count < capacity; ++i) {
+        const auto &p = peers->peers[i];
+        const uint32_t role = p.role == ZT_PEER_ROLE_PLANET ? 2 : (p.role == ZT_PEER_ROLE_MOON ? 1 : 0);
+        uint64_t rx = 0;
+        for (unsigned j = 0; j < p.pathCount && j < ZT_MAX_PEER_NETWORK_PATHS; ++j) {
+            rx = std::max(rx, p.paths[j].lastReceive);
+        }
+        out[count++] = {p.address, rx, role, p.latency};
+    }
+    ZT_Node_freeQueryResult(c->node, peers);
+    return count;
+}
+
 size_t mzt_moon_roots(mzt_client *c, uint64_t world, mzt_moon_root *out, size_t capacity) {
     if (!c || !out || !capacity || !world) return 0;
     try {
@@ -287,7 +305,15 @@ int mzt_network(const mzt_client *c, uint64_t network, mzt_network_view *result)
     if (!result) return 0;
     const auto *view = ZT_Node_networkConfig(c->node, network);
     if (!view) return 0;
-    *result = {view->mac, 0, static_cast<int>(view->status), view->mtu, 0};
+    *result = {};
+    result->mac = view->mac;
+    result->status = static_cast<int>(view->status);
+    result->mtu = view->mtu;
+    result->flags = (view->type == ZT_NETWORK_TYPE_PUBLIC ? 1u : 0u)
+        | (view->broadcastEnabled ? 2u : 0u) | (view->bridge ? 4u : 0u);
+    for (size_t i = 0; i < sizeof(result->name) - 1 && i < sizeof(view->name) && view->name[i]; ++i) {
+        result->name[i] = view->name[i];
+    }
     for (unsigned i = 0; i < view->assignedAddressCount; ++i) {
         const auto &a = view->assignedAddresses[i];
         if (a.ss_family == AF_INET) {
@@ -315,7 +341,7 @@ size_t mzt_routes(const mzt_client *c, uint64_t network, mzt_route *out, size_t 
             if (route.target.ss_family != AF_INET) continue;
             const auto &target = reinterpret_cast<const sockaddr_in &>(route.target);
             const auto bits = ntohs(target.sin_port);
-            if (!bits || bits > 32) continue;
+            if (bits > 32) continue;
             uint32_t via = 0;
             if (route.via.ss_family == AF_INET) {
                 via = ntohl(reinterpret_cast<const sockaddr_in &>(route.via).sin_addr.s_addr);
@@ -324,6 +350,22 @@ size_t mzt_routes(const mzt_client *c, uint64_t network, mzt_route *out, size_t 
                 continue;
             }
             out[count++] = {ntohl(target.sin_addr.s_addr), via, bits};
+        }
+    }
+    ZT_Node_freeQueryResult(c->node, const_cast<ZT_VirtualNetworkConfig *>(view));
+    return count;
+}
+size_t mzt_dns_ipv4(const mzt_client *c, uint64_t network, uint32_t *out, size_t capacity) {
+    if (!out || !capacity) return 0;
+    const auto *view = ZT_Node_networkConfig(c->node, network);
+    if (!view) return 0;
+    size_t count = 0;
+    if (view->status == ZT_NETWORK_STATUS_OK) {
+        for (size_t i = 0; i < ZT_MAX_DNS_SERVERS && count < capacity; ++i) {
+            const auto &address = view->dns.server_addr[i];
+            if (address.ss_family == AF_INET) {
+                out[count++] = ntohl(reinterpret_cast<const sockaddr_in &>(address).sin_addr.s_addr);
+            }
         }
     }
     ZT_Node_freeQueryResult(c->node, const_cast<ZT_VirtualNetworkConfig *>(view));

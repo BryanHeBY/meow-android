@@ -2,6 +2,7 @@
 use meow_overlay_policy::{
     apps::AppFilter,
     membership::{MoonOrbit, MoonWorldId, NetworkId, NodeAddress, OrbitSource},
+    routes::ManagedRoute,
     OverlayPolicy, Prefix,
 };
 use serde::Deserialize;
@@ -21,6 +22,15 @@ enum Mode {
     Exclude,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DnsMode {
+    #[default]
+    Off,
+    Network,
+    Custom,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawMoon {
@@ -34,6 +44,9 @@ struct RawConfig {
     enabled: bool,
     network: String,
     routes: Vec<String>,
+    allow_default: bool,
+    dns_mode: DnsMode,
+    dns_servers: Vec<Ipv4Addr>,
     /// Active local LAN routes as observed by the Android VPN owner.
     local_cidrs: Vec<String>,
     app_mode: Mode,
@@ -49,9 +62,46 @@ struct RawConfig {
 pub(crate) struct Config {
     pub network: NetworkId,
     pub policy: OverlayPolicy,
+    pub use_managed: bool,
+    pub allow_default: bool,
+    pub dns_mode: DnsMode,
+    pub dns_servers: Vec<Ipv4Addr>,
+    conflicts: Vec<Prefix>,
     pub filter: AppFilter,
     pub clash_filter: AppFilter,
     pub moons: Vec<MoonOrbit>,
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+impl Config {
+    pub fn acceptable_address(&self, address: Ipv4Addr) -> bool {
+        OverlayPolicy::allows_prefix(
+            Prefix::new(address, 32).expect("valid host route"),
+            &self.conflicts,
+        )
+    }
+    pub fn default_candidate(&self, packet: &[u8]) -> bool {
+        self.allow_default
+            && packet.first().is_some_and(|v| *v >> 4 == 4)
+            && packet
+                .get(16..20)
+                .is_some_and(|a| self.acceptable_address(Ipv4Addr::new(a[0], a[1], a[2], a[3])))
+    }
+
+    /// Controller-assigned on-link prefix and non-default advertised routes.
+    /// Conflicting/reserved routes are skipped individually; the network can
+    /// still be joined and its eligible routes continue to work.
+    pub fn managed_policy(&self, attached: Prefix, routes: &[ManagedRoute]) -> OverlayPolicy {
+        let mut accepted = Vec::new();
+        for target in std::iter::once(attached).chain(routes.iter().map(|route| route.target)) {
+            if !accepted.contains(&target) && OverlayPolicy::allows_prefix(target, &self.conflicts)
+            {
+                accepted.push(target);
+            }
+        }
+        OverlayPolicy::new(accepted, &self.conflicts)
+            .unwrap_or_else(|_| OverlayPolicy::membership_only())
+    }
 }
 
 fn prefix(raw: &str) -> Result<Prefix, &'static str> {
@@ -76,6 +126,7 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
         || raw.packages.len() > MAX_PACKAGES
         || raw.clash_packages.len() > MAX_PACKAGES
         || raw.moons.len() > MAX_MOONS
+        || raw.dns_servers.len() > 2
     {
         return Err("too many ZeroTier settings entries");
     }
@@ -92,8 +143,13 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
     for route in &raw.local_cidrs {
         conflicts.push(prefix(route)?);
     }
-    let policy = OverlayPolicy::new(authorized, &conflicts)
-        .map_err(|_| "ZeroTier route is empty, reserved, default, or overlaps a local route")?;
+    let use_managed = raw.routes.is_empty();
+    let policy = if use_managed {
+        OverlayPolicy::membership_only()
+    } else {
+        OverlayPolicy::new(authorized, &conflicts)
+            .map_err(|_| "ZeroTier route is reserved, default, or overlaps a local route")?
+    };
     if !raw.packages.iter().chain(&raw.clash_packages).all(|name| {
         !name.is_empty()
             && name.len() <= 255
@@ -133,6 +189,11 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
     Ok(Some(Config {
         network,
         policy,
+        use_managed,
+        allow_default: raw.allow_default,
+        dns_mode: raw.dns_mode,
+        dns_servers: raw.dns_servers,
+        conflicts,
         filter,
         clash_filter,
         moons,
@@ -188,6 +249,32 @@ mod tests {
         assert!(config.clash_filter.permits_owner(&["other"]));
         input["clash_packages"] = json!(["/invalid"]);
         assert!(parse(input.to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn joins_by_id_and_adopts_only_safe_controller_routes() {
+        let config = parse(settings(&[], &["192.168.1.0/24"]).to_string().as_bytes())
+            .unwrap()
+            .unwrap();
+        assert!(config.use_managed);
+        assert!(config.policy.prefixes().is_empty());
+        let routes = ["0.0.0.0/0", "10.20.0.0/16", "192.168.1.0/24", "28.0.0.0/8"].map(|cidr| {
+            ManagedRoute {
+                target: prefix(cidr).unwrap(),
+                via: None,
+            }
+        });
+        let policy = config.managed_policy(prefix("10.8.0.2/24").unwrap(), &routes);
+        let actual: Vec<_> = policy.prefixes().iter().map(ToString::to_string).collect();
+        assert_eq!(actual, ["10.8.0.0/24", "10.20.0.0/16"]);
+        assert_eq!(
+            policy.classify("10.20.0.2".parse().unwrap(), false),
+            Destination::DropOverlayUnavailable
+        );
+        assert_eq!(
+            policy.classify("1.1.1.1".parse().unwrap(), true),
+            Destination::Clash
+        );
     }
 
     #[test]
