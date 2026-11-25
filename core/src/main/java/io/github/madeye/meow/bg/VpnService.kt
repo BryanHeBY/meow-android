@@ -2,19 +2,22 @@ package io.github.madeye.meow.bg
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.Core
 import io.github.madeye.meow.preference.DataStore
 import io.github.madeye.meow.preference.PerAppConfigStore
+import io.github.madeye.meow.repo.OverlaySettingsRepository
 import io.github.madeye.meow.repo.PerAppMode
 import kotlinx.coroutines.CoroutineScope
 import org.json.JSONArray
+import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import android.net.VpnService as BaseVpnService
@@ -152,7 +155,28 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     fun packagesForOverlayUid(uid: Int): Array<String> =
         packageManager.getPackagesForUid(uid) ?: emptyArray()
 
+    /**
+     * Snapshot directly attached IPv4 networks before establishing our own VPN.
+     * Default routes and the gateway's remote routes are not local subnets.
+     */
+    private fun overlayConfig(): String {
+        val settings = OverlaySettingsRepository.directory.resolve("settings.json")
+        if (!settings.isFile) return "{}"
+        val config = JSONObject(settings.readText())
+        if (!config.optBoolean("enabled")) return config.toString()
+        val network = connectivity.activeNetwork
+        val capabilities = network?.let(connectivity::getNetworkCapabilities)
+        val localRoutes = if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true) {
+            connectivity.getLinkProperties(network)?.routes.orEmpty()
+                .filter { !it.hasGateway() && it.destination.address is Inet4Address && it.destination.prefixLength > 0 }
+                .map { it.destination.toString() }
+                .distinct()
+        } else emptyList()
+        return config.put("local_cidrs", JSONArray(localRoutes)).toString()
+    }
+
     private fun startVpn() {
+        val overlayConfig = overlayConfig()
         val builder = Builder()
             .setSession("Meow VPN")
             .setMtu(VPN_MTU)
@@ -243,7 +267,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         } else {
             null
         }
-        data.meowInstance!!.startTun2Socks(this, conn.fd)
+        data.meowInstance!!.startTun2Socks(this, conn.fd, overlayConfig)
     }
 
     override fun onDestroy() {
