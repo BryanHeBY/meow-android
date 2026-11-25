@@ -42,6 +42,7 @@ struct RawMoon {
 #[serde(default, deny_unknown_fields)]
 struct RawConfig {
     enabled: bool,
+    meow_forwarding: Option<bool>,
     network: String,
     routes: Vec<String>,
     allow_default: bool,
@@ -113,11 +114,30 @@ fn prefix(raw: &str) -> Result<Prefix, &'static str> {
     .ok_or("prefix length must be 0 to 32")
 }
 
+#[cfg(any(test, target_os = "android"))]
+pub(crate) fn hot_overlay_allowed(old: Option<&Config>, new: Option<&Config>) -> bool {
+    old.is_none_or(hot_without_dns_override) && new.is_none_or(hot_without_dns_override)
+}
+
+#[cfg(any(test, target_os = "android"))]
+fn hot_without_dns_override(config: &Config) -> bool {
+    config.dns_mode == DnsMode::Off && config.clash_filter.permits_owner(&[])
+}
+
 pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
+    parse_session(json).map(|(overlay, _)| overlay)
+}
+
+pub(crate) fn parse_session(json: &[u8]) -> Result<(Option<Config>, bool), &'static str> {
     if json.len() > MAX_JSON {
         return Err("ZeroTier settings exceed the size limit");
     }
     let raw: RawConfig = serde_json::from_slice(json).map_err(|_| "invalid ZeroTier settings")?;
+    let meow = raw.meow_forwarding.unwrap_or(true);
+    parse_overlay(raw).map(|overlay| (overlay, meow))
+}
+
+fn parse_overlay(raw: RawConfig) -> Result<Option<Config>, &'static str> {
     if !raw.enabled {
         return Ok(None);
     }
@@ -202,6 +222,39 @@ pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hot_switch_retains_meow_unless_dns_or_clash_gate_changes() {
+        let make = |extra: &str| {
+            let input = format!(
+                r#"{{"enabled":true,"network":"8056c2e21c000001","app_mode":"all"{extra}}}"#
+            );
+            parse(input.as_bytes()).unwrap().unwrap()
+        };
+        let split = make("");
+        assert!(hot_overlay_allowed(None, Some(&split)));
+        assert!(hot_overlay_allowed(Some(&split), None));
+        let default_route = make(r#","allow_default":true"#);
+        assert!(hot_overlay_allowed(None, Some(&default_route)));
+        assert!(hot_overlay_allowed(Some(&default_route), None));
+        for extra in [
+            r#","dns_mode":"network""#,
+            r#","clash_app_mode":"exclude","clash_packages":["example.app"]"#,
+        ] {
+            let config = make(extra);
+            assert!(!hot_overlay_allowed(None, Some(&config)));
+            assert!(!hot_overlay_allowed(Some(&config), None));
+        }
+    }
+
+    #[test]
+    fn meow_forwarding_rebuild_preference_does_not_require_an_overlay() {
+        let (overlay, meow) =
+            parse_session(br#"{"enabled":false,"meow_forwarding":false}"#).unwrap();
+        assert!(overlay.is_none());
+        assert!(!meow);
+        assert!(parse_session(br#"{}"#).unwrap().1);
+    }
+
     use super::*;
     use meow_overlay_policy::Destination;
     use serde_json::json;

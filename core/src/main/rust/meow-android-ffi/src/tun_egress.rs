@@ -1,7 +1,7 @@
 //! Bounded packet queues keep transient TUN backpressure from consuming the VPN heap.
 use std::{
     io,
-    os::fd::RawFd,
+    os::fd::AsRawFd,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
         Arc,
@@ -38,10 +38,43 @@ impl Stats {
     }
 }
 
+/// Serializes the enable/disable boundary against the nonblocking write
+/// syscall, and cancels a stalled or queued packet from the old generation.
+#[cfg(any(test, target_os = "android"))]
+pub(super) struct Gate(parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>);
+
+#[cfg(any(test, target_os = "android"))]
+impl Gate {
+    pub(super) fn new(enabled: bool) -> Arc<Self> {
+        Arc::new(Self(parking_lot::Mutex::new(
+            enabled.then(tokio_util::sync::CancellationToken::new),
+        )))
+    }
+
+    pub(super) fn snapshot(&self) -> Option<tokio_util::sync::CancellationToken> {
+        self.0.lock().clone()
+    }
+
+    pub(super) fn set(&self, enabled: bool) {
+        let mut current = self.0.lock();
+        if current.is_some() == enabled {
+            return;
+        }
+        if let Some(old) = current.take() {
+            old.cancel();
+        }
+        if enabled {
+            *current = Some(tokio_util::sync::CancellationToken::new());
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Tx {
     tx: mpsc::Sender<Packet>,
     budget: Arc<Semaphore>,
+    #[cfg(any(test, target_os = "android"))]
+    gate: Option<Arc<Gate>>,
     stats: Arc<Stats>,
 }
 
@@ -50,6 +83,8 @@ pub(super) struct Packet {
     bytes: usize,
     stats: Arc<Stats>,
     _permit: OwnedSemaphorePermit,
+    #[cfg(any(test, target_os = "android"))]
+    gate: Option<(Arc<Gate>, tokio_util::sync::CancellationToken)>,
 }
 
 impl Drop for Packet {
@@ -65,6 +100,8 @@ pub(super) fn channel(slots: usize, bytes: usize) -> (Tx, mpsc::Receiver<Packet>
         Tx {
             tx,
             budget: Arc::new(Semaphore::new(bytes)),
+            #[cfg(any(test, target_os = "android"))]
+            gate: None,
             stats: stats.clone(),
         },
         rx,
@@ -73,9 +110,55 @@ pub(super) fn channel(slots: usize, bytes: usize) -> (Tx, mpsc::Receiver<Packet>
 }
 
 impl Tx {
+    #[cfg(any(test, target_os = "android"))]
+    pub(super) fn gated(&self, gate: Arc<Gate>) -> Self {
+        Self {
+            gate: Some(gate),
+            ..self.clone()
+        }
+    }
+
     /// Drop the newest packet on overflow; waiting here could deadlock the
     /// lwIP pump or stall the ZeroTier SDK owner thread.
     pub(crate) fn enqueue(&self, data: Vec<u8>) {
+        #[cfg(any(test, target_os = "android"))]
+        let gate = if let Some(gate) = &self.gate {
+            let Some(generation) = gate.snapshot() else {
+                return;
+            };
+            Some((gate.clone(), generation))
+        } else {
+            None
+        };
+        self.enqueue_inner(
+            data,
+            #[cfg(any(test, target_os = "android"))]
+            gate,
+        );
+    }
+
+    #[cfg(target_os = "android")]
+    pub(super) fn enqueue_at(
+        &self,
+        data: Vec<u8>,
+        generation: tokio_util::sync::CancellationToken,
+    ) {
+        if generation.is_cancelled() {
+            return;
+        }
+        if let Some(gate) = &self.gate {
+            self.enqueue_inner(data, Some((gate.clone(), generation)));
+        }
+    }
+
+    fn enqueue_inner(
+        &self,
+        data: Vec<u8>,
+        #[cfg(any(test, target_os = "android"))] gate: Option<(
+            Arc<Gate>,
+            tokio_util::sync::CancellationToken,
+        )>,
+    ) {
         let bytes = data.capacity();
         let Ok(slot) = self.tx.try_reserve() else {
             if !self.tx.is_closed() {
@@ -97,21 +180,52 @@ impl Tx {
             bytes,
             stats: self.stats.clone(),
             _permit: permit,
+            #[cfg(any(test, target_os = "android"))]
+            gate,
         });
     }
 }
 
-pub(super) async fn write(tun: &AsyncFd<RawFd>, packet: Packet) -> io::Result<()> {
+pub(super) async fn write(tun: &AsyncFd<impl AsRawFd>, packet: Packet) -> io::Result<()> {
     let start = Instant::now();
     let result = loop {
-        let mut ready = match tun.writable().await {
+        let writable = tun.writable();
+        #[cfg(any(test, target_os = "android"))]
+        let writable = async {
+            if let Some((_, generation)) = &packet.gate {
+                tokio::select! {
+                    biased;
+                    _ = generation.cancelled() => return None,
+                    r = writable => return Some(r),
+                }
+            }
+            Some(writable.await)
+        };
+        #[cfg(any(test, target_os = "android"))]
+        let Some(writable) = writable.await
+        else {
+            break Ok(());
+        };
+        #[cfg(not(any(test, target_os = "android")))]
+        let writable = writable.await;
+        let mut ready = match writable {
             Ok(ready) => ready,
             Err(error) => break Err(error),
         };
         let result = ready.try_io(|fd| {
+            #[cfg(any(test, target_os = "android"))]
+            let _guard = if let Some((gate, generation)) = &packet.gate {
+                let guard = gate.0.lock();
+                if generation.is_cancelled() {
+                    return Ok(());
+                }
+                Some(guard)
+            } else {
+                None
+            };
             let written = unsafe {
                 libc::write(
-                    *fd.get_ref(),
+                    fd.get_ref().as_raw_fd(),
                     packet.data.as_ptr().cast(),
                     packet.data.len(),
                 )
@@ -148,10 +262,7 @@ pub(super) async fn write(tun: &AsyncFd<RawFd>, packet: Packet) -> io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        os::{fd::AsRawFd, unix::net::UnixDatagram},
-        time::Duration,
-    };
+    use std::{os::unix::net::UnixDatagram, time::Duration};
     use tokio::io::Interest;
 
     #[test]
@@ -181,13 +292,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closed_gate_discards_old_packets_even_after_reenable() {
+        let (tx, mut rx, _stats) = channel(4, 128);
+        let gate = Gate::new(true);
+        let tx = tx.gated(gate.clone());
+        tx.enqueue(vec![1]);
+        gate.set(false);
+        assert!(!gate.snapshot().is_some());
+        tx.enqueue(vec![2]);
+        gate.set(true);
+        assert!(gate.snapshot().is_some());
+        tx.enqueue(vec![3]);
+
+        let (sender, receiver) = UnixDatagram::pair().unwrap();
+        sender.set_nonblocking(true).unwrap();
+        receiver.set_nonblocking(true).unwrap();
+        // SAFETY: registration owns the already nonblocking socket.
+        let fd = unsafe { AsyncFd::register_with_interest(sender, Interest::WRITABLE) }.unwrap();
+        write(&fd, rx.try_recv().unwrap()).await.unwrap();
+        write(&fd, rx.try_recv().unwrap()).await.unwrap();
+        let mut received = [0; 1];
+        assert_eq!(receiver.recv(&mut received).unwrap(), 1);
+        assert_eq!(received, [3]);
+        assert_eq!(
+            receiver.recv(&mut received).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn cancelling_a_stalled_write_releases_its_budget() {
         let (sender, _receiver) = UnixDatagram::pair().unwrap();
         sender.set_nonblocking(true).unwrap();
         while sender.send(&[0; 1024]).is_ok() {}
         // The sender stays alive until after deregistration of fd.
-        let fd = unsafe { AsyncFd::register_with_interest(sender.as_raw_fd(), Interest::WRITABLE) }
-            .unwrap();
+        // SAFETY: registration owns a duplicate of the nonblocking socket.
+        let fd = unsafe {
+            AsyncFd::register_with_interest(sender.try_clone().unwrap(), Interest::WRITABLE)
+        }
+        .unwrap();
         let (tx, mut rx, stats) = channel(2, 128);
         tx.enqueue(vec![0; 128]);
         let mut pending = Box::pin(write(&fd, rx.try_recv().unwrap()));
@@ -209,8 +353,11 @@ mod tests {
         receiver.set_nonblocking(true).unwrap();
         // First drain the cached reactor readiness into EAGAIN.
         // The sender stays alive until after deregistration of fd.
-        let fd = unsafe { AsyncFd::register_with_interest(sender.as_raw_fd(), Interest::WRITABLE) }
-            .unwrap();
+        // SAFETY: registration owns a duplicate of the nonblocking socket.
+        let fd = unsafe {
+            AsyncFd::register_with_interest(sender.try_clone().unwrap(), Interest::WRITABLE)
+        }
+        .unwrap();
         drop(fd.writable().await.unwrap());
         while sender.send(&[0; 1024]).is_ok() {}
         let (tx, mut rx, stats) = channel(2, 128);

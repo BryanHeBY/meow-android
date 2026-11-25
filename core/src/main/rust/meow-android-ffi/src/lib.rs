@@ -700,7 +700,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
             .get_string(&overlay_settings)
             .map_err(|e| e.to_string())?
             .into();
-        let config = zerotier_config::parse(json.as_bytes())?;
+        let (config, meow_enabled) = zerotier_config::parse_session(json.as_bytes())?;
         // Capture this exact service instance, not a process-global pointer
         // that a newer session can replace while the old task exits.
         let report_exit = env.get_java_vm().ok().and_then(|jvm| {
@@ -722,7 +722,12 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
                 }) as Box<dyn FnOnce(i32) + Send>
             })
         });
-        tun2socks::start_android(fd, config.map(|config| (root.into(), config)), report_exit)
+        tun2socks::start_android(
+            fd,
+            config.map(|config| (root.into(), config)),
+            report_exit,
+            meow_enabled,
+        )
     })();
     #[cfg(not(target_os = "android"))]
     let start = {
@@ -737,6 +742,80 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
         Err(e) => {
             logging::bridge_log(&format!("nativeStartTun2Socks: ERROR: {}", e));
             set_error(e);
+            -1
+        }
+    }
+}
+
+/// Stops only raw packet forwarding. The engine, protected sockets,
+/// controller API, fake-IP and selector state do not belong to the TUN fd.
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStopTun2Socks(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    if tun2socks::stop() {
+        // UDP NAT entries belong to the old TUN readers. Close those sessions
+        // so the new forwarding generation doesn't reuse pending replies.
+        if let Some(engine) = ENGINE.lock().as_ref() {
+            engine.tunnel.close_all_udp_sessions();
+        }
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeApplyZeroTier(
+    mut env: JNIEnv,
+    _class: JClass,
+    overlay_root: JString,
+    overlay_settings: JString,
+) -> jint {
+    use tun2socks::OverlayApplyError::{NotApplied, OutcomeUnknown};
+    let result = (|| {
+        let root: String = env
+            .get_string(&overlay_root)
+            .map_err(|e| NotApplied(e.to_string()))?
+            .into();
+        let json: String = env
+            .get_string(&overlay_settings)
+            .map_err(|e| NotApplied(e.to_string()))?
+            .into();
+        let config = zerotier_config::parse(json.as_bytes()).map_err(|e| NotApplied(e.into()))?;
+        tun2socks::apply_overlay(config.map(|config| (root.into(), config)))
+    })();
+    match result {
+        Ok(true) => 0,
+        Ok(false) => 1,
+        Err(OutcomeUnknown) => {
+            set_error("ZeroTier apply outcome unknown; reconnect before retrying".into());
+            -2
+        }
+        Err(NotApplied(mut err)) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
+                err = "invalid ZeroTier JNI input".into();
+            }
+            set_error(err);
+            -1
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeSetMeowForwarding(
+    _env: JNIEnv,
+    _class: JClass,
+    enabled: jboolean,
+) -> jint {
+    match tun2socks::set_meow_forwarding(enabled != JNI_FALSE) {
+        Ok(()) => 0,
+        Err(err) => {
+            set_error(err.into());
             -1
         }
     }

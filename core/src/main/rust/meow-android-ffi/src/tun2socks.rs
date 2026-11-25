@@ -25,8 +25,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::os::raw::c_void;
-use std::os::unix::io::RawFd;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -40,6 +40,10 @@ use tracing::{trace, warn};
 
 type UdpMsg = (Vec<u8>, SocketAddr, SocketAddr);
 type AnyIpPktFrame = Vec<u8>;
+#[cfg(target_os = "android")]
+type StackFrame = (AnyIpPktFrame, tokio_util::sync::CancellationToken);
+#[cfg(not(target_os = "android"))]
+type StackFrame = AnyIpPktFrame;
 type FlowTasks = Arc<Mutex<Vec<JoinHandle<()>>>>;
 type NatKey = (SocketAddr, SocketAddr);
 /// The NAT session each running reply reader serves, by NAT key. Holding the
@@ -96,6 +100,91 @@ static TUN2SOCKS_STOP_NOTIFY: Notify = Notify::const_new();
 // Handle of the running session's top-level task, so `stop()` can wait for
 // it to finish touching the TUN fd before Kotlin closes it.
 static TUN2SOCKS_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+#[cfg(target_os = "android")]
+type MeowGate = Arc<crate::tun_egress::Gate>;
+
+#[cfg(target_os = "android")]
+struct TunControl {
+    overlay: mpsc::Sender<OverlayCommand>,
+    meow: MeowGate,
+}
+
+#[cfg(target_os = "android")]
+static TUN_CONTROL: Mutex<Option<TunControl>> = Mutex::new(None);
+
+#[cfg(target_os = "android")]
+struct OverlayCommand {
+    target: Overlay,
+    claim: Arc<CommandClaim>,
+    reply: tokio::sync::oneshot::Sender<Result<bool, String>>,
+}
+
+#[cfg(any(test, target_os = "android"))]
+#[derive(Default)]
+struct CommandClaim(std::sync::atomic::AtomicU8);
+
+#[cfg(any(test, target_os = "android"))]
+impl CommandClaim {
+    fn claim(&self) -> bool {
+        self.0
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    /// Returns true only when the reader can no longer begin this command.
+    fn cancel_before_apply(&self) -> bool {
+        self.0
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
+
+#[cfg(target_os = "android")]
+pub enum OverlayApplyError {
+    NotApplied(String),
+    OutcomeUnknown,
+}
+
+#[cfg(target_os = "android")]
+pub fn apply_overlay(target: Overlay) -> Result<bool, OverlayApplyError> {
+    use OverlayApplyError::{NotApplied, OutcomeUnknown};
+    let sender = TUN_CONTROL
+        .lock()
+        .as_ref()
+        .ok_or_else(|| NotApplied("TUN is not active".into()))?
+        .overlay
+        .clone();
+    let claim = Arc::new(CommandClaim::default());
+    let (reply, mut response) = tokio::sync::oneshot::channel();
+    sender
+        .try_send(OverlayCommand {
+            target,
+            claim: claim.clone(),
+            reply,
+        })
+        .map_err(|_| NotApplied("ZeroTier apply is busy or TUN has stopped".into()))?;
+    let reply = crate::get_runtime()
+        .block_on(async { tokio::time::timeout(TUN2SOCKS_STOP_TIMEOUT, &mut response).await });
+    match reply {
+        Ok(Ok(result)) => result.map_err(NotApplied),
+        Ok(Err(_)) => Err(OutcomeUnknown),
+        Err(_) if claim.cancel_before_apply() => Err(NotApplied(
+            "ZeroTier apply timed out before it could start".into(),
+        )),
+        Err(_) => response
+            .try_recv()
+            .map_err(|_| OutcomeUnknown)?
+            .map_err(NotApplied),
+    }
+}
+
+#[cfg(target_os = "android")]
+pub fn set_meow_forwarding(enabled: bool) -> Result<(), &'static str> {
+    let active = TUN_CONTROL.lock();
+    let control = active.as_ref().ok_or("TUN is not active")?;
+    control.meow.set(enabled);
+    Ok(())
+}
 const TUN2SOCKS_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 
 const DNS_BURST_CAP: usize = 256;
@@ -130,6 +219,8 @@ pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
         None,
         #[cfg(target_os = "android")]
         None,
+        #[cfg(target_os = "android")]
+        true,
     )
 }
 
@@ -141,15 +232,21 @@ pub fn start_android(
     fd: i32,
     config: Overlay,
     report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
+    meow_enabled: bool,
 ) -> Result<(), String> {
-    start_inner(fd, config, report_exit)
+    start_inner(fd, config, report_exit, meow_enabled)
 }
 
 fn start_inner(
     fd: i32,
     #[cfg(target_os = "android")] overlay: Overlay,
     #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
+    #[cfg(target_os = "android")] meow_enabled: bool,
 ) -> Result<(), String> {
+    let mut task = TUN2SOCKS_TASK.lock();
+    if task.as_ref().is_some_and(|task| !task.is_finished()) {
+        return Err("previous TUN forwarding is still shutting down".into());
+    }
     if TUN2SOCKS_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -165,12 +262,40 @@ fn start_inner(
         return Err(error.to_string());
     }
 
+    // The OS/service owner keeps the source descriptor. Every async task
+    // retains an owned duplicate, so even a crash or shutdown timeout cannot
+    // read/write an unrelated fd after its number is reused by Android.
+    let tun_fd = match unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned() {
+        Ok(owned) => owned,
+        Err(error) => {
+            TUN2SOCKS_ACTIVE.store(false, Ordering::SeqCst);
+            return Err(error.to_string());
+        }
+    };
+    #[cfg(target_os = "android")]
+    let (overlay_tx, overlay_rx) = mpsc::channel(1);
+    #[cfg(target_os = "android")]
+    let meow = crate::tun_egress::Gate::new(meow_enabled);
+    #[cfg(target_os = "android")]
+    let meow_task = meow.clone();
+    #[cfg(target_os = "android")]
+    {
+        *TUN_CONTROL.lock() = Some(TunControl {
+            overlay: overlay_tx,
+            meow,
+        });
+    }
+
     let rt = crate::get_runtime();
     let handle = rt.spawn(async move {
         let run = run_tun2socks(
-            fd,
+            tun_fd,
             #[cfg(target_os = "android")]
             overlay,
+            #[cfg(target_os = "android")]
+            Some(overlay_rx),
+            #[cfg(target_os = "android")]
+            meow_task,
         );
         let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(run)).await;
         let reason = match result {
@@ -185,6 +310,10 @@ fn start_inner(
             }
         };
         let requested = TUN2SOCKS_STOP_REQUESTED.swap(false, Ordering::SeqCst);
+        #[cfg(target_os = "android")]
+        {
+            *TUN_CONTROL.lock() = None;
+        }
         TUN2SOCKS_ACTIVE.store(false, Ordering::SeqCst);
         #[cfg(target_os = "android")]
         if let Some(report) = report_exit.filter(|_| !requested || reason != 1) {
@@ -194,7 +323,7 @@ fn start_inner(
         let _ = (requested, reason);
         logging::bridge_log("tun2socks exited");
     });
-    *TUN2SOCKS_TASK.lock() = Some(handle);
+    *task = Some(handle);
 
     Ok(())
 }
@@ -211,28 +340,28 @@ fn set_nonblocking(fd: RawFd) -> io::Result<()> {
 
 /// Request shutdown and block until the session's reader/writer tasks have
 /// stopped using the TUN fd (bounded by `TUN2SOCKS_STOP_TIMEOUT`).
-pub fn stop() {
+pub fn stop() -> bool {
+    // Do not consume a handle that cannot be joined by this caller. A later
+    // retry still waits for the original tasks, before any new session starts.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return false;
+    }
+    let mut task = TUN2SOCKS_TASK.lock();
     TUN2SOCKS_STOP_REQUESTED.store(true, Ordering::SeqCst);
     TUN2SOCKS_STOP_NOTIFY.notify_waiters();
-    let Some(handle) = TUN2SOCKS_TASK.lock().take() else {
-        return;
+    let Some(handle) = task.as_mut() else {
+        TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+        return true;
     };
-    // Only block from a non-runtime thread (JNI callers); block_on would
-    // panic inside a tokio worker.
-    if tokio::runtime::Handle::try_current().is_ok() {
-        return;
-    }
-    // `timeout()` registers with the current runtime's timer, and a JNI
-    // thread is only inside one within `block_on` — so build it there. Built
-    // as the argument it panicked ("no reactor running") on every stop, and
-    // a panic cannot unwind out of a JNI entry point: :vpn aborted.
-    let rt = crate::get_runtime();
-    if rt
-        .block_on(async move { tokio::time::timeout(TUN2SOCKS_STOP_TIMEOUT, handle).await })
-        .is_err()
-    {
+    let stopped = crate::get_runtime()
+        .block_on(async { tokio::time::timeout(TUN2SOCKS_STOP_TIMEOUT, handle).await })
+        .is_ok();
+    if stopped {
+        task.take();
+    } else {
         logging::bridge_log("tun2socks: stop timed out waiting for shutdown");
     }
+    stopped
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +369,10 @@ pub fn stop() {
 // ---------------------------------------------------------------------------
 
 async fn run_tun2socks(
-    fd: RawFd,
+    fd: OwnedFd,
     #[cfg(target_os = "android")] overlay: Overlay,
+    #[cfg(target_os = "android")] mut overlay_control: Option<mpsc::Receiver<OverlayCommand>>,
+    #[cfg(target_os = "android")] meow: MeowGate,
 ) -> io::Result<()> {
     logging::bridge_log("tun2socks: building lwip netstack");
 
@@ -253,29 +384,23 @@ async fn run_tun2socks(
     let (udp_reply_tx, mut udp_reply_rx) = mpsc::channel::<UdpMsg>(256);
     let reply_readers: ReplyReaders = Arc::new(Mutex::new(HashMap::new()));
 
-    let (stack_ingress_tx, mut stack_ingress_rx) = mpsc::channel::<AnyIpPktFrame>(256);
+    let (stack_ingress_tx, mut stack_ingress_rx) = mpsc::channel::<StackFrame>(256);
     // One reactor registration for both directions; the tasks each own
     // their readiness guard and stop waits for both before the fd closes.
+    // SAFETY: the owned fd stays open and nonblocking until the registration
+    // and all AsyncFd handles are dropped. No one else can close this dup.
     let tun = Arc::new(unsafe {
         AsyncFd::register_with_interest(fd, Interest::READABLE | Interest::WRITABLE)?
     });
     let (egress_tx, mut egress_rx, egress_stats) = crate::tun_egress::channel(256, 2 * 1024 * 1024);
     #[cfg(target_os = "android")]
-    let (overlay_out, mut overlay_in, overlay_stats) = crate::tun_egress::channel(128, 512 * 1024);
+    let egress_tx = egress_tx.gated(meow.clone());
     #[cfg(target_os = "android")]
-    let overlay = match overlay {
-        Some((root, config)) => Some(Arc::new(crate::zerotier_worker::Worker::start(
-            config,
-            root,
-            overlay_out,
-        )?)),
-        None => None,
-    };
-    // Restricted app policy applies independently of the Android capture set.
+    let (overlay_out, mut overlay_in, overlay_stats) = crate::tun_egress::channel(128, 512 * 1024);
     #[cfg(target_os = "android")]
     let clash_gate = overlay
         .as_ref()
-        .map(|worker| &worker.config.clash_filter)
+        .map(|(_, config)| &config.clash_filter)
         .filter(|filter| !filter.permits_owner(&[]))
         .map(|filter| Arc::new(filter.clone()));
     #[cfg(not(target_os = "android"))]
@@ -301,7 +426,20 @@ async fn run_tun2socks(
                 pkt = stack_ingress_rx.recv() => {
                     match pkt {
                         Some(frame) => {
-                            if let Err(e) = stack.send(frame).await {
+                            #[cfg(target_os = "android")]
+                            let result = {
+                                let (bytes, generation) = frame;
+                                // Reserve in the Sink before submitting; select
+                                // cancellation first to discard a blocked old frame.
+                                tokio::select! {
+                                    biased;
+                                    _ = generation.cancelled() => continue,
+                                    result = stack.send(bytes) => result,
+                                }
+                            };
+                            #[cfg(not(target_os = "android"))]
+                            let result = stack.send(frame).await;
+                            if let Err(e) = result {
                                 logging::bridge_log(&format!("stack send error: {}", e));
                                 break;
                             }
@@ -411,34 +549,34 @@ async fn run_tun2socks(
             gate: clash_gate,
         };
         #[cfg(target_os = "android")]
-        let owner_lanes = overlay
-            .as_ref()
-            .filter(|o| !o.config.filter.permits_owner(&[]))
-            .map(|overlay| {
-                let overlay = Arc::clone(overlay);
-                let ingress = ingress.clone();
-                tun_owner_ingress::Lanes::new(
-                    8,
-                    16,
-                    512 * 1024,
-                    move |(packet, initial): (Vec<u8>, _)| {
-                        let overlay = Arc::clone(&overlay);
-                        let ingress = ingress.clone();
-                        async move {
-                            match overlay_exit(&overlay, initial, &packet).await {
-                                OverlayExit::Transmit => overlay.transmit(packet),
-                                OverlayExit::Drop => (),
-                                OverlayExit::Clash if ingress.spawn_dns(&packet) => (),
-                                OverlayExit::Clash => {
-                                    let _ = ingress.stack.send(packet).await;
-                                }
-                            }
-                        }
-                    },
-                )
-            });
+        let (mut overlay, mut owner_lanes) = match overlay {
+            Some((root, config)) => {
+                let active = LiveOverlay::start(root, config, &overlay_out)?;
+                let lanes = make_owner_lanes(&active, &ingress);
+                (Some(active), lanes)
+            }
+            None => (None, None),
+        };
 
         let result = 'reader: loop {
+            #[cfg(target_os = "android")]
+            let mut ready = tokio::select! {
+                biased;
+                _ = &mut stopped => break Ok(()),
+                command = recv_overlay_command(&mut overlay_control) => {
+                    if let Some(command) = command {
+                        handle_overlay_command(command, &mut overlay, &mut owner_lanes, &ingress, &overlay_out).await;
+                    } else {
+                        overlay_control = None;
+                    }
+                    continue;
+                }
+                ready = tun.readable() => match ready {
+                    Ok(ready) => ready,
+                    Err(e) => break Err(e),
+                },
+            };
+            #[cfg(not(target_os = "android"))]
             let mut ready = tokio::select! {
                 biased;
                 _ = &mut stopped => break Ok(()),
@@ -453,8 +591,13 @@ async fn run_tun2socks(
             // Bound each drain batch: with active lanes and a perpetually
             // readable fd, a synchronous enqueue loop must yield to workers.
             for _ in 0..64 {
-                let n =
-                    unsafe { libc::read(fd, read_buf.as_mut_ptr() as *mut c_void, read_buf.len()) };
+                let n = unsafe {
+                    libc::read(
+                        tun.get_ref().as_raw_fd(),
+                        read_buf.as_mut_ptr() as *mut c_void,
+                        read_buf.len(),
+                    )
+                };
                 if n == 0 {
                     break 'reader Err(io::ErrorKind::UnexpectedEof.into());
                 }
@@ -473,14 +616,19 @@ async fn run_tun2socks(
                 let ip_data = &read_buf[..n];
 
                 #[cfg(target_os = "android")]
-                if let Some(overlay) = &overlay {
+                let meow_generation = meow.snapshot();
+                #[cfg(target_os = "android")]
+                if let Some(active) = &overlay {
+                    let overlay = &active.worker;
                     let initial = overlay.classify(ip_data);
                     let unrestricted = owner_lanes.is_none();
                     if let Some(lanes) = &owner_lanes {
                         if let Ok(flow) = meow_overlay_policy::wire::flow(ip_data) {
                             // Keep even immediate Clash packets on this lane: the
                             // route can change while an earlier packet awaits JNI.
-                            if !lanes.enqueue(flow, n as u32, || (ip_data.to_vec(), initial)) {
+                            if !lanes.enqueue(flow, n as u32, || {
+                                (ip_data.to_vec(), initial, meow_generation.clone())
+                            }) {
                                 warn_capped(
                                     &OWNER_CAP_LOG_LAST_MS,
                                     "tun2socks: app-owner queue full, dropping packet",
@@ -509,19 +657,47 @@ async fn run_tun2socks(
                     }
                 }
 
-                if ingress.spawn_dns(ip_data) {
+                #[cfg(target_os = "android")]
+                let Some(generation) = meow_generation
+                else {
+                    continue;
+                };
+                if ingress.spawn_dns(
+                    ip_data,
+                    #[cfg(target_os = "android")]
+                    generation.clone(),
+                ) {
                     continue;
                 }
-                if !send_ingress(&ingress.stack, ip_data.to_vec(), &mut stopped).await {
+                #[cfg(target_os = "android")]
+                let frame = (ip_data.to_vec(), generation);
+                #[cfg(not(target_os = "android"))]
+                let frame = ip_data.to_vec();
+                #[cfg(target_os = "android")]
+                let forwarded = tokio::select! {
+                    biased;
+                    command = recv_overlay_command(&mut overlay_control) => {
+                        // Policy changes cut this packet at the owner boundary:
+                        // do not enqueue a frame classified under older rules.
+                        if let Some(command) = command {
+                            handle_overlay_command(command, &mut overlay, &mut owner_lanes, &ingress, &overlay_out).await;
+                        } else {
+                            overlay_control = None;
+                        }
+                        continue 'reader;
+                    }
+                    success = send_ingress(&ingress.stack, frame, &mut stopped) => success,
+                };
+                #[cfg(not(target_os = "android"))]
+                let forwarded = send_ingress(&ingress.stack, frame, &mut stopped).await;
+                if !forwarded {
                     break 'reader Ok(());
                 }
             }
             tokio::task::yield_now().await;
         };
         #[cfg(target_os = "android")]
-        if let Some(lanes) = owner_lanes {
-            lanes.shutdown().await;
-        }
+        retire_overlay(overlay, owner_lanes).await;
         result
     });
 
@@ -542,6 +718,146 @@ async fn run_tun2socks(
     ));
     logging::bridge_log("tun2socks: exiting");
     reader.map_err(io::Error::other)?
+}
+
+#[cfg(target_os = "android")]
+struct LiveOverlay {
+    worker: Arc<crate::zerotier_worker::Worker>,
+    // Only this generation can emit ZeroTier packets. A detached worker's
+    // queue is discarded even if the shared TUN writer was backpressured.
+    egress: Arc<crate::tun_egress::Gate>,
+}
+
+#[cfg(target_os = "android")]
+impl LiveOverlay {
+    fn start(
+        root: std::path::PathBuf,
+        config: crate::zerotier_config::Config,
+        out: &crate::tun_egress::Tx,
+    ) -> io::Result<Self> {
+        let egress = crate::tun_egress::Gate::new(true);
+        let worker =
+            crate::zerotier_worker::Worker::start(config, root, out.gated(egress.clone()))?;
+        Ok(Self {
+            worker: Arc::new(worker),
+            egress,
+        })
+    }
+}
+
+#[cfg(target_os = "android")]
+type OwnerPacket = (
+    Vec<u8>,
+    Destination,
+    Option<tokio_util::sync::CancellationToken>,
+);
+
+#[cfg(target_os = "android")]
+type OwnerLanes = tun_owner_ingress::Lanes<OwnerPacket>;
+
+#[cfg(target_os = "android")]
+fn make_owner_lanes(overlay: &LiveOverlay, ingress: &ClashIngress) -> Option<OwnerLanes> {
+    if overlay.worker.config.filter.permits_owner(&[]) {
+        return None;
+    }
+    let worker = overlay.worker.clone();
+    let ingress = ingress.clone();
+    Some(tun_owner_ingress::Lanes::new(
+        8,
+        16,
+        512 * 1024,
+        move |(packet, initial, generation): OwnerPacket| {
+            let overlay = worker.clone();
+            let ingress = ingress.clone();
+            async move {
+                match overlay_exit(&overlay, initial, &packet).await {
+                    OverlayExit::Transmit => overlay.transmit(packet),
+                    OverlayExit::Drop => (),
+                    OverlayExit::Clash => {
+                        let Some(generation) = generation.filter(|g| !g.is_cancelled()) else {
+                            return;
+                        };
+                        if !ingress.spawn_dns(&packet, generation.clone()) {
+                            let _ = ingress.stack.send((packet, generation)).await;
+                        }
+                    }
+                }
+            }
+        },
+    ))
+}
+
+#[cfg(target_os = "android")]
+async fn retire_overlay(overlay: Option<LiveOverlay>, lanes: Option<OwnerLanes>) {
+    if let Some(active) = &overlay {
+        active.egress.set(false);
+    }
+    if let Some(lanes) = lanes {
+        lanes.shutdown().await;
+    }
+    if let Some(overlay) = overlay {
+        // Worker::drop joins its OS thread. Never block Tokio on that join.
+        let _ = tokio::task::spawn_blocking(move || drop(overlay)).await;
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn replace_overlay(
+    target: Overlay,
+    active: &mut Option<LiveOverlay>,
+    lanes: &mut Option<OwnerLanes>,
+    ingress: &ClashIngress,
+    out: &crate::tun_egress::Tx,
+) -> Result<bool, String> {
+    if active.is_none() && target.is_none() {
+        return Ok(true);
+    }
+    // A live replacement could open the same identity/state concurrently.
+    // Changes to the static Clash gate or DNS interception need a new
+    // native TUN forwarding generation instead. Public IPv4 changes are
+    // intentional when the user enables default-route ownership; the same
+    // fail-closed classifier used at cold start handles them without edits.
+    if active.is_some() && target.is_some() {
+        return Ok(false);
+    }
+    if !crate::zerotier_config::hot_overlay_allowed(
+        active.as_ref().map(|old| old.worker.config.as_ref()),
+        target.as_ref().map(|(_, config)| config),
+    ) {
+        return Ok(false);
+    }
+    if let Some((root, config)) = target {
+        let next = LiveOverlay::start(root, config, out).map_err(|err| err.to_string())?;
+        *lanes = make_owner_lanes(&next, ingress);
+        *active = Some(next);
+    } else {
+        retire_overlay(active.take(), lanes.take()).await;
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "android")]
+async fn handle_overlay_command(
+    command: OverlayCommand,
+    active: &mut Option<LiveOverlay>,
+    lanes: &mut Option<OwnerLanes>,
+    ingress: &ClashIngress,
+    out: &crate::tun_egress::Tx,
+) {
+    if command.claim.claim() {
+        let result = replace_overlay(command.target, active, lanes, ingress, out).await;
+        let _ = command.reply.send(result);
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn recv_overlay_command(
+    control: &mut Option<mpsc::Receiver<OverlayCommand>>,
+) -> Option<OverlayCommand> {
+    match control {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -583,7 +899,7 @@ async fn overlay_exit(
 
 #[derive(Clone)]
 struct ClashIngress {
-    stack: mpsc::Sender<AnyIpPktFrame>,
+    stack: mpsc::Sender<StackFrame>,
     dns_sem: Arc<Semaphore>,
     tasks: FlowTasks,
     egress: crate::tun_egress::Tx,
@@ -592,7 +908,11 @@ struct ClashIngress {
 
 impl ClashIngress {
     // The DNS handler keeps its original per-request concurrency and deadline.
-    fn spawn_dns(&self, ip_data: &[u8]) -> bool {
+    fn spawn_dns(
+        &self,
+        ip_data: &[u8],
+        #[cfg(target_os = "android")] generation: tokio_util::sync::CancellationToken,
+    ) -> bool {
         // In-process DNS: intercept UDP/53 pre-stack.
         if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
             let permit = match self.dns_sem.clone().try_acquire_owned() {
@@ -647,7 +967,18 @@ impl ClashIngress {
                     let Some(reply_pkt) = build_udp_reply(&request, &response_payload) else {
                         return;
                     };
+                    #[cfg(target_os = "android")]
+                    egress.enqueue_at(reply_pkt, generation.clone());
+                    #[cfg(not(target_os = "android"))]
                     egress.enqueue(reply_pkt);
+                };
+                #[cfg(target_os = "android")]
+                let work = async {
+                    tokio::select! {
+                        biased;
+                        _ = generation.cancelled() => (),
+                        _ = work => (),
+                    }
                 };
                 if tokio::time::timeout(DNS_TASK_TIMEOUT, work).await.is_err() {
                     trace!(
@@ -663,9 +994,9 @@ impl ClashIngress {
     }
 }
 
-async fn send_ingress(
-    tx: &mpsc::Sender<AnyIpPktFrame>,
-    frame: AnyIpPktFrame,
+async fn send_ingress<T>(
+    tx: &mpsc::Sender<T>,
+    frame: T,
     stopped: &mut (impl std::future::Future<Output = ()> + Unpin),
 ) -> bool {
     // A full ingress queue must not hide stop from the TUN reader. Cancelling
@@ -1103,6 +1434,17 @@ fn ipv4_header_checksum(h: &[u8]) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn apply_deadline_and_reader_claim_are_exclusive() {
+        let cancelled = CommandClaim::default();
+        assert!(cancelled.cancel_before_apply());
+        assert!(!cancelled.claim());
+        let begun = CommandClaim::default();
+        assert!(begun.claim());
+        assert!(!begun.cancel_before_apply());
+        assert!(!begun.claim());
+    }
+
     #[tokio::test]
     async fn native_reply_scratch_releases_on_pending_and_copies_large_datagrams() {
         let first = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -1520,9 +1862,13 @@ mod tests {
                 tokio::time::timeout(
                     Duration::from_secs(2),
                     run_tun2socks(
-                        socket.as_raw_fd(),
+                        socket.into(),
                         #[cfg(target_os = "android")]
                         None,
+                        #[cfg(target_os = "android")]
+                        None,
+                        #[cfg(target_os = "android")]
+                        crate::tun_egress::Gate::new(true),
                     ),
                 )
                 .await
