@@ -11,6 +11,7 @@ use meow_overlay_policy::{
 use serde::Serialize;
 use std::{
     fs,
+    io::Read,
     net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::{
@@ -128,6 +129,22 @@ fn publish(path: &Path, last: &mut Option<Status>, status: &Status) {
     }
 }
 
+fn read_moon(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?.take(16_385).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn remove_moon_file(path: &Path) -> std::io::Result<()> {
+    fs::remove_file(path).or_else(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            Ok(())
+        } else {
+            Err(err)
+        }
+    })
+}
+
 fn run(
     (config, ready, quit): (Arc<Config>, Arc<AtomicBool>, Arc<AtomicBool>),
     root: &Path,
@@ -155,10 +172,55 @@ fn run(
         if status_code != 0 {
             return Err("native join request failed");
         }
-        // Replay only configured Moon entries. A removed world is not restored
-        // after a normal restart, even if its cached definition remains on disk.
+        let desired: std::collections::BTreeSet<_> =
+            config.moons.iter().map(|moon| moon.sdk_args().0).collect();
+        for entry in fs::read_dir(&state_path)
+            .map_err(|_| "could not read node state")?
+            .flatten()
+        {
+            let name = entry.file_name();
+            let retired = name
+                .to_str()
+                .and_then(|name| name.strip_prefix("moon-"))
+                .filter(|raw| raw.len() == 16)
+                .and_then(|raw| u64::from_str_radix(raw, 16).ok())
+                .filter(|world| *world != 0 && !desired.contains(world));
+            if let Some(world) = retired {
+                if client.deorbit(world) != 0 {
+                    return Err("could not retire cached Moon");
+                }
+                remove_moon_file(&state_path.join(format!("import-anchor-{world:016x}")))
+                    .map_err(|_| "could not retire Moon trust anchor")?;
+            }
+        }
         for moon in &config.moons {
             let (world, seed) = moon.sdk_args();
+            let anchor = state_path.join(format!("import-anchor-{world:016x}"));
+            if seed == 0 {
+                let path = root.join(format!("imported-{world:016x}.moon"));
+                let bytes = read_moon(&path).map_err(|_| "could not read imported Moon")?;
+                let changed = read_moon(&anchor).ok().as_ref() != Some(&bytes);
+                // A newly approved import must not reuse a cache rooted in an
+                // earlier definition with the same ID. Unchanged anchors keep
+                // the SDK's authenticated updates instead of resetting to the file.
+                if changed && client.deorbit(world) != 0 {
+                    return Err("could not replace stale Moon definition");
+                }
+                if !client.install_moon(world, &bytes) {
+                    return Err("imported Moon is not valid for this World ID");
+                }
+                if changed {
+                    let temp = anchor.with_extension("tmp");
+                    fs::write(&temp, &bytes)
+                        .and_then(|_| fs::rename(&temp, &anchor))
+                        .map_err(|_| "could not remember approved Moon definition")?;
+                }
+            } else if anchor.is_file() {
+                if client.deorbit(world) != 0 {
+                    return Err("could not retire imported Moon");
+                }
+                remove_moon_file(&anchor).map_err(|_| "could not retire Moon trust anchor")?;
+            }
             if client.orbit(world, seed) != 0 {
                 return Err("native Moon orbit request failed");
             }

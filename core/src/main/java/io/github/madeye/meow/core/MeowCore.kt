@@ -40,6 +40,7 @@ object MeowCore {
         overlayRoot: String,
         overlaySettings: String,
     ): Int
+    external fun nativeInspectMoon(input: ByteArray): String?
     external fun nativeIsRunning(): Boolean
     external fun nativeGetUploadTraffic(): Long
     external fun nativeGetDownloadTraffic(): Long

@@ -38,6 +38,11 @@ uint64_t mzt_address(const mzt_client *client);
 int mzt_online(const mzt_client *client);
 int mzt_join(mzt_client *client, uint64_t network);
 int mzt_leave(mzt_client *client, uint64_t network);
+/* Inspect an explicitly approved local .moon definition without a running node.
+ * Zero is invalid. An import authorizes its root keys; this is not a statement
+ * that the roots are online or endorsed by the default planet. */
+uint64_t mzt_moon_id(const uint8_t *bytes, size_t size);
+int mzt_install_moon(mzt_client *client, uint64_t world, const uint8_t *bytes, size_t size);
 int mzt_orbit(mzt_client *client, uint64_t world, uint64_t seed);
 int mzt_deorbit(mzt_client *client, uint64_t world);
 int mzt_network(const mzt_client *client, uint64_t network, mzt_network_view *result);

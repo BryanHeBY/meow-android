@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -34,15 +35,18 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.madeye.meow.AppGraph
 import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.repo.MoonSetting
 import io.github.madeye.meow.repo.OverlaySettings
 import io.github.madeye.meow.repo.OverlaySettingsRepository
 import io.github.madeye.meow.repo.OverlayStatus
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.MeowScaffold
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
@@ -105,6 +109,7 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
     var routes by rememberSaveable { mutableStateOf("") }
     var moonWorld by rememberSaveable { mutableStateOf("") }
     var moonSeed by rememberSaveable { mutableStateOf("") }
+    var pendingMoon by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
     var showSystem by rememberSaveable { mutableStateOf(false) }
     var showApps by rememberSaveable { mutableStateOf(false) }
@@ -144,7 +149,7 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
         if (it.resultCode == Activity.RESULT_OK) start()
         else info = tr("Android VPN permission was not granted", "未授予 Android VPN 权限")
     }
-    fun persist(candidate: OverlaySettings, apply: Boolean) {
+    fun persist(candidate: OverlaySettings, apply: Boolean, imported: Pair<String, ByteArray>? = null) {
         val normalized = candidate.validated()
         if (normalized == null) {
             info = tr("Check the network ID, IPv4 CIDRs and Moon entries", "请检查网络 ID、IPv4 网段和 Moon 条目")
@@ -153,6 +158,7 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
         scope.launch {
             busy = true
             try {
+                if (imported != null) store.stageMoon(imported.first, imported.second)
                 store.save(normalized)
                 config = normalized
                 info = if (apply) "" else tr("Saved. Reconnect VPN to apply changes.", "已保存，重新连接 VPN 后生效。")
@@ -176,6 +182,58 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                 busy = false
             }
         }
+    }
+
+    val chooseMoon = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            busy = true
+            try {
+                val encoded = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val buffer = ByteArray(16_385)
+                        var length = 0
+                        while (length < buffer.size) {
+                            val read = stream.read(buffer, length, buffer.size - length)
+                            if (read <= 0) break
+                            length += read
+                        }
+                        if (length in 1..16_384) buffer.copyOf(length) else null
+                    }
+                }
+                val world = encoded?.let { withContext(Dispatchers.Default) { MeowCore.nativeInspectMoon(it) } }
+                when {
+                    world == null -> info = tr("Invalid or oversized Moon file", "Moon 文件无效或过大")
+                    config.moons.any { it.world == world } ->
+                        info = tr("Remove the existing entry before replacing that World ID", "请先移除同一 World ID，再重新导入")
+                    else -> pendingMoon = world to requireNotNull(encoded)
+                }
+            } catch (e: java.io.IOException) {
+                info = tr("Could not read the Moon file", "无法读取 Moon 文件")
+            } catch (e: SecurityException) {
+                info = tr("Could not access the Moon file", "无法访问 Moon 文件")
+            } finally {
+                busy = false
+            }
+        }
+    }
+    pendingMoon?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { pendingMoon = null },
+            title = { Text(tr("Trust this Moon?", "信任此 Moon？")) },
+            text = { Text(tr(
+                "World ID: ${candidate.first}\nOnly import a file from a source you trust. This trusts the root identities in the file.",
+                "World ID：${candidate.first}\n仅导入可信来源的文件。确认后将信任文件中的根节点身份。",
+            )) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingMoon = null
+                    persist(config.copy(moons = config.moons + MoonSetting(candidate.first)), config.enabled && vpn.canStop, candidate)
+                }) { Text(tr("Trust and import", "信任并导入")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingMoon = null }) { Text(tr("Cancel", "取消")) }
+            },
+        )
     }
 
     MeowScaffold(title = "ZeroTier", bottomBar = bottomBar) { padding ->
@@ -232,12 +290,22 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                         Text(tr("Moon orbit", "Moon 入轨"), style = MaterialTheme.typography.titleMedium)
                         for (entry in config.moons) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(entry.world, Modifier.align(Alignment.CenterVertically))
+                                Column(Modifier.align(Alignment.CenterVertically)) {
+                                    Text(entry.world)
+                                    Text(
+                                        if (entry.seed == null) tr("Imported file", "文件导入") else tr("Manual seed", "手动 Seed"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
                                 TextButton(enabled = loaded && !busy, onClick = {
                                     persist(config.copy(moons = config.moons.filter { it.world != entry.world }), config.enabled && vpn.canStop)
                                 }) { Text(tr("Remove", "移除")) }
                             }
                         }
+                        TextButton(
+                            enabled = loaded && !busy && config.moons.size < 32,
+                            onClick = { chooseMoon.launch(arrayOf("*/*")) },
+                        ) { Text(tr("Import .moon file", "导入 .moon 文件")) }
                         OutlinedTextField(moonWorld, { moonWorld = it.take(20) }, label = { Text("World ID") },
                             singleLine = true, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(moonSeed, { moonSeed = it.take(15) }, label = { Text("Seed") },

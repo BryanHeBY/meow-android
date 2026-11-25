@@ -1,5 +1,6 @@
 #include "client.h"
 #include "ZeroTierOne.h"
+#include "World.hpp"
 
 #include <cstdlib>
 #include <cstdio>
@@ -42,6 +43,25 @@ int main() {
     Protector permitted{true};
     auto *client = mzt_open(tmp, protect, nullptr, &permitted, now);
     require(client && permitted.calls >= 1, "create node with protected UDP");
+    constexpr uint64_t moon_id = 0x123456789a;
+    ZeroTier::Identity identity;
+    identity.generate();
+    ZeroTier::World::Root root;
+    char public_identity[ZT_IDENTITY_STRING_BUFFER_LENGTH]{};
+    root.identity = ZeroTier::Identity(identity.toString(false, public_identity));
+    const auto keys = ZeroTier::ECC::generate();
+    const auto moon = ZeroTier::World::make(ZeroTier::World::TYPE_MOON, moon_id, now, keys.pub, {root}, keys);
+    ZeroTier::Buffer<ZT_WORLD_MAX_SERIALIZED_LENGTH> moon_bytes;
+    moon.serialize(moon_bytes);
+    const auto *encoded_moon = static_cast<const uint8_t *>(moon_bytes.data());
+    require(mzt_moon_id(encoded_moon, moon_bytes.size()) == moon_id, "validate generated Moon");
+    require(!mzt_moon_id(encoded_moon, moon_bytes.size() - 1), "reject truncated Moon");
+    require(mzt_install_moon(client, moon_id + 1, encoded_moon, moon_bytes.size()) != 0,
+            "reject mismatched World ID");
+    require(mzt_install_moon(client, moon_id, encoded_moon, moon_bytes.size()) == 0, "persist Moon");
+    const auto moon_file = std::filesystem::path(tmp) / "moon-000000123456789a";
+    require(std::filesystem::exists(moon_file), "stored Moon under canonical file");
+    require(mzt_orbit(client, moon_id, 0) == ZT_RESULT_OK, "load stored Moon");
     const auto address = mzt_address(client);
     require(address != 0, "read node identity");
     const auto private_file = std::filesystem::path(tmp) / "identity.secret";
@@ -61,6 +81,11 @@ int main() {
     client = mzt_open(tmp, protect, nullptr, &permitted, now + 100);
     require(client && mzt_address(client) == address, "same private identity after restart");
     require(mzt_network(client, network, &view) == 0, "left network remains absent");
+    require(mzt_deorbit(client, moon_id) == ZT_RESULT_OK, "deorbit cached Moon after restart");
+    require(!std::filesystem::exists(moon_file), "deorbit removes cached Moon even if not loaded");
+    mzt_close(client);
+    client = mzt_open(tmp, protect, nullptr, &permitted, now + 200);
+    require(client && !std::filesystem::exists(moon_file), "removed Moon does not come back on restart");
     mzt_close(client);
     std::filesystem::remove_all(tmp);
 }

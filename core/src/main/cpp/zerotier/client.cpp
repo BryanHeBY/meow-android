@@ -1,5 +1,6 @@
 #include "client.h"
 #include "ZeroTierOne.h"
+#include "World.hpp"
 
 #include <algorithm>
 #include <array>
@@ -208,11 +209,47 @@ int mzt_join(mzt_client *c, uint64_t network) {
 int mzt_leave(mzt_client *c, uint64_t network) {
     return ZT_Node_leave(c->node, network, nullptr, nullptr);
 }
+uint64_t mzt_moon_id(const uint8_t *bytes, size_t size) {
+    if (!bytes || !size || size > ZT_WORLD_MAX_SERIALIZED_LENGTH) return 0;
+    try {
+        ZeroTier::World world;
+        const ZeroTier::Buffer<ZT_WORLD_MAX_SERIALIZED_LENGTH> encoded(bytes, static_cast<unsigned>(size));
+        if (world.deserialize(encoded) != size || world.type() != ZeroTier::World::TYPE_MOON ||
+            !world.id() || world.roots().empty()) return 0;
+        for (const auto &root : world.roots()) {
+            if (root.identity.hasPrivate() || !root.identity.locallyValidate()) return 0;
+        }
+        return world.id();
+    } catch (...) {
+        return 0;
+    }
+}
+
+int mzt_install_moon(mzt_client *c, uint64_t world, const uint8_t *bytes, size_t size) {
+    if (!world || mzt_moon_id(bytes, size) != world) return -1;
+    const uint64_t id[2] = {world, 0};
+    std::array<uint8_t, ZT_WORLD_MAX_SERIALIZED_LENGTH> cached{};
+    const auto count = state_get(c->node, c, nullptr, ZT_STATE_OBJECT_MOON, id, cached.data(), cached.size());
+    if (count > 0 && mzt_moon_id(cached.data(), static_cast<size_t>(count)) == world) {
+        // Keep any authenticated upstream update over the original import.
+        return 0;
+    }
+    state_put(c->node, c, nullptr, ZT_STATE_OBJECT_MOON, id, bytes, static_cast<int>(size));
+    return c->storage_error ? -1 : 0;
+}
+
 int mzt_orbit(mzt_client *c, uint64_t world, uint64_t seed) {
     return ZT_Node_orbit(c->node, nullptr, world, seed);
 }
 int mzt_deorbit(mzt_client *c, uint64_t world) {
-    return ZT_Node_deorbit(c->node, nullptr, world);
+    if (!world) return -1;
+    const auto result = ZT_Node_deorbit(c->node, nullptr, world);
+    if (result != ZT_RESULT_OK) return result;
+    // The engine only deletes a loaded World. Offline retirement must remove
+    // a cached definition as well, even just after a reboot.
+    const uint64_t id[2] = {world, 0};
+    state_put(c->node, c, nullptr, ZT_STATE_OBJECT_MOON, id, nullptr, -1);
+    return c->storage_error ? -1 : 0;
 }
 int mzt_network(const mzt_client *c, uint64_t network, mzt_network_view *result) {
     if (!result) return 0;

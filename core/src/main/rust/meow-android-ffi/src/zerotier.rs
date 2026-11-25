@@ -63,6 +63,8 @@ unsafe extern "C" {
     fn mzt_online(client: *const c_void) -> c_int;
     fn mzt_join(client: *mut c_void, network: u64) -> c_int;
     fn mzt_leave(client: *mut c_void, network: u64) -> c_int;
+    fn mzt_moon_id(bytes: *const u8, length: usize) -> u64;
+    fn mzt_install_moon(client: *mut c_void, world: u64, bytes: *const u8, length: usize) -> c_int;
     fn mzt_orbit(client: *mut c_void, world: u64, seed: u64) -> c_int;
     fn mzt_deorbit(client: *mut c_void, world: u64) -> c_int;
     fn mzt_network(client: *const c_void, network: u64, view: *mut NetworkView) -> c_int;
@@ -135,6 +137,11 @@ pub(crate) struct Client {
     incoming: Receiver<Frame>,
 }
 
+pub(crate) fn moon_id(encoded: &[u8]) -> Option<u64> {
+    let world = unsafe { mzt_moon_id(encoded.as_ptr(), encoded.len()) };
+    (world != 0).then_some(world)
+}
+
 impl Client {
     pub fn open(path: &Path) -> Result<Self, &'static str> {
         let path = CString::new(path.as_os_str().as_bytes()).map_err(|_| "invalid state path")?;
@@ -170,6 +177,11 @@ impl Client {
     }
     pub fn leave(&mut self, network: u64) -> i32 {
         unsafe { mzt_leave(self.handle.as_ptr(), network) }
+    }
+    pub fn install_moon(&mut self, world: u64, encoded: &[u8]) -> bool {
+        unsafe {
+            mzt_install_moon(self.handle.as_ptr(), world, encoded.as_ptr(), encoded.len()) == 0
+        }
     }
     pub fn orbit(&mut self, world: u64, seed: u64) -> i32 {
         unsafe { mzt_orbit(self.handle.as_ptr(), world, seed) }

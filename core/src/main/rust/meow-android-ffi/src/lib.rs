@@ -632,6 +632,26 @@ fn stop_engine() {
     }
 }
 
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeInspectMoon(
+    env: JNIEnv,
+    _class: JClass,
+    input: jni::objects::JByteArray,
+) -> jni::sys::jstring {
+    if env
+        .get_array_length(&input)
+        .map_or(true, |n| !(1..=16_384).contains(&n))
+    {
+        return std::ptr::null_mut();
+    }
+    env.convert_byte_array(input)
+        .ok()
+        .and_then(|bytes| zerotier::moon_id(&bytes))
+        .and_then(|world| env.new_string(format!("{world:016x}")).ok())
+        .map_or(std::ptr::null_mut(), JString::into_raw)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2Socks(
     mut env: JNIEnv,
