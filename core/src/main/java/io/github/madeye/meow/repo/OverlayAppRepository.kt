@@ -31,7 +31,8 @@ class OverlayAppRepository(
         val stored = store.load() ?: return OverlayAppConfig()
         val mode = OverlayAppMode.entries.firstOrNull { it.key == stored.mode }
             ?: return OverlayAppConfig()
-        return OverlayAppConfig(mode, stored.packages.filterTo(linkedSetOf(), ::isPackageName))
+        if (!stored.packages.all(::isPackageName)) return OverlayAppConfig()
+        return OverlayAppConfig(mode, stored.packages)
     }
 
     suspend fun save(config: OverlayAppConfig) = withContext(Dispatchers.IO) {

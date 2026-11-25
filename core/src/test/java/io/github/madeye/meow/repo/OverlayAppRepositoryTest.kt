@@ -18,6 +18,8 @@ class OverlayAppRepositoryTest {
         assertEquals(OverlayAppConfig(OverlayAppMode.Allow, emptySet()), repository.read())
         store.save("future", setOf("com.example.ssh"))
         assertEquals(OverlayAppConfig(OverlayAppMode.Allow, emptySet()), repository.read())
+        store.save("exclude", setOf("invalid package"))
+        assertEquals(OverlayAppConfig(OverlayAppMode.Allow, emptySet()), repository.read())
     }
 
     @Test
