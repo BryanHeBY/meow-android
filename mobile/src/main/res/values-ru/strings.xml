@@ -411,4 +411,5 @@
     <string name="settings_vpn_notification_details_desc">Показывать профиль и скорость. Android может показывать обязательное уведомление VPN и без деталей.</string>
     <string name="settings_vpn_notification_system">Настроить уведомление VPN в Android</string>
     <string name="settings_vpn_notification_failed">Не удалось сохранить настройки уведомлений</string>
+    <string name="tab_zerotier">ZeroTier</string>
 </resources>

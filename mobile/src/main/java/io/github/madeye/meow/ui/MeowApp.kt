@@ -126,6 +126,7 @@ import io.github.madeye.meow.ui.screens.yaml.YamlEditorActions
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorScreen
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorViewModel
 import io.github.madeye.meow.ui.screens.yaml.rememberSoraEditorHandle
+import io.github.madeye.meow.ui.screens.zerotier.ZeroTierRoute
 import io.github.madeye.meow.ui.theme.meow
 import io.github.madeye.meow.ui.util.openUrl
 import io.github.madeye.meow.ui.util.readText
@@ -226,6 +227,7 @@ private fun MeowNavHost(
                     navController.navigate(Dest.Subscriptions) { launchSingleTop = true }
                 },
                 onProxyServers = { navController.navigate(Dest.ProxyServers) },
+                onZeroTier = { navController.navigateToTab(Dest.ZeroTier) },
                 onRules = { navController.navigate(Dest.Rules()) },
                 onOpenTraffic = { route -> navController.navigate(route) },
                 bottomBar = { BottomBar(navController, onTab) },
@@ -247,6 +249,9 @@ private fun MeowNavHost(
                 onLogbook = { navController.navigate(Dest.Logbook) },
                 bottomBar = { BottomBar(navController, onTab) },
             )
+        }
+        composable<Dest.ZeroTier> {
+            ZeroTierRoute(bottomBar = { BottomBar(navController, onTab) })
         }
         composable<Dest.Settings> {
             SettingsRoute(
@@ -396,6 +401,7 @@ private fun HomeRoute(
     autoConnect: Boolean,
     onOpenSubscriptions: () -> Unit,
     onProxyServers: () -> Unit,
+    onZeroTier: () -> Unit,
     onRules: () -> Unit,
     onOpenTraffic: (Dest) -> Unit,
     bottomBar: @Composable () -> Unit,
@@ -482,6 +488,7 @@ private fun HomeRoute(
             onRefreshExitIp = exitIp::refresh,
             onOpenSubscriptions = onOpenSubscriptions,
             onProxyServers = onProxyServers,
+            onZeroTier = onZeroTier,
             onRules = onRules,
             topTraffic = topTrafficState,
             appIcon = AppGraph.installedApps::icon,

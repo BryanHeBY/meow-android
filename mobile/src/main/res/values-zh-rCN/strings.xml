@@ -381,4 +381,5 @@
     <string name="settings_vpn_notification_details_desc">显示当前配置和实时速度。关闭后 VPN 继续运行，Android 仍可显示必要的 VPN 通知。</string>
     <string name="settings_vpn_notification_system">在系统设置中管理 VPN 通知</string>
     <string name="settings_vpn_notification_failed">无法保存通知设置</string>
+    <string name="tab_zerotier">ZeroTier</string>
 </resources>

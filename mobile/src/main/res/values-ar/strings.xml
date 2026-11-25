@@ -443,4 +443,5 @@
     <string name="settings_vpn_notification_details_desc">عرض الملف والسرعة الحالية. قد يستمر Android في عرض إشعار VPN الإلزامي.</string>
     <string name="settings_vpn_notification_system">إدارة إشعار VPN في Android</string>
     <string name="settings_vpn_notification_failed">تعذّر حفظ إعدادات الإشعار</string>
+    <string name="tab_zerotier">شبكة ZeroTier</string>
 </resources>

@@ -53,6 +53,7 @@ import io.github.madeye.meow.traffic.TrafficRow
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.NavRow
 import io.github.madeye.meow.ui.screens.trafficdetails.TrafficDetailsUiState
+import io.github.madeye.meow.ui.screens.zerotier.ZeroTierSummary
 import io.github.madeye.meow.ui.theme.meow
 
 /**
@@ -77,6 +78,7 @@ fun HomeScreen(
     onRefreshExitIp: () -> Unit,
     onOpenSubscriptions: () -> Unit,
     onProxyServers: () -> Unit,
+    onZeroTier: () -> Unit,
     onRules: () -> Unit,
     topTraffic: TrafficDetailsUiState,
     appIcon: suspend (packageName: String) -> Drawable?,
@@ -101,6 +103,7 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { StatusCard(state = state, onToggle = onToggle, onSelectRouteMode = onSelectRouteMode) }
+        item { ZeroTierSummary(onOpen = onZeroTier) }
 
         // The switch stays disabled until a profile is selected, and the list
         // to pick one from is on the Subscriptions page, so point there.

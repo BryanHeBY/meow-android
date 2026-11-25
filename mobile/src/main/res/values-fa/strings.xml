@@ -399,4 +399,5 @@
     <string name="settings_vpn_notification_details_desc">نمایش نمایه و سرعت لحظه‌ای. Android همچنان می‌تواند اعلان ضروری VPN را نشان دهد.</string>
     <string name="settings_vpn_notification_system">مدیریت اعلان VPN در Android</string>
     <string name="settings_vpn_notification_failed">ذخیره تنظیمات اعلان ممکن نبود</string>
+    <string name="tab_zerotier">شبکه ZeroTier</string>
 </resources>

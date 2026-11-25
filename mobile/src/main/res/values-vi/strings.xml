@@ -381,4 +381,5 @@
     <string name="settings_vpn_notification_details_desc">Hiện cấu hình và tốc độ. Android vẫn có thể hiện thông báo VPN bắt buộc.</string>
     <string name="settings_vpn_notification_system">Quản lý thông báo VPN trong Android</string>
     <string name="settings_vpn_notification_failed">Không thể lưu cài đặt thông báo</string>
+    <string name="tab_zerotier">ZeroTier</string>
 </resources>

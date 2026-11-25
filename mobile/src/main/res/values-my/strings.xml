@@ -386,4 +386,5 @@
     <string name="settings_vpn_notification_details_desc">ပရိုဖိုင်နှင့် လက်ရှိအမြန်နှုန်းကို ပြမည်။ Android က လိုအပ်သော VPN အသိပေးချက်ကို ပြနိုင်သေးသည်။</string>
     <string name="settings_vpn_notification_system">Android တွင် VPN အသိပေးချက် စီမံရန်</string>
     <string name="settings_vpn_notification_failed">အသိပေးချက် ဆက်တင် မသိမ်းနိုင်ပါ</string>
+    <string name="tab_zerotier">ZeroTier</string>
 </resources>
