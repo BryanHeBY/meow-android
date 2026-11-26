@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_zerotier">ZeroTier</string>
+    <string name="zt_apps_title">ZeroTier per-app routing</string>
+    <string name="zt_apps_mode_all">All apps eligible</string>
+    <string name="zt_apps_mode_allow">Only selected apps are eligible (allowlist)</string>
+    <string name="zt_apps_mode_exclude">Selected apps bypass ZeroTier (blocklist)</string>
+    <string name="zt_apps_scope">This affects only traffic eligible for ZeroTier routes, not Meow rules.</string>
+    <string name="zt_apps_show_system">Show system apps</string>
+    <string name="zt_apps_none_allowed">No apps selected: none can use ZeroTier.</string>
+    <string name="home_meow_forwarding">Meow forwarding</string>
+    <string name="home_meow_forwarding_scope">For this VPN session only. Turning it off blocks non-ZeroTier traffic captured by the VPN; it does not go direct.</string>
+    <string name="home_meow_forwarding_requires_zt">To pause Meow without stopping the VPN, connect ZeroTier first.</string>
+    <string name="home_meow_forwarding_failed">Could not change Meow forwarding.</string>
+</resources>

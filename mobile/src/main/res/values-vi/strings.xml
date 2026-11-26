@@ -381,17 +381,9 @@
     <string name="settings_vpn_notification_details_desc">Hiện cấu hình và tốc độ. Android vẫn có thể hiện thông báo VPN bắt buộc.</string>
     <string name="settings_vpn_notification_system">Quản lý thông báo VPN trong Android</string>
     <string name="settings_vpn_notification_failed">Không thể lưu cài đặt thông báo</string>
-    <string name="tab_zerotier">ZeroTier</string>
     <string name="proxy_groups_refresh_failed">Không thể tải các nhóm proxy.</string>
     <string name="proxy_groups_refresh_stale">Không thể làm mới. Đang hiển thị các nhóm proxy đã tải gần nhất.</string>
     <string name="proxy_groups_retry">Thử lại</string>
-    <string name="zt_apps_title">Định tuyến theo ứng dụng ZeroTier</string>
-    <string name="zt_apps_mode_all">Mọi ứng dụng đều có thể sử dụng</string>
-    <string name="zt_apps_mode_allow">Chỉ ứng dụng đã chọn được phép (danh sách cho phép)</string>
-    <string name="zt_apps_mode_exclude">Ứng dụng đã chọn bỏ qua ZeroTier (danh sách chặn)</string>
-    <string name="zt_apps_scope">Chỉ ảnh hưởng đến các tuyến ZeroTier, không thay đổi quy tắc Meow.</string>
-    <string name="zt_apps_show_system">Hiện ứng dụng hệ thống</string>
-    <string name="zt_apps_none_allowed">Chưa chọn ứng dụng: không ứng dụng nào có thể dùng ZeroTier.</string>
     <string name="fault_diagnostics_title">Chẩn đoán sự cố</string>
     <string name="fault_diagnostics_local">Thiết bị lưu tối đa 128 sự kiện và không tự động tải lên.</string>
     <string name="fault_diagnostics_legacy">Android trước phiên bản 11 không có lịch sử thoát tiến trình.</string>
@@ -411,8 +403,4 @@
     <string name="fault_diagnostics_tun">Chuyển tiếp TUN dừng bất ngờ</string>
     <string name="fault_diagnostics_network">Mạng nền đã thay đổi</string>
     <string name="fault_diagnostics_groups">Không thể làm mới nhóm proxy</string>
-    <string name="home_meow_forwarding">Chuyển tiếp lưu lượng Meow</string>
-    <string name="home_meow_forwarding_scope">Chỉ áp dụng cho phiên VPN này. Khi tắt, lưu lượng do VPN xử lý mà không qua ZeroTier sẽ bị chặn, không đi trực tiếp.</string>
-    <string name="home_meow_forwarding_requires_zt">Để tạm dừng Meow mà không dừng VPN, hãy kết nối ZeroTier trước.</string>
-    <string name="home_meow_forwarding_failed">Không thể thay đổi trạng thái chuyển tiếp của Meow.</string>
 </resources>

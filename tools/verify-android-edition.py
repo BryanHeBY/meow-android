@@ -1,5 +1,6 @@
 """Check the compiled ABI and class sets, not just the Gradle option values."""
 import argparse
+import re
 import shutil
 import struct
 import subprocess
@@ -83,7 +84,18 @@ def main():
             "Missing launcher activity")
     for value in ('"clash"', '"clashmeta"', '"install-config"'):
         require(value in manifest, f"Missing shared subscription deep link: {value}")
-    print(f"{args.edition}: JNI, DEX, ARM64 ABI, application ID, launcher and deep link verified")
+    resources = subprocess.check_output([args.aapt, "dump", "resources", args.apk], text=True)
+    overlay_strings = set(re.findall(
+        r":string/((?:zt_apps_|home_meow_forwarding)[a-z_]*|tab_zerotier):", resources,
+    ))
+    expected = {
+        "tab_zerotier", "zt_apps_title", "zt_apps_mode_all", "zt_apps_mode_allow",
+        "zt_apps_mode_exclude", "zt_apps_scope", "zt_apps_show_system",
+        "zt_apps_none_allowed", "home_meow_forwarding", "home_meow_forwarding_scope",
+        "home_meow_forwarding_requires_zt", "home_meow_forwarding_failed",
+    } if full else set()
+    require(overlay_strings == expected, f"Incorrect ZeroTier string set: {overlay_strings}")
+    print(f"{args.edition}: JNI, DEX, resources, ARM64 ABI, application ID, launcher and deep link verified")
 
 
 if __name__ == "__main__":

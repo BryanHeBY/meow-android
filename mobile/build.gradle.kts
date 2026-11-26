@@ -41,6 +41,7 @@ android {
 
     sourceSets.named("main") {
         java.srcDir(if (withZeroTier) "src/withZeroTier/java" else "src/withoutZeroTier/java")
+        if (withZeroTier) res.srcDir("src/withZeroTier/res")
     }
     if (withZeroTier) {
         sourceSets.named("test") { java.srcDir("src/testWithZeroTier/java") }

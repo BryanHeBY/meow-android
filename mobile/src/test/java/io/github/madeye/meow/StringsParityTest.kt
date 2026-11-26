@@ -16,7 +16,8 @@ import org.w3c.dom.Element
  * (`LocalizableParityTests`); this is the Android half.
  *
  * Every `values-*` directory with a strings.xml is checked, in `:mobile` and in
- * `:core` (whose strings the VPN notification shows), so a new locale is
+ * `:core` (whose strings the VPN notification shows), and in the optional
+ * ZeroTier catalog, so a new locale is
  * covered the day it lands.
  *
  * Plain JVM test — no Robolectric, no device. Gradle runs JVM tests with the
@@ -238,7 +239,11 @@ class StringsParityTest {
     }
 
     private companion object {
-        val RES_DIRS = listOf(File("src/main/res"), File("../core/src/main/res"))
+        val RES_DIRS = listOf(
+            File("src/main/res"),
+            File("../core/src/main/res"),
+            File("src/withZeroTier/res"),
+        )
 
         // Language subtags written right-to-left; "iw" is Android's legacy Hebrew code.
         val RTL_LANGUAGES = setOf("ar", "fa", "he", "iw", "ur")

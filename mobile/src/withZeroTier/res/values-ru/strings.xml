@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_zerotier">ZeroTier</string>
+    <string name="zt_apps_title">Маршруты ZeroTier для приложений</string>
+    <string name="zt_apps_mode_all">Разрешены все приложения</string>
+    <string name="zt_apps_mode_allow">Только выбранные приложения (список разрешений)</string>
+    <string name="zt_apps_mode_exclude">Выбранные приложения обходят ZeroTier (список исключений)</string>
+    <string name="zt_apps_scope">Настройка касается только маршрутов ZeroTier и не меняет правила Meow.</string>
+    <string name="zt_apps_show_system">Показывать системные приложения</string>
+    <string name="zt_apps_none_allowed">Приложения не выбраны: ни одно не может использовать ZeroTier.</string>
+    <string name="home_meow_forwarding">Передача трафика Meow</string>
+    <string name="home_meow_forwarding_scope">Только для текущего сеанса VPN. При выключении трафик VPN вне ZeroTier блокируется, а не отправляется напрямую.</string>
+    <string name="home_meow_forwarding_requires_zt">Чтобы приостановить Meow, не отключая VPN, сначала подключите ZeroTier.</string>
+    <string name="home_meow_forwarding_failed">Не удалось изменить состояние передачи трафика Meow.</string>
+</resources>

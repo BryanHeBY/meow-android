@@ -402,17 +402,9 @@
     <string name="settings_vpn_notification_details_desc">Show the profile and live speed. When off, Android can still show the required VPN notification.</string>
     <string name="settings_vpn_notification_system">Manage VPN notification in Android</string>
     <string name="settings_vpn_notification_failed">Could not save notification settings</string>
-    <string name="tab_zerotier">ZeroTier</string>
     <string name="proxy_groups_refresh_failed">Could not load proxy groups.</string>
     <string name="proxy_groups_refresh_stale">Could not refresh. Showing the last known proxy groups.</string>
     <string name="proxy_groups_retry">Retry</string>
-    <string name="zt_apps_title">ZeroTier per-app routing</string>
-    <string name="zt_apps_mode_all">All apps eligible</string>
-    <string name="zt_apps_mode_allow">Only selected apps are eligible (allowlist)</string>
-    <string name="zt_apps_mode_exclude">Selected apps bypass ZeroTier (blocklist)</string>
-    <string name="zt_apps_scope">This affects only traffic eligible for ZeroTier routes, not Meow rules.</string>
-    <string name="zt_apps_show_system">Show system apps</string>
-    <string name="zt_apps_none_allowed">No apps selected: none can use ZeroTier.</string>
     <string name="fault_diagnostics_title">Fault diagnostics</string>
     <string name="fault_diagnostics_local">Up to 128 events are kept on this device. Nothing is uploaded automatically.</string>
     <string name="fault_diagnostics_legacy">Android versions below 11 do not provide process exit history.</string>
@@ -432,8 +424,4 @@
     <string name="fault_diagnostics_tun">TUN forwarding stopped unexpectedly</string>
     <string name="fault_diagnostics_network">Underlying network changed</string>
     <string name="fault_diagnostics_groups">Proxy groups could not refresh</string>
-    <string name="home_meow_forwarding">Meow forwarding</string>
-    <string name="home_meow_forwarding_scope">For this VPN session only. Turning it off blocks non-ZeroTier traffic captured by the VPN; it does not go direct.</string>
-    <string name="home_meow_forwarding_requires_zt">To pause Meow without stopping the VPN, connect ZeroTier first.</string>
-    <string name="home_meow_forwarding_failed">Could not change Meow forwarding.</string>
 </resources>

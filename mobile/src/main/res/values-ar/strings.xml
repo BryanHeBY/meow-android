@@ -443,17 +443,9 @@
     <string name="settings_vpn_notification_details_desc">عرض الملف والسرعة الحالية. قد يستمر Android في عرض إشعار VPN الإلزامي.</string>
     <string name="settings_vpn_notification_system">إدارة إشعار VPN في Android</string>
     <string name="settings_vpn_notification_failed">تعذّر حفظ إعدادات الإشعار</string>
-    <string name="tab_zerotier">شبكة ZeroTier</string>
     <string name="proxy_groups_refresh_failed">تعذّر تحميل مجموعات الوكيل.</string>
     <string name="proxy_groups_refresh_stale">تعذّر التحديث. تُعرض آخر مجموعات وكيل معروفة.</string>
     <string name="proxy_groups_retry">إعادة المحاولة</string>
-    <string name="zt_apps_title">توجيه التطبيقات عبر ZeroTier</string>
-    <string name="zt_apps_mode_all">كل التطبيقات مؤهلة</string>
-    <string name="zt_apps_mode_allow">التطبيقات المحددة فقط مؤهلة (قائمة السماح)</string>
-    <string name="zt_apps_mode_exclude">تتجاوز التطبيقات المحددة شبكة ZeroTier (قائمة الحظر)</string>
-    <string name="zt_apps_scope">يؤثر هذا في مسارات ZeroTier فقط، ولا يغيّر قواعد Meow.</string>
-    <string name="zt_apps_show_system">عرض تطبيقات النظام</string>
-    <string name="zt_apps_none_allowed">لم تُحدد تطبيقات: لا يمكن لأي تطبيق استخدام ZeroTier.</string>
     <string name="fault_diagnostics_title">تشخيص الأعطال</string>
     <string name="fault_diagnostics_local">يُحفظ ما يصل إلى 128 حدثًا على هذا الجهاز دون رفع تلقائي.</string>
     <string name="fault_diagnostics_legacy">لا تعرض إصدارات Android الأقدم من 11 سجل خروج العمليات.</string>
@@ -473,8 +465,4 @@
     <string name="fault_diagnostics_tun">توقف تمرير TUN بشكل غير متوقع</string>
     <string name="fault_diagnostics_network">تغيرت الشبكة الأساسية</string>
     <string name="fault_diagnostics_groups">تعذر تحديث مجموعات الوكيل</string>
-    <string name="home_meow_forwarding">تمرير حركة المرور عبر Meow</string>
-    <string name="home_meow_forwarding_scope">لهذه الجلسة فقط. عند الإيقاف تُحجب حركة مرور VPN غير المخصصة لـ ZeroTier ولا تمر مباشرة.</string>
-    <string name="home_meow_forwarding_requires_zt">لإيقاف Meow مؤقتًا دون إيقاف VPN، اتصل أولًا بـ ZeroTier.</string>
-    <string name="home_meow_forwarding_failed">تعذّر تغيير حالة تمرير Meow.</string>
 </resources>

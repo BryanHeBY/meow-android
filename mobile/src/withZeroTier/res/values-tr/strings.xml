@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_zerotier">ZeroTier</string>
+    <string name="zt_apps_title">ZeroTier uygulama yönlendirmesi</string>
+    <string name="zt_apps_mode_all">Tüm uygulamalar kullanabilir</string>
+    <string name="zt_apps_mode_allow">Yalnızca seçili uygulamalar kullanabilir (izin listesi)</string>
+    <string name="zt_apps_mode_exclude">Seçili uygulamalar ZeroTier kullanmaz (engelleme listesi)</string>
+    <string name="zt_apps_scope">Yalnızca ZeroTier rotalarını etkiler; Meow kurallarını değiştirmez.</string>
+    <string name="zt_apps_show_system">Sistem uygulamalarını göster</string>
+    <string name="zt_apps_none_allowed">Uygulama seçilmedi: hiçbir uygulama ZeroTier kullanamaz.</string>
+    <string name="home_meow_forwarding">Meow trafik iletimi</string>
+    <string name="home_meow_forwarding_scope">Yalnızca bu VPN oturumu için. Kapatıldığında VPN kapsamındaki ZeroTier dışı trafik engellenir; doğrudan gönderilmez.</string>
+    <string name="home_meow_forwarding_requires_zt">VPN durmadan Meow’u duraklatmak için önce ZeroTier’i bağlayın.</string>
+    <string name="home_meow_forwarding_failed">Meow iletimi değiştirilemedi.</string>
+</resources>

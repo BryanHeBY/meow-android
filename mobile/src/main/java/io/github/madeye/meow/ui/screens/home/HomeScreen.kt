@@ -230,36 +230,7 @@ private fun StatusCard(
                 )
             }
         }
-        if (state.showMeowForwarding) {
-            HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val title = stringResource(R.string.home_meow_forwarding)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        text = stringResource(
-                            if (state.overlayForwarding) R.string.home_meow_forwarding_scope
-                            else R.string.home_meow_forwarding_requires_zt,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.mutedText,
-                    )
-                }
-                Spacer(Modifier.size(12.dp))
-                if (state.forwardingChangePending) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Switch(
-                        checked = state.meowForwarding,
-                        onCheckedChange = onToggleMeowForwarding,
-                        enabled = state.canToggleMeowForwarding,
-                        modifier = Modifier
-                            .testTag("meow_forwarding_switch")
-                            .semantics { contentDescription = title },
-                    )
-                }
-            }
-        }
+        ZeroTierUi.ForwardingControls(state, onToggleMeowForwarding)
         HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 14.dp))
         RouteModePicker(
             mode = state.routeMode,

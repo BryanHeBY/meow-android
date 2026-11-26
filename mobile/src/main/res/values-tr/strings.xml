@@ -391,17 +391,9 @@
     <string name="settings_vpn_notification_details_desc">Profili ve anlık hızı gösterir. Android gerekli VPN bildirimini göstermeye devam edebilir.</string>
     <string name="settings_vpn_notification_system">Android VPN bildirimini yönet</string>
     <string name="settings_vpn_notification_failed">Bildirim ayarları kaydedilemedi</string>
-    <string name="tab_zerotier">ZeroTier</string>
     <string name="proxy_groups_refresh_failed">Proxy grupları yüklenemedi.</string>
     <string name="proxy_groups_refresh_stale">Yenileme başarısız. Son bilinen proxy grupları gösteriliyor.</string>
     <string name="proxy_groups_retry">Yeniden dene</string>
-    <string name="zt_apps_title">ZeroTier uygulama yönlendirmesi</string>
-    <string name="zt_apps_mode_all">Tüm uygulamalar kullanabilir</string>
-    <string name="zt_apps_mode_allow">Yalnızca seçili uygulamalar kullanabilir (izin listesi)</string>
-    <string name="zt_apps_mode_exclude">Seçili uygulamalar ZeroTier kullanmaz (engelleme listesi)</string>
-    <string name="zt_apps_scope">Yalnızca ZeroTier rotalarını etkiler; Meow kurallarını değiştirmez.</string>
-    <string name="zt_apps_show_system">Sistem uygulamalarını göster</string>
-    <string name="zt_apps_none_allowed">Uygulama seçilmedi: hiçbir uygulama ZeroTier kullanamaz.</string>
     <string name="fault_diagnostics_title">Hata tanılama</string>
     <string name="fault_diagnostics_local">Bu cihazda en fazla 128 olay saklanır. Otomatik yükleme yapılmaz.</string>
     <string name="fault_diagnostics_legacy">Android 11 öncesi sürümlerde işlem çıkışı geçmişi yoktur.</string>
@@ -421,8 +413,4 @@
     <string name="fault_diagnostics_tun">TUN iletimi beklenmedik şekilde durdu</string>
     <string name="fault_diagnostics_network">Alt ağ değişti</string>
     <string name="fault_diagnostics_groups">Proxy grupları yenilenemedi</string>
-    <string name="home_meow_forwarding">Meow trafik iletimi</string>
-    <string name="home_meow_forwarding_scope">Yalnızca bu VPN oturumu için. Kapatıldığında VPN kapsamındaki ZeroTier dışı trafik engellenir; doğrudan gönderilmez.</string>
-    <string name="home_meow_forwarding_requires_zt">VPN durmadan Meow’u duraklatmak için önce ZeroTier’i bağlayın.</string>
-    <string name="home_meow_forwarding_failed">Meow iletimi değiştirilemedi.</string>
 </resources>

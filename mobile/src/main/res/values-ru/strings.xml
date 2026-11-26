@@ -411,17 +411,9 @@
     <string name="settings_vpn_notification_details_desc">Показывать профиль и скорость. Android может показывать обязательное уведомление VPN и без деталей.</string>
     <string name="settings_vpn_notification_system">Настроить уведомление VPN в Android</string>
     <string name="settings_vpn_notification_failed">Не удалось сохранить настройки уведомлений</string>
-    <string name="tab_zerotier">ZeroTier</string>
     <string name="proxy_groups_refresh_failed">Не удалось загрузить группы прокси.</string>
     <string name="proxy_groups_refresh_stale">Не удалось обновить список. Показаны последние известные группы прокси.</string>
     <string name="proxy_groups_retry">Повторить</string>
-    <string name="zt_apps_title">Маршруты ZeroTier для приложений</string>
-    <string name="zt_apps_mode_all">Разрешены все приложения</string>
-    <string name="zt_apps_mode_allow">Только выбранные приложения (список разрешений)</string>
-    <string name="zt_apps_mode_exclude">Выбранные приложения обходят ZeroTier (список исключений)</string>
-    <string name="zt_apps_scope">Настройка касается только маршрутов ZeroTier и не меняет правила Meow.</string>
-    <string name="zt_apps_show_system">Показывать системные приложения</string>
-    <string name="zt_apps_none_allowed">Приложения не выбраны: ни одно не может использовать ZeroTier.</string>
     <string name="fault_diagnostics_title">Диагностика сбоев</string>
     <string name="fault_diagnostics_local">На устройстве хранится до 128 событий. Автоматической отправки нет.</string>
     <string name="fault_diagnostics_legacy">В версиях Android ниже 11 история завершения процессов недоступна.</string>
@@ -441,8 +433,4 @@
     <string name="fault_diagnostics_tun">Пересылка TUN неожиданно остановилась</string>
     <string name="fault_diagnostics_network">Базовая сеть изменилась</string>
     <string name="fault_diagnostics_groups">Не удалось обновить группы прокси</string>
-    <string name="home_meow_forwarding">Передача трафика Meow</string>
-    <string name="home_meow_forwarding_scope">Только для текущего сеанса VPN. При выключении трафик VPN вне ZeroTier блокируется, а не отправляется напрямую.</string>
-    <string name="home_meow_forwarding_requires_zt">Чтобы приостановить Meow, не отключая VPN, сначала подключите ZeroTier.</string>
-    <string name="home_meow_forwarding_failed">Не удалось изменить состояние передачи трафика Meow.</string>
 </resources>

@@ -399,17 +399,9 @@
     <string name="settings_vpn_notification_details_desc">نمایش نمایه و سرعت لحظه‌ای. Android همچنان می‌تواند اعلان ضروری VPN را نشان دهد.</string>
     <string name="settings_vpn_notification_system">مدیریت اعلان VPN در Android</string>
     <string name="settings_vpn_notification_failed">ذخیره تنظیمات اعلان ممکن نبود</string>
-    <string name="tab_zerotier">شبکه ZeroTier</string>
     <string name="proxy_groups_refresh_failed">بارگیری گروه‌های پراکسی ممکن نبود.</string>
     <string name="proxy_groups_refresh_stale">به‌روزرسانی ناموفق بود. آخرین گروه‌های پراکسی نمایش داده می‌شوند.</string>
     <string name="proxy_groups_retry">تلاش دوباره</string>
-    <string name="zt_apps_title">مسیریابی برنامه‌ها از طریق ZeroTier</string>
-    <string name="zt_apps_mode_all">همهٔ برنامه‌ها مجازند</string>
-    <string name="zt_apps_mode_allow">فقط برنامه‌های انتخاب‌شده مجازند (فهرست مجاز)</string>
-    <string name="zt_apps_mode_exclude">برنامه‌های انتخاب‌شده از ZeroTier عبور نمی‌کنند (فهرست مسدود)</string>
-    <string name="zt_apps_scope">این تنظیم فقط بر مسیرهای ZeroTier اثر دارد و قوانین Meow را تغییر نمی‌دهد.</string>
-    <string name="zt_apps_show_system">نمایش برنامه‌های سیستمی</string>
-    <string name="zt_apps_none_allowed">برنامه‌ای انتخاب نشده است؛ هیچ برنامه‌ای نمی‌تواند از ZeroTier استفاده کند.</string>
     <string name="fault_diagnostics_title">عیب‌یابی</string>
     <string name="fault_diagnostics_local">حداکثر ۱۲۸ رویداد در همین دستگاه نگهداری می‌شود و خودکار بارگذاری نمی‌شود.</string>
     <string name="fault_diagnostics_legacy">نسخه‌های پیش از Android 11 تاریخچهٔ خروج فرایند ندارند.</string>
@@ -429,8 +421,4 @@
     <string name="fault_diagnostics_tun">انتقال TUN غیرمنتظره متوقف شد</string>
     <string name="fault_diagnostics_network">شبکهٔ زیربنایی تغییر کرد</string>
     <string name="fault_diagnostics_groups">به‌روزرسانی گروه‌های پراکسی ناموفق بود</string>
-    <string name="home_meow_forwarding">ارسال ترافیک Meow</string>
-    <string name="home_meow_forwarding_scope">فقط در این نشست. با خاموش کردن، ترافیک تحت پوشش VPN که از ZeroTier نیست مسدود می‌شود و مستقیم نمی‌رود.</string>
-    <string name="home_meow_forwarding_requires_zt">برای توقف موقت Meow بدون قطع VPN، ابتدا به ZeroTier وصل شوید.</string>
-    <string name="home_meow_forwarding_failed">تغییر وضعیت ارسال ترافیک Meow ممکن نبود.</string>
 </resources>

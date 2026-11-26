@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_zerotier">ZeroTier</string>
+    <string name="zt_apps_title">ZeroTier 分应用代理</string>
+    <string name="zt_apps_mode_all">所有应用均可走 ZeroTier</string>
+    <string name="zt_apps_mode_allow">仅所选应用可走 ZeroTier（白名单）</string>
+    <string name="zt_apps_mode_exclude">所选应用不走 ZeroTier（黑名单）</string>
+    <string name="zt_apps_scope">只限制哪些应用可使用 ZeroTier 路由，不改变 Meow 的规则。</string>
+    <string name="zt_apps_show_system">显示系统应用</string>
+    <string name="zt_apps_none_allowed">未选择应用：所有应用都不走 ZeroTier。</string>
+    <string name="home_meow_forwarding">Meow 流量转发</string>
+    <string name="home_meow_forwarding_scope">仅本次 VPN 会话生效。关闭后，VPN 接管的非 ZeroTier 流量会被阻断，不会改为直连。</string>
+    <string name="home_meow_forwarding_requires_zt">如需在不停止 VPN 的情况下暂停 Meow，请先连接 ZeroTier。</string>
+    <string name="home_meow_forwarding_failed">无法更改 Meow 转发状态。</string>
+</resources>
