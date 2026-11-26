@@ -49,6 +49,33 @@ pub(crate) async fn tcp(mut stream: lwip::TcpStream, dst: SocketAddr) -> std::io
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
+const DIRECT_UDP_RECEIVE_CAPACITY: usize = u16::MAX as usize;
+
+#[cfg(any(target_os = "android", test))]
+thread_local! {
+    // Shared by flows on this runtime thread, rather than reserved per flow.
+    static DIRECT_UDP_RECEIVE_SCRATCH: std::cell::RefCell<Vec<u8>> =
+        std::cell::RefCell::new(vec![0; DIRECT_UDP_RECEIVE_CAPACITY]);
+}
+
+#[cfg(any(target_os = "android", test))]
+fn poll_direct_udp_payload(
+    cx: &mut std::task::Context<'_>,
+    poll: impl FnOnce(
+        &mut std::task::Context<'_>,
+        &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>>,
+) -> std::task::Poll<std::io::Result<Vec<u8>>> {
+    DIRECT_UDP_RECEIVE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        let mut buf = tokio::io::ReadBuf::new(&mut scratch);
+        // poll_recv cannot retain the ReadBuf on Pending. Copy on Ready so
+        // neither the scratch nor its borrow crosses an await or task migration.
+        poll(cx, &mut buf).map(|result| result.map(|()| buf.filled().to_vec()))
+    })
+}
+
 #[cfg(target_os = "android")]
 pub(crate) mod udp {
     use super::*;
@@ -125,7 +152,6 @@ pub(crate) mod udp {
         };
         protect(&socket)?;
         socket.connect(key.1).await?;
-        let mut buffer = vec![0; 65535];
         let ttl = Duration::from_secs(30);
         let idle = tokio::time::sleep(ttl);
         tokio::pin!(idle);
@@ -137,15 +163,17 @@ pub(crate) mod udp {
                     socket.send(&data).await?;
                     idle.as_mut().reset(tokio::time::Instant::now() + ttl);
                 }
-                n = socket.recv(&mut buffer) => {
-                    let n = n?;
+                payload = std::future::poll_fn(|cx| {
+                    poll_direct_udp_payload(cx, |cx, buf| socket.poll_recv(cx, buf))
+                }) => {
+                    let payload = payload?;
                     let mut current = crate::owner::overlay_packages(crate::owner::IPPROTO_UDP, key.0, key.1).await;
                     current.sort_unstable();
                     current.dedup();
                     if current != owner {
                         return Ok(());
                     }
-                    let _ = reply.try_send((buffer[..n].to_vec(), key.1, key.0));
+                    let _ = reply.try_send((payload, key.1, key.0));
                 }
                 () = &mut idle => return Ok(()),
             }
@@ -185,6 +213,59 @@ pub(crate) async fn system_dns(query: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn direct_udp_scratch_is_released_between_flows_and_copies_payloads() {
+        let first_packet = std::cell::RefCell::new(None::<Vec<u8>>);
+        let mut first_read = std::future::poll_fn(|cx| {
+            poll_direct_udp_payload(cx, |_, buf| match first_packet.borrow_mut().take() {
+                Some(payload) => {
+                    buf.put_slice(&payload);
+                    std::task::Poll::Ready(Ok(()))
+                }
+                None => std::task::Poll::Pending,
+            })
+        });
+        assert!(futures::poll!(&mut first_read).is_pending());
+        // IPv4's largest UDP payload: 65,535 minus 20-byte IP and 8-byte UDP headers.
+        let payload: Vec<_> = (0..65_507).map(|i| (i % 251) as u8).collect();
+        let received = std::future::poll_fn(|cx| {
+            poll_direct_udp_payload(cx, |_, buf| {
+                buf.put_slice(&payload);
+                std::task::Poll::Ready(Ok(()))
+            })
+        })
+        .await
+        .unwrap();
+        *first_packet.borrow_mut() = Some(b"other flow".to_vec());
+        assert_eq!(first_read.await.unwrap(), b"other flow");
+        assert_eq!(received, payload);
+        let empty = std::future::poll_fn(|cx| {
+            poll_direct_udp_payload(cx, |_, _| std::task::Poll::Ready(Ok(())))
+        })
+        .await
+        .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_udp_scratch_retains_the_full_previous_receive_capacity() {
+        // Exercise the entire old 65,535-byte buffer, including IPv6's
+        // 65,527-byte non-jumbogram UDP payload, without relying on MTU.
+        for len in [65_527, DIRECT_UDP_RECEIVE_CAPACITY] {
+            let payload: Vec<_> = (0..len).map(|i| (i % 251) as u8).collect();
+            let received = std::future::poll_fn(|cx| {
+                poll_direct_udp_payload(cx, |_, buf| {
+                    assert_eq!(buf.remaining(), DIRECT_UDP_RECEIVE_CAPACITY);
+                    buf.put_slice(&payload);
+                    std::task::Poll::Ready(Ok(()))
+                })
+            })
+            .await
+            .unwrap();
+            assert_eq!(received, payload);
+        }
+    }
 
     #[test]
     fn accepts_only_a_matching_dns_response_for_a_query() {
