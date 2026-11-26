@@ -126,7 +126,7 @@ import io.github.madeye.meow.ui.screens.yaml.YamlEditorActions
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorScreen
 import io.github.madeye.meow.ui.screens.yaml.YamlEditorViewModel
 import io.github.madeye.meow.ui.screens.yaml.rememberSoraEditorHandle
-import io.github.madeye.meow.ui.screens.zerotier.ZeroTierRoute
+import io.github.madeye.meow.ui.nav.ZeroTierUi
 import io.github.madeye.meow.ui.theme.meow
 import io.github.madeye.meow.ui.util.openUrl
 import io.github.madeye.meow.ui.util.readText
@@ -227,7 +227,7 @@ private fun MeowNavHost(
                     navController.navigate(Dest.Subscriptions) { launchSingleTop = true }
                 },
                 onProxyServers = { navController.navigate(Dest.ProxyServers) },
-                onZeroTier = { navController.navigateToTab(Dest.ZeroTier) },
+                onZeroTier = { ZeroTierUi.tab?.let { navController.navigateToTab(it.dest) } },
                 onRules = { navController.navigate(Dest.Rules()) },
                 onOpenTraffic = { route -> navController.navigate(route) },
                 bottomBar = { BottomBar(navController, onTab) },
@@ -251,9 +251,7 @@ private fun MeowNavHost(
                 bottomBar = { BottomBar(navController, onTab) },
             )
         }
-        composable<Dest.ZeroTier> {
-            ZeroTierRoute(bottomBar = { BottomBar(navController, onTab) })
-        }
+        ZeroTierUi.register(this) { BottomBar(navController, onTab) }
         composable<Dest.Settings> {
             SettingsRoute(
                 snackbarHost = snackbarHost,
@@ -472,7 +470,7 @@ private fun HomeRoute(
     }
 
     MeowScaffold(
-        title = stringResource(R.string.app_name),
+        title = if (io.github.madeye.meow.BuildConfig.ZEROTIER) stringResource(R.string.app_name) else "MeowZ Lite",
         bottomBar = bottomBar,
         actions = {
             IconButton(

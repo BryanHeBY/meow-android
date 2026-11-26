@@ -18,7 +18,7 @@
         android:name="io.github.madeye.meow.App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="${meowLabel}"
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.DayNight.NoActionBar">
         <!-- Firebase Analytics opt-in is per buildType (release=true, playRelease=false). -->

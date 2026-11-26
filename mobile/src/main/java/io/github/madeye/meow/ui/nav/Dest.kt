@@ -4,7 +4,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Handyman
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.annotation.StringRes
@@ -26,8 +25,6 @@ sealed interface Dest {
     @Serializable data object ProxyGroups : Dest
 
     @Serializable data object Utility : Dest
-
-    @Serializable data object ZeroTier : Dest
 
     @Serializable data object Settings : Dest
 
@@ -90,10 +87,10 @@ data class TabDestination(
     val testTag: String,
 )
 
-val TABS = listOf(
-    TabDestination(Dest.Home, R.string.tab_home, Icons.Filled.Home, "tab_home"),
-    TabDestination(Dest.ProxyGroups, R.string.tab_proxy_groups, Icons.Filled.Layers, "tab_proxy_groups"),
-    TabDestination(Dest.Utility, R.string.tab_utility, Icons.Filled.Handyman, "tab_utility"),
-    TabDestination(Dest.ZeroTier, R.string.tab_zerotier, Icons.Filled.Hub, "tab_zerotier"),
-    TabDestination(Dest.Settings, R.string.tab_settings, Icons.Filled.Settings, "tab_settings"),
-)
+val TABS = buildList {
+    add(TabDestination(Dest.Home, R.string.tab_home, Icons.Filled.Home, "tab_home"))
+    add(TabDestination(Dest.ProxyGroups, R.string.tab_proxy_groups, Icons.Filled.Layers, "tab_proxy_groups"))
+    add(TabDestination(Dest.Utility, R.string.tab_utility, Icons.Filled.Handyman, "tab_utility"))
+    ZeroTierUi.tab?.let(::add)
+    add(TabDestination(Dest.Settings, R.string.tab_settings, Icons.Filled.Settings, "tab_settings"))
+}

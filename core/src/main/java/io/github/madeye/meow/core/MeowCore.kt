@@ -6,6 +6,9 @@ object MeowCore {
         nativeInit()
     }
 
+    /** Ensure the shared library has been initialized before flavor-specific JNI calls. */
+    internal fun ensureLoaded() = Unit
+
     external fun nativeInit()
     external fun nativeSetHomeDir(dir: String)
     /**
@@ -42,10 +45,6 @@ object MeowCore {
     ): Int
     /** Stop the forwarding stack only; keep the live engine and controller. Off Main. */
     external fun nativeStopTun2Socks(): Boolean
-    /** 0 applied, 1 requires rebuilding forwarding, negative leaves the old policy. Off Main. */
-    external fun nativeApplyZeroTier(overlayRoot: String, overlayConfig: String): Int
-    external fun nativeSetMeowForwarding(enabled: Boolean): Int
-    external fun nativeInspectMoon(input: ByteArray): String?
     external fun nativeIsRunning(): Boolean
     external fun nativeGetUploadTraffic(): Long
     external fun nativeGetDownloadTraffic(): Long

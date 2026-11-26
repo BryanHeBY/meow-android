@@ -20,6 +20,13 @@ val Project.currentFlavor get() = gradle.startParameter.taskNames.let { tasks ->
     }
 }
 
+/** Keep Android and Cargo on the same build-time feature selection. */
+val Project.zerotierEnabled: Boolean
+    get() = providers.gradleProperty("ZEROTIER").orElse("true").get().let { value ->
+        value.toBooleanStrictOrNull()
+            ?: throw org.gradle.api.GradleException("ZEROTIER must be true or false, was: " + value)
+    }
+
 fun Project.setupCommon() {
     // JVM 17 — required by sora-editor, whose inline functions are compiled at
     // 17. Bumped from 11 when sora-editor was added.

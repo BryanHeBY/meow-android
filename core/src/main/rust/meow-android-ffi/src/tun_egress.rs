@@ -40,10 +40,10 @@ impl Stats {
 
 /// Serializes the enable/disable boundary against the nonblocking write
 /// syscall, and cancels a stalled or queued packet from the old generation.
-#[cfg(any(test, target_os = "android"))]
+#[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
 pub(super) struct Gate(parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>);
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
 impl Gate {
     pub(super) fn new(enabled: bool) -> Arc<Self> {
         Arc::new(Self(parking_lot::Mutex::new(
@@ -73,7 +73,7 @@ impl Gate {
 pub(crate) struct Tx {
     tx: mpsc::Sender<Packet>,
     budget: Arc<Semaphore>,
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
     gate: Option<Arc<Gate>>,
     stats: Arc<Stats>,
 }
@@ -83,7 +83,7 @@ pub(super) struct Packet {
     bytes: usize,
     stats: Arc<Stats>,
     _permit: OwnedSemaphorePermit,
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
     gate: Option<(Arc<Gate>, tokio_util::sync::CancellationToken)>,
 }
 
@@ -100,7 +100,7 @@ pub(super) fn channel(slots: usize, bytes: usize) -> (Tx, mpsc::Receiver<Packet>
         Tx {
             tx,
             budget: Arc::new(Semaphore::new(bytes)),
-            #[cfg(any(test, target_os = "android"))]
+            #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
             gate: None,
             stats: stats.clone(),
         },
@@ -110,7 +110,7 @@ pub(super) fn channel(slots: usize, bytes: usize) -> (Tx, mpsc::Receiver<Packet>
 }
 
 impl Tx {
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
     pub(super) fn gated(&self, gate: Arc<Gate>) -> Self {
         Self {
             gate: Some(gate),
@@ -121,7 +121,7 @@ impl Tx {
     /// Drop the newest packet on overflow; waiting here could deadlock the
     /// lwIP pump or stall the ZeroTier SDK owner thread.
     pub(crate) fn enqueue(&self, data: Vec<u8>) {
-        #[cfg(any(test, target_os = "android"))]
+        #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
         let gate = if let Some(gate) = &self.gate {
             let Some(generation) = gate.snapshot() else {
                 return;
@@ -132,12 +132,12 @@ impl Tx {
         };
         self.enqueue_inner(
             data,
-            #[cfg(any(test, target_os = "android"))]
+            #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
             gate,
         );
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     pub(super) fn enqueue_at(
         &self,
         data: Vec<u8>,
@@ -154,7 +154,7 @@ impl Tx {
     fn enqueue_inner(
         &self,
         data: Vec<u8>,
-        #[cfg(any(test, target_os = "android"))] gate: Option<(
+        #[cfg(any(test, all(target_os = "android", feature = "zerotier")))] gate: Option<(
             Arc<Gate>,
             tokio_util::sync::CancellationToken,
         )>,
@@ -180,7 +180,7 @@ impl Tx {
             bytes,
             stats: self.stats.clone(),
             _permit: permit,
-            #[cfg(any(test, target_os = "android"))]
+            #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
             gate,
         });
     }
@@ -190,7 +190,7 @@ pub(super) async fn write(tun: &AsyncFd<impl AsRawFd>, packet: Packet) -> io::Re
     let start = Instant::now();
     let result = loop {
         let writable = tun.writable();
-        #[cfg(any(test, target_os = "android"))]
+        #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
         let writable = async {
             if let Some((_, generation)) = &packet.gate {
                 tokio::select! {
@@ -201,19 +201,19 @@ pub(super) async fn write(tun: &AsyncFd<impl AsRawFd>, packet: Packet) -> io::Re
             }
             Some(writable.await)
         };
-        #[cfg(any(test, target_os = "android"))]
+        #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
         let Some(writable) = writable.await
         else {
             break Ok(());
         };
-        #[cfg(not(any(test, target_os = "android")))]
+        #[cfg(not(any(test, all(target_os = "android", feature = "zerotier"))))]
         let writable = writable.await;
         let mut ready = match writable {
             Ok(ready) => ready,
             Err(error) => break Err(error),
         };
         let result = ready.try_io(|fd| {
-            #[cfg(any(test, target_os = "android"))]
+            #[cfg(any(test, all(target_os = "android", feature = "zerotier")))]
             let _guard = if let Some((gate, generation)) = &packet.gate {
                 let guard = gate.0.lock();
                 if generation.is_cancelled() {

@@ -70,10 +70,20 @@ abstract class DownloadGeoxAssets : DefaultTask() {
 
 val downloadGeoxAssets = tasks.register<DownloadGeoxAssets>("downloadGeoxAssets")
 
+val withZeroTier = zerotierEnabled
+
 android {
     namespace = "io.github.madeye.meow.core"
 
+    sourceSets.named("main") {
+        java.srcDir(if (withZeroTier) "src/withZeroTier/java" else "src/withoutZeroTier/java")
+    }
+    if (withZeroTier) {
+        sourceSets.named("test") { java.srcDir("src/testWithZeroTier/java") }
+    }
+
     defaultConfig {
+        buildConfigField("boolean", "ZEROTIER", withZeroTier.toString())
         consumerProguardFiles("proguard-rules.pro")
 
         ksp {
@@ -102,6 +112,8 @@ extensions.getByType(LibraryAndroidComponentsExtension::class.java).onVariants {
 cargo {
     module = "src/main/rust/meow-android-ffi"
     libname = "meow_android_ffi"
+    extraCargoBuildArguments = if (withZeroTier) listOf("--locked", "--features", "zerotier")
+        else listOf("--locked", "--no-default-features")
     targets = if (targetAbi != null) listOf(targetAbi) else listOf("arm", "arm64", "x86", "x86_64")
     profile = findProperty("CARGO_PROFILE")?.toString() ?: currentFlavor
     exec = { spec, toolchain ->
@@ -200,6 +212,10 @@ cargo {
 // vendored workspace too so switching the gitlink cannot leave a stale .so.
 val pinnedKernel = rootProject.layout.projectDirectory.dir("vendor/meow-rs")
 tasks.matching { it.name.startsWith("cargoBuild") }.configureEach {
+    // Switching the property must relink and repackage rather than reusing
+    // the other edition's JNI binary from the Gradle task output.
+    inputs.property("withZeroTier", withZeroTier)
+    if (withZeroTier) inputs.dir(layout.projectDirectory.dir("src/main/cpp/zerotier"))
     inputs.files(fileTree(pinnedKernel.asFile) {
         include("Cargo.toml", "Cargo.lock", "crates/**")
     }).withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)

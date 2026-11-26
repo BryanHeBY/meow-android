@@ -14,7 +14,7 @@
 //! `meow_dns::DnsServer::handle_query`.
 
 mod diagnostics;
-#[cfg(any(test, target_os = "android"))]
+#[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 mod direct_exit;
 mod engine;
 mod ip_info;
@@ -30,13 +30,16 @@ mod test_support;
 mod traffic;
 mod tun2socks;
 mod tun_egress;
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 mod zerotier;
-#[cfg(any(test, target_os = "android"))]
+#[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 mod zerotier_config;
-#[cfg(any(target_os = "android", all(test, target_os = "linux")))]
+#[cfg(all(
+    feature = "zerotier",
+    any(target_os = "android", all(test, target_os = "linux"))
+))]
 mod zerotier_wake;
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 mod zerotier_worker;
 
 use dashmap::DashMap;
@@ -643,9 +646,9 @@ fn stop_engine() {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 #[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeInspectMoon(
+pub extern "system" fn Java_io_github_madeye_meow_core_ZeroTierNative_nativeInspectMoon(
     env: JNIEnv,
     _class: JClass,
     input: jni::objects::JByteArray,
@@ -692,15 +695,21 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
 
     #[cfg(target_os = "android")]
     let start = (|| -> Result<(), String> {
-        let root: String = env
-            .get_string(&overlay_root)
-            .map_err(|e| e.to_string())?
-            .into();
-        let json: String = env
-            .get_string(&overlay_settings)
-            .map_err(|e| e.to_string())?
-            .into();
-        let (config, meow_enabled) = zerotier_config::parse_session(json.as_bytes())?;
+        #[cfg(feature = "zerotier")]
+        let (root, config, meow_enabled) = {
+            let root: String = env
+                .get_string(&overlay_root)
+                .map_err(|e| e.to_string())?
+                .into();
+            let json: String = env
+                .get_string(&overlay_settings)
+                .map_err(|e| e.to_string())?
+                .into();
+            let (config, meow_enabled) = zerotier_config::parse_session(json.as_bytes())?;
+            (root, config, meow_enabled)
+        };
+        #[cfg(not(feature = "zerotier"))]
+        let _ = (overlay_root, overlay_settings);
         // Capture this exact service instance, not a process-global pointer
         // that a newer session can replace while the old task exits.
         let report_exit = env.get_java_vm().ok().and_then(|jvm| {
@@ -724,8 +733,10 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
         });
         tun2socks::start_android(
             fd,
+            #[cfg(feature = "zerotier")]
             config.map(|config| (root.into(), config)),
             report_exit,
+            #[cfg(feature = "zerotier")]
             meow_enabled,
         )
     })();
@@ -766,9 +777,9 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStopTun2So
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 #[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeApplyZeroTier(
+pub extern "system" fn Java_io_github_madeye_meow_core_ZeroTierNative_nativeApplyZeroTier(
     mut env: JNIEnv,
     _class: JClass,
     overlay_root: JString,
@@ -805,9 +816,9 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeApplyZeroT
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 #[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeSetMeowForwarding(
+pub extern "system" fn Java_io_github_madeye_meow_core_ZeroTierNative_nativeSetMeowForwarding(
     _env: JNIEnv,
     _class: JClass,
     enabled: jboolean,

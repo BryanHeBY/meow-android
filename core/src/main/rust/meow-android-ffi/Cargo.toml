@@ -17,8 +17,12 @@ needless_return = "allow"
 # macro expansion on this version.
 missing_const_for_thread_local = "allow"
 
+[features]
+default = ["zerotier"]
+zerotier = ["dep:meow-overlay-policy"]
+
 [dependencies]
-meow-overlay-policy = { path = "../meow-overlay-policy" }
+meow-overlay-policy = { path = "../meow-overlay-policy", optional = true }
 # Full upstream protocol set (mirrors meow-app's `full` bundle):
 # ss (+simple-obfs / v2ray-plugin, and the shadow-tls / restls / jls /
 # gost-plugin plugins, each its own feature since meow-rs v0.28.0), trojan,

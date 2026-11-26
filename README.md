@@ -145,3 +145,22 @@ The Android FFI builds the Rust dependencies from `vendor/meow-rs`; the
 Git link pins the exact kernel revision. Treat the submodule and Cargo
 lockfile as one update. For the Android build, continue to use the app's
 documented Gradle/NDK setup.
+
+### MeowZ editions
+
+ZeroTier is on by default. Use `-PZEROTIER=false` for MeowZ Lite; that
+variant does not build or link ZeroTier, compile the overlay storage and UI,
+or expose the overlay controls. Both use the same Meow engine and their own
+app data. Lite uses application ID `io.github.bryanheby.meowz.lite` and can be
+installed next to MeowZ; Android still allows only one active VPN. Both editions
+handle the existing subscription import links (Android shows a chooser if needed).
+
+```bash
+./gradlew :mobile:assembleDebug -PTARGET_ABI=arm64 -PZEROTIER=false
+./tools/build-editions.sh debug   # both APKs under build/editions/debug/
+./tools/build-editions.sh release # both ARM64 release APKs
+```
+
+A debug build is debug-signed. Release builds are unsigned unless the existing
+release keystore is configured. The GitHub Actions **Android editions** workflow
+checks each edition independently and uploads its debug APK.

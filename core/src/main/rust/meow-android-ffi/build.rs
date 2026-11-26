@@ -54,7 +54,9 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android") {
         return;
     }
-    build_zerotier();
+    if cfg!(feature = "zerotier") {
+        build_zerotier();
+    }
     println!("cargo:rustc-link-lib=c++abi");
 }
 

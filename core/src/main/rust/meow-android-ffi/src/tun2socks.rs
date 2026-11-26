@@ -8,7 +8,7 @@
 //! synthesis, other qtypes forwarded over the same upstreams. No loopback
 //! DNS server socket exists.
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 #[path = "tun_owner_ingress.rs"]
 mod tun_owner_ingress;
 
@@ -18,6 +18,7 @@ use crate::owner;
 use futures::{SinkExt, StreamExt};
 use meow_common::{ConnType, Metadata, Network, ProxyConn};
 use meow_dns::DnsServer;
+#[cfg(feature = "zerotier")]
 use meow_overlay_policy::apps::AppFilter;
 use meow_tunnel::udp::UdpSession;
 use parking_lot::Mutex;
@@ -40,9 +41,9 @@ use tracing::{trace, warn};
 
 type UdpMsg = (Vec<u8>, SocketAddr, SocketAddr);
 type AnyIpPktFrame = Vec<u8>;
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 type StackFrame = (AnyIpPktFrame, tokio_util::sync::CancellationToken);
-#[cfg(not(target_os = "android"))]
+#[cfg(not(all(target_os = "android", feature = "zerotier")))]
 type StackFrame = AnyIpPktFrame;
 type FlowTasks = Arc<Mutex<Vec<JoinHandle<()>>>>;
 type NatKey = (SocketAddr, SocketAddr);
@@ -51,21 +52,26 @@ type NatKey = (SocketAddr, SocketAddr);
 /// while the evicted one's reader is still winding down.
 type ReplyReaders = Arc<Mutex<HashMap<NatKey, Arc<UdpSession>>>>;
 
+#[cfg(feature = "zerotier")]
 type ClashGate = AppFilter;
+#[cfg(not(feature = "zerotier"))]
+type ClashGate = ();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum FlowExit {
     Clash,
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
     Direct(Vec<String>),
+    #[cfg(feature = "zerotier")]
     Drop,
 }
 
+#[cfg(feature = "zerotier")]
 fn owner_exit(gate: &ClashGate, packages: &[&str]) -> FlowExit {
     if gate.permits_owner(packages) {
         return FlowExit::Clash;
     }
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
     if !packages.is_empty() && packages.iter().all(|name| !gate.permits(name)) {
         let mut identity: Vec<_> = packages.iter().map(|name| (*name).to_owned()).collect();
         identity.sort_unstable();
@@ -75,6 +81,7 @@ fn owner_exit(gate: &ClashGate, packages: &[&str]) -> FlowExit {
     FlowExit::Drop
 }
 
+#[cfg(feature = "zerotier")]
 async fn flow_exit(
     gate: Option<&ClashGate>,
     _protocol: i32,
@@ -84,12 +91,17 @@ async fn flow_exit(
     let Some(gate) = gate else {
         return FlowExit::Clash;
     };
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let packages = owner::overlay_packages(_protocol, _src, _dst).await;
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(all(target_os = "android", feature = "zerotier")))]
     let packages: Vec<String> = Vec::new();
     let refs: Vec<&str> = packages.iter().map(String::as_str).collect();
     owner_exit(gate, &refs)
+}
+
+#[cfg(not(feature = "zerotier"))]
+async fn flow_exit(_: Option<&ClashGate>, _: i32, _: SocketAddr, _: SocketAddr) -> FlowExit {
+    FlowExit::Clash
 }
 
 static TUN2SOCKS_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -100,30 +112,30 @@ static TUN2SOCKS_STOP_NOTIFY: Notify = Notify::const_new();
 // Handle of the running session's top-level task, so `stop()` can wait for
 // it to finish touching the TUN fd before Kotlin closes it.
 static TUN2SOCKS_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 type MeowGate = Arc<crate::tun_egress::Gate>;
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 struct TunControl {
     overlay: mpsc::Sender<OverlayCommand>,
     meow: MeowGate,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 static TUN_CONTROL: Mutex<Option<TunControl>> = Mutex::new(None);
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 struct OverlayCommand {
     target: Overlay,
     claim: Arc<CommandClaim>,
     reply: tokio::sync::oneshot::Sender<Result<bool, String>>,
 }
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 #[derive(Default)]
 struct CommandClaim(std::sync::atomic::AtomicU8);
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 impl CommandClaim {
     fn claim(&self) -> bool {
         self.0
@@ -139,13 +151,13 @@ impl CommandClaim {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 pub enum OverlayApplyError {
     NotApplied(String),
     OutcomeUnknown,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 pub fn apply_overlay(target: Overlay) -> Result<bool, OverlayApplyError> {
     use OverlayApplyError::{NotApplied, OutcomeUnknown};
     let sender = TUN_CONTROL
@@ -178,7 +190,7 @@ pub fn apply_overlay(target: Overlay) -> Result<bool, OverlayApplyError> {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 pub fn set_meow_forwarding(enabled: bool) -> Result<(), &'static str> {
     let active = TUN_CONTROL.lock();
     let control = active.as_ref().ok_or("TUN is not active")?;
@@ -215,33 +227,40 @@ fn warn_capped(slot: &AtomicU64, msg: &str) {
 pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
     start_inner(
         fd,
-        #[cfg(target_os = "android")]
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
         None,
         #[cfg(target_os = "android")]
         None,
-        #[cfg(target_os = "android")]
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
         true,
     )
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 type Overlay = Option<(std::path::PathBuf, crate::zerotier_config::Config)>;
 
 #[cfg(target_os = "android")]
 pub fn start_android(
     fd: i32,
-    config: Overlay,
+    #[cfg(feature = "zerotier")] config: Overlay,
     report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
-    meow_enabled: bool,
+    #[cfg(feature = "zerotier")] meow_enabled: bool,
 ) -> Result<(), String> {
-    start_inner(fd, config, report_exit, meow_enabled)
+    start_inner(
+        fd,
+        #[cfg(feature = "zerotier")]
+        config,
+        report_exit,
+        #[cfg(feature = "zerotier")]
+        meow_enabled,
+    )
 }
 
 fn start_inner(
     fd: i32,
-    #[cfg(target_os = "android")] overlay: Overlay,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
-    #[cfg(target_os = "android")] meow_enabled: bool,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] meow_enabled: bool,
 ) -> Result<(), String> {
     let mut task = TUN2SOCKS_TASK.lock();
     if task.as_ref().is_some_and(|task| !task.is_finished()) {
@@ -272,13 +291,13 @@ fn start_inner(
             return Err(error.to_string());
         }
     };
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let (overlay_tx, overlay_rx) = mpsc::channel(1);
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let meow = crate::tun_egress::Gate::new(meow_enabled);
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let meow_task = meow.clone();
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     {
         *TUN_CONTROL.lock() = Some(TunControl {
             overlay: overlay_tx,
@@ -290,11 +309,11 @@ fn start_inner(
     let handle = rt.spawn(async move {
         let run = run_tun2socks(
             tun_fd,
-            #[cfg(target_os = "android")]
+            #[cfg(all(target_os = "android", feature = "zerotier"))]
             overlay,
-            #[cfg(target_os = "android")]
+            #[cfg(all(target_os = "android", feature = "zerotier"))]
             Some(overlay_rx),
-            #[cfg(target_os = "android")]
+            #[cfg(all(target_os = "android", feature = "zerotier"))]
             meow_task,
         );
         let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(run)).await;
@@ -310,7 +329,7 @@ fn start_inner(
             }
         };
         let requested = TUN2SOCKS_STOP_REQUESTED.swap(false, Ordering::SeqCst);
-        #[cfg(target_os = "android")]
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
         {
             *TUN_CONTROL.lock() = None;
         }
@@ -370,9 +389,11 @@ pub fn stop() -> bool {
 
 async fn run_tun2socks(
     fd: OwnedFd,
-    #[cfg(target_os = "android")] overlay: Overlay,
-    #[cfg(target_os = "android")] mut overlay_control: Option<mpsc::Receiver<OverlayCommand>>,
-    #[cfg(target_os = "android")] meow: MeowGate,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] mut overlay_control: Option<
+        mpsc::Receiver<OverlayCommand>,
+    >,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] meow: MeowGate,
 ) -> io::Result<()> {
     logging::bridge_log("tun2socks: building lwip netstack");
 
@@ -393,20 +414,20 @@ async fn run_tun2socks(
         AsyncFd::register_with_interest(fd, Interest::READABLE | Interest::WRITABLE)?
     });
     let (egress_tx, mut egress_rx, egress_stats) = crate::tun_egress::channel(256, 2 * 1024 * 1024);
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let egress_tx = egress_tx.gated(meow.clone());
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let (overlay_out, mut overlay_in, overlay_stats) = crate::tun_egress::channel(128, 512 * 1024);
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let clash_gate = overlay
         .as_ref()
         .map(|(_, config)| &config.clash_filter)
         .filter(|filter| !filter.permits_owner(&[]))
         .map(|filter| Arc::new(filter.clone()));
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(all(target_os = "android", feature = "zerotier")))]
     let clash_gate: Option<Arc<ClashGate>> = None;
     let stack_clash_gate = clash_gate.clone();
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     let direct_udp = Arc::new(crate::direct_exit::udp::Flows::default());
     let dns_sem = Arc::new(Semaphore::new(DNS_BURST_CAP));
     let flow_tasks: FlowTasks = Arc::new(Mutex::new(Vec::new()));
@@ -426,7 +447,7 @@ async fn run_tun2socks(
                 pkt = stack_ingress_rx.recv() => {
                     match pkt {
                         Some(frame) => {
-                            #[cfg(target_os = "android")]
+                            #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let result = {
                                 let (bytes, generation) = frame;
                                 // Reserve in the Sink before submitting; select
@@ -437,7 +458,7 @@ async fn run_tun2socks(
                                     result = stack.send(bytes) => result,
                                 }
                             };
-                            #[cfg(not(target_os = "android"))]
+                            #[cfg(not(all(target_os = "android", feature = "zerotier")))]
                             let result = stack.send(frame).await;
                             if let Err(e) = result {
                                 logging::bridge_log(&format!("stack send error: {}", e));
@@ -466,7 +487,7 @@ async fn run_tun2socks(
                                     FlowExit::Clash if remote_addr.port() != 53 => {
                                         dispatch_tcp(stream, local_addr, remote_addr).await;
                                     }
-                                    #[cfg(target_os = "android")]
+                                    #[cfg(all(target_os = "android", feature = "zerotier"))]
                                     FlowExit::Direct(_) => { let _ = crate::direct_exit::tcp(stream, remote_addr).await; }
                                     _ => {}
                                 }
@@ -482,13 +503,14 @@ async fn run_tun2socks(
                             let reply_tx = udp_reply_tx_lwip.clone();
                             let readers = reply_readers_lwip.clone();
                             let gate = stack_clash_gate.clone();
-                            #[cfg(target_os = "android")]
+                            #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let direct = direct_udp.clone();
                             let handle = tokio::spawn(async move {
                                 match flow_exit(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await {
                                     FlowExit::Clash => dispatch_udp(payload, src, dst, reply_tx, readers).await,
-                                    #[cfg(target_os = "android")]
+                                    #[cfg(all(target_os = "android", feature = "zerotier"))]
                                     FlowExit::Direct(owner) => direct.transmit((src, dst), owner, payload, reply_tx),
+                                    #[cfg(feature = "zerotier")]
                                     _ => {}
                                 }
                             });
@@ -515,9 +537,9 @@ async fn run_tun2socks(
     let tun_writer = Arc::clone(&tun);
     let tun_writer_handle = tokio::spawn(async move {
         loop {
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(all(target_os = "android", feature = "zerotier")))]
             let next = egress_rx.recv().await;
-            #[cfg(target_os = "android")]
+            #[cfg(all(target_os = "android", feature = "zerotier"))]
             let next = tokio::select! {
                 Some(pkt) = overlay_in.recv() => Some(pkt),
                 next = egress_rx.recv() => next,
@@ -548,7 +570,7 @@ async fn run_tun2socks(
             egress: egress_tx,
             gate: clash_gate,
         };
-        #[cfg(target_os = "android")]
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
         let (mut overlay, mut owner_lanes) = match overlay {
             Some((root, config)) => {
                 let active = LiveOverlay::start(root, config, &overlay_out)?;
@@ -559,7 +581,7 @@ async fn run_tun2socks(
         };
 
         let result = 'reader: loop {
-            #[cfg(target_os = "android")]
+            #[cfg(all(target_os = "android", feature = "zerotier"))]
             let mut ready = tokio::select! {
                 biased;
                 _ = &mut stopped => break Ok(()),
@@ -576,7 +598,7 @@ async fn run_tun2socks(
                     Err(e) => break Err(e),
                 },
             };
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(all(target_os = "android", feature = "zerotier")))]
             let mut ready = tokio::select! {
                 biased;
                 _ = &mut stopped => break Ok(()),
@@ -615,9 +637,9 @@ async fn run_tun2socks(
                 let n = n as usize;
                 let ip_data = &read_buf[..n];
 
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 let meow_generation = meow.snapshot();
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 if let Some(active) = &overlay {
                     let overlay = &active.worker;
                     let initial = overlay.classify(ip_data);
@@ -657,23 +679,23 @@ async fn run_tun2socks(
                     }
                 }
 
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 let Some(generation) = meow_generation
                 else {
                     continue;
                 };
                 if ingress.spawn_dns(
                     ip_data,
-                    #[cfg(target_os = "android")]
+                    #[cfg(all(target_os = "android", feature = "zerotier"))]
                     generation.clone(),
                 ) {
                     continue;
                 }
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 let frame = (ip_data.to_vec(), generation);
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(all(target_os = "android", feature = "zerotier")))]
                 let frame = ip_data.to_vec();
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 let forwarded = tokio::select! {
                     biased;
                     command = recv_overlay_command(&mut overlay_control) => {
@@ -688,7 +710,7 @@ async fn run_tun2socks(
                     }
                     success = send_ingress(&ingress.stack, frame, &mut stopped) => success,
                 };
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(all(target_os = "android", feature = "zerotier")))]
                 let forwarded = send_ingress(&ingress.stack, frame, &mut stopped).await;
                 if !forwarded {
                     break 'reader Ok(());
@@ -696,7 +718,7 @@ async fn run_tun2socks(
             }
             tokio::task::yield_now().await;
         };
-        #[cfg(target_os = "android")]
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
         retire_overlay(overlay, owner_lanes).await;
         result
     });
@@ -711,7 +733,7 @@ async fn run_tun2socks(
     let _ = tun_writer_handle.await;
 
     logging::bridge_log(&format!("tun2socks: egress {}", egress_stats.summary()));
-    #[cfg(target_os = "android")]
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
     logging::bridge_log(&format!(
         "tun2socks: ZeroTier egress {}",
         overlay_stats.summary()
@@ -720,7 +742,7 @@ async fn run_tun2socks(
     reader.map_err(io::Error::other)?
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 struct LiveOverlay {
     worker: Arc<crate::zerotier_worker::Worker>,
     // Only this generation can emit ZeroTier packets. A detached worker's
@@ -728,7 +750,7 @@ struct LiveOverlay {
     egress: Arc<crate::tun_egress::Gate>,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 impl LiveOverlay {
     fn start(
         root: std::path::PathBuf,
@@ -745,17 +767,17 @@ impl LiveOverlay {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 type OwnerPacket = (
     Vec<u8>,
     Destination,
     Option<tokio_util::sync::CancellationToken>,
 );
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 type OwnerLanes = tun_owner_ingress::Lanes<OwnerPacket>;
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 fn make_owner_lanes(overlay: &LiveOverlay, ingress: &ClashIngress) -> Option<OwnerLanes> {
     if overlay.worker.config.filter.permits_owner(&[]) {
         return None;
@@ -787,7 +809,7 @@ fn make_owner_lanes(overlay: &LiveOverlay, ingress: &ClashIngress) -> Option<Own
     ))
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 async fn retire_overlay(overlay: Option<LiveOverlay>, lanes: Option<OwnerLanes>) {
     if let Some(active) = &overlay {
         active.egress.set(false);
@@ -801,7 +823,7 @@ async fn retire_overlay(overlay: Option<LiveOverlay>, lanes: Option<OwnerLanes>)
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 async fn replace_overlay(
     target: Overlay,
     active: &mut Option<LiveOverlay>,
@@ -836,7 +858,7 @@ async fn replace_overlay(
     Ok(true)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 async fn handle_overlay_command(
     command: OverlayCommand,
     active: &mut Option<LiveOverlay>,
@@ -850,7 +872,7 @@ async fn handle_overlay_command(
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 async fn recv_overlay_command(
     control: &mut Option<mpsc::Receiver<OverlayCommand>>,
 ) -> Option<OverlayCommand> {
@@ -860,15 +882,15 @@ async fn recv_overlay_command(
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 use meow_overlay_policy::Destination;
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 use tun_owner_ingress::{overlay_route, route_history, OverlayExit};
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 static OWNER_CAP_LOG_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 async fn overlay_exit(
     overlay: &crate::zerotier_worker::Worker,
     initial: Destination,
@@ -911,7 +933,8 @@ impl ClashIngress {
     fn spawn_dns(
         &self,
         ip_data: &[u8],
-        #[cfg(target_os = "android")] generation: tokio_util::sync::CancellationToken,
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
+        generation: tokio_util::sync::CancellationToken,
     ) -> bool {
         // In-process DNS: intercept UDP/53 pre-stack.
         if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
@@ -954,7 +977,7 @@ impl ClashIngress {
                             };
                             bytes
                         }
-                        #[cfg(target_os = "android")]
+                        #[cfg(all(target_os = "android", feature = "zerotier"))]
                         FlowExit::Direct(_) if parsed.dst.ip() == Ipv4Addr::new(172, 19, 0, 2) => {
                             let Some(bytes) = crate::direct_exit::system_dns(parsed.payload).await
                             else {
@@ -962,17 +985,18 @@ impl ClashIngress {
                             };
                             bytes
                         }
+                        #[cfg(feature = "zerotier")]
                         _ => return,
                     };
                     let Some(reply_pkt) = build_udp_reply(&request, &response_payload) else {
                         return;
                     };
-                    #[cfg(target_os = "android")]
+                    #[cfg(all(target_os = "android", feature = "zerotier"))]
                     egress.enqueue_at(reply_pkt, generation.clone());
-                    #[cfg(not(target_os = "android"))]
+                    #[cfg(not(all(target_os = "android", feature = "zerotier")))]
                     egress.enqueue(reply_pkt);
                 };
-                #[cfg(target_os = "android")]
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
                 let work = async {
                     tokio::select! {
                         biased;
@@ -1338,7 +1362,7 @@ mod app_gate_tests {
     use super::*;
 
     #[tokio::test]
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(feature = "zerotier", not(target_os = "android")))]
     async fn a_missing_owner_never_reaches_a_restricted_clash_egress() {
         let local = "172.19.0.1:54321".parse().unwrap();
         let remote = "172.19.0.2:53".parse().unwrap();
@@ -1435,6 +1459,7 @@ fn ipv4_header_checksum(h: &[u8]) -> u16 {
 #[cfg(test)]
 mod tests {
     #[test]
+    #[cfg(feature = "zerotier")]
     fn apply_deadline_and_reader_claim_are_exclusive() {
         let cancelled = CommandClaim::default();
         assert!(cancelled.cancel_before_apply());
@@ -1863,11 +1888,11 @@ mod tests {
                     Duration::from_secs(2),
                     run_tun2socks(
                         socket.into(),
-                        #[cfg(target_os = "android")]
+                        #[cfg(all(target_os = "android", feature = "zerotier"))]
                         None,
-                        #[cfg(target_os = "android")]
+                        #[cfg(all(target_os = "android", feature = "zerotier"))]
                         None,
-                        #[cfg(target_os = "android")]
+                        #[cfg(all(target_os = "android", feature = "zerotier"))]
                         crate::tun_egress::Gate::new(true),
                     ),
                 )

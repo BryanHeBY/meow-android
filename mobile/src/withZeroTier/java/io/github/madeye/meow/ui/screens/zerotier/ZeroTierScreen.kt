@@ -44,7 +44,7 @@ import io.github.madeye.meow.AppGraph
 import io.github.madeye.meow.R
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.bg.ForwardingControl
-import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.core.ZeroTierNative
 import io.github.madeye.meow.repo.MoonSetting
 import io.github.madeye.meow.repo.OverlaySettings
 import io.github.madeye.meow.repo.OverlaySettingsRepository
@@ -227,7 +227,7 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                         if (length in 1..16_384) buffer.copyOf(length) else null
                     }
                 }
-                val world = encoded?.let { withContext(Dispatchers.Default) { MeowCore.nativeInspectMoon(it) } }
+                val world = encoded?.let { withContext(Dispatchers.Default) { ZeroTierNative.nativeInspectMoon(it) } }
                 when {
                     world == null -> info = tr("Invalid or oversized Moon file", "Moon 文件无效或过大")
                     config.moons.any { it.world == world } ->

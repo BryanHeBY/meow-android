@@ -11,13 +11,13 @@ import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import io.github.madeye.meow.Core
+import io.github.madeye.meow.core.BuildConfig
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
 import io.github.madeye.meow.diagnostics.FaultProcess
 import io.github.madeye.meow.preference.DataStore
 import io.github.madeye.meow.preference.PerAppConfigStore
-import io.github.madeye.meow.repo.OverlaySettingsRepository
 import io.github.madeye.meow.repo.PerAppMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -227,9 +227,9 @@ class VpnService : BaseVpnService(), BaseService.Interface {
      * Default routes and the gateway's remote routes are not local subnets.
      */
     private fun overlayConfig(reconfiguring: Boolean): JSONObject {
-        val settings = OverlaySettingsRepository.directory.resolve("settings.json")
-        if (!settings.isFile) return JSONObject()
-        val config = JSONObject(settings.readText()).apply { remove("saved_networks") }
+        if (!BuildConfig.ZEROTIER) return JSONObject()
+        val settings = OverlayPlatform.configText() ?: return JSONObject()
+        val config = JSONObject(settings).apply { remove("saved_networks") }
         if (!config.optBoolean("enabled")) return config
         val network = directNetwork ?: connectivity.activeNetwork
         val capabilities = network?.let(connectivity::getNetworkCapabilities)
@@ -389,6 +389,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     }
 
     override suspend fun applyZeroTier(): Int = tunChanges.withLock {
+        if (!BuildConfig.ZEROTIER) return@withLock ForwardingControl.OFFLINE
         if (data.state != BaseService.State.Connected) {
             return@withLock if (data.state == BaseService.State.Stopped)
                 ForwardingControl.OFFLINE else ForwardingControl.FAILED
@@ -404,9 +405,8 @@ class VpnService : BaseVpnService(), BaseService.Interface {
             if (!overlayApplyUnknown && proposed == old) return@withLock ForwardingControl.APPLIED
             val replaceInterface = old == null || old.envelope.requiresNewInterface(proposed.envelope)
             if (!replaceInterface && !overlayApplyUnknown) {
-                val root = OverlaySettingsRepository.directory.absolutePath
                 when (withContext(Dispatchers.IO) {
-                    MeowCore.nativeApplyZeroTier(root, proposed.nativeConfig(meowForwarding))
+                    OverlayPlatform.apply(proposed.nativeConfig(meowForwarding))
                 }) {
                     0 -> {
                         tunPlan = proposed
@@ -481,12 +481,13 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     }
 
     override suspend fun setMeowForwarding(enabled: Boolean): Int = tunChanges.withLock {
+        if (!BuildConfig.ZEROTIER) return@withLock ForwardingControl.OFFLINE
         val plan = tunPlan
         if (data.state != BaseService.State.Connected || overlayApplyUnknown || plan?.overlayEnabled != true ||
             data.meowInstance?.profile?.id == 0L
         ) return@withLock ForwardingControl.OFFLINE
         if (meowForwarding == enabled) return@withLock ForwardingControl.APPLIED
-        if (withContext(Dispatchers.IO) { MeowCore.nativeSetMeowForwarding(enabled) } != 0) {
+        if (withContext(Dispatchers.IO) { OverlayPlatform.setMeowForwarding(enabled) } != 0) {
             return@withLock ForwardingControl.FAILED
         }
         meowForwarding = enabled

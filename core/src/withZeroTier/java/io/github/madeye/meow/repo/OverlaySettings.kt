@@ -1,7 +1,7 @@
 package io.github.madeye.meow.repo
 
 import io.github.madeye.meow.Core
-import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.core.ZeroTierNative
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -195,7 +195,7 @@ class OverlaySettingsRepository(private val root: File = directory) {
     }
 
     suspend fun stageMoon(world: String, bytes: ByteArray) = withContext(Dispatchers.IO) {
-        check(bytes.size in 1..16_384 && MeowCore.nativeInspectMoon(bytes) == world) { "Invalid Moon definition" }
+        check(bytes.size in 1..16_384 && ZeroTierNative.nativeInspectMoon(bytes) == world) { "Invalid Moon definition" }
         check(root.isDirectory || root.mkdirs()) { "Cannot create ZeroTier storage" }
         val temp = File.createTempFile("moon-import-", ".tmp", root)
         try {

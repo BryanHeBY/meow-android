@@ -10,14 +10,16 @@ plugins {
 
 setupApp()
 
+val withZeroTier = zerotierEnabled
+
 // google-services.json is a CI secret that is not exposed to fork PRs. Apply the
 // Firebase plugins only when it exists so fork/CI builds still configure; the
 // Firebase SDKs no-op at runtime without a google_app_id.
-if (file("google-services.json").exists()) {
+if (withZeroTier && file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
     apply(plugin = "com.google.firebase.crashlytics")
 } else {
-    logger.warn("mobile/google-services.json not found; skipping Firebase Gradle plugins")
+    logger.info("Skipping Firebase Gradle plugins for Lite or a missing google-services.json")
 }
 
 val localProps = Properties().apply {
@@ -37,8 +39,21 @@ android {
         compose = true
     }
 
+    sourceSets.named("main") {
+        java.srcDir(if (withZeroTier) "src/withZeroTier/java" else "src/withoutZeroTier/java")
+    }
+    if (withZeroTier) {
+        sourceSets.named("test") { java.srcDir("src/testWithZeroTier/java") }
+    }
+
     defaultConfig {
+        buildConfigField("boolean", "ZEROTIER", withZeroTier.toString())
         applicationId = "io.github.bryanheby.meowz"
+        if (!withZeroTier) {
+            applicationIdSuffix = ".lite"
+            versionNameSuffix = "-lite"
+        }
+        manifestPlaceholders["meowLabel"] = if (withZeroTier) "@string/app_name" else "MeowZ Lite"
         manifestPlaceholders["analyticsEnabled"] = "false"
         if (project.findProperty("TARGET_ABI") == "arm64") {
             ndk.abiFilters += "arm64-v8a"

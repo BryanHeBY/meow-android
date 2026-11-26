@@ -50,7 +50,7 @@ pub async fn lookup(protocol: i32, local: SocketAddr, remote: SocketAddr) -> Opt
 }
 
 /// Resolve all packages for an overlay flow; a shared UID must not inherit access.
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "zerotier"))]
 pub async fn overlay_packages(protocol: i32, local: SocketAddr, remote: SocketAddr) -> Vec<String> {
     if !inner::installed() {
         return Vec::new();
@@ -135,7 +135,7 @@ impl PackageCache {
 #[cfg(target_os = "android")]
 mod inner {
     use super::{uid_from_jint, Owner, PackageCache};
-    use jni::objects::{GlobalRef, JObject, JObjectArray, JString, JValue};
+    use jni::objects::{GlobalRef, JObject, JString, JValue};
     use jni::{JNIEnv, JavaVM};
     use parking_lot::RwLock;
     use std::net::{IpAddr, SocketAddr};
@@ -220,6 +220,7 @@ mod inner {
         }
     }
 
+    #[cfg(feature = "zerotier")]
     pub(super) fn overlay_packages(
         protocol: i32,
         local: SocketAddr,
@@ -247,7 +248,7 @@ mod inner {
             if raw.is_null() {
                 return Ok(Vec::new());
             }
-            let array = JObjectArray::from(raw);
+            let array = jni::objects::JObjectArray::from(raw);
             let length = env.get_array_length(&array)?;
             if !(1..=64).contains(&length) {
                 return Ok(Vec::new());

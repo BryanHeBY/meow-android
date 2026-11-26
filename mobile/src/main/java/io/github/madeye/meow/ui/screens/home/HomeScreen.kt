@@ -53,7 +53,7 @@ import io.github.madeye.meow.traffic.TrafficRow
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.NavRow
 import io.github.madeye.meow.ui.screens.trafficdetails.TrafficDetailsUiState
-import io.github.madeye.meow.ui.screens.zerotier.ZeroTierSummary
+import io.github.madeye.meow.ui.nav.ZeroTierUi
 import io.github.madeye.meow.ui.theme.meow
 
 /**
@@ -111,7 +111,7 @@ fun HomeScreen(
                 onSelectRouteMode = onSelectRouteMode,
             )
         }
-        item { ZeroTierSummary(onOpen = onZeroTier) }
+        ZeroTierUi.addHomeSummary(this, onZeroTier)
 
         // The switch stays disabled until a profile is selected, and the list
         // to pick one from is on the Subscriptions page, so point there.

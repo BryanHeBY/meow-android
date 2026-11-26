@@ -1,5 +1,7 @@
 package io.github.madeye.meow.ui.screens.home
 
+import io.github.madeye.meow.BuildConfig
+
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -41,7 +43,7 @@ data class HomeUiState(
 ) {
     val isConnected: Boolean get() = state == BaseService.State.Connected
 
-    val showMeowForwarding: Boolean get() = isConnected && hasProfile
+    val showMeowForwarding: Boolean get() = BuildConfig.ZEROTIER && isConnected && hasProfile
     val canToggleMeowForwarding: Boolean
         get() = showMeowForwarding && overlayForwarding && !forwardingChangePending
 
