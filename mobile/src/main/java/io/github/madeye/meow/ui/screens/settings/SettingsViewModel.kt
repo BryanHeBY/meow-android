@@ -6,7 +6,6 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.boot.StartOnBootPreference
-import io.github.madeye.meow.preference.BuiltinDnsPreference
 import io.github.madeye.meow.preference.ExitIpPreference
 import io.github.madeye.meow.preference.VpnNotificationStore
 import io.github.madeye.meow.preference.ThemeMode
@@ -32,8 +31,6 @@ data class SettingsUiState(
     val appVersion: String = "",
     val engineVersion: String = "",
     val showExitIp: Boolean = false,
-    /** Settings' "Built-in DNS" switch; a running VPN follows it. */
-    val builtinDns: Boolean = true,
     /** Settings' "Start on boot" switch: connect the VPN once the device boots. */
     val startOnBoot: Boolean = false,
     val vpnNotificationDetails: Boolean = true,
@@ -45,21 +42,18 @@ data class SettingsUiState(
 )
 
 /**
- * Settings' snackbars: the outcomes of an update check, and a DNS switch the
- * running VPN refused. A newer release is state instead
+ * Settings snackbars. A newer release is state
  * ([SettingsUiState.update]), so its dialog survives rotation.
  */
 sealed interface SettingsEvent {
     data class UpToDate(val version: String) : SettingsEvent
     data class UpdateCheckFailed(val reason: String) : SettingsEvent
     data object NotificationPreferenceFailed : SettingsEvent
-    data class BuiltinDnsFailed(val reason: String) : SettingsEvent
 }
 
 class SettingsViewModel(
     private val versions: AppVersions,
     private val exitIp: ExitIpPreference,
-    private val builtinDns: BuiltinDnsPreference,
     private val theme: ThemeModePreference,
     private val startOnBoot: StartOnBootPreference,
     private val context: Context,
@@ -75,20 +69,18 @@ class SettingsViewModel(
     private val checking = MutableStateFlow(false)
     private val notificationDetails = MutableStateFlow(VpnNotificationStore.default.detailsEnabled())
 
-    private data class Switches(val exitIp: Boolean, val builtinDns: Boolean, val onBoot: Boolean, val details: Boolean)
+    private data class Switches(val exitIp: Boolean, val onBoot: Boolean, val details: Boolean)
     private val update = MutableStateFlow<AppRelease?>(null)
 
     private val _events = MutableSharedFlow<SettingsEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<SettingsEvent> = _events.asSharedFlow()
 
-    /** The switches, as (show exit IP, built-in DNS, start on boot). */
     private val switches = combine(
         exitIp.enabled,
-        builtinDns.enabled,
         startOnBoot.enabled,
         notificationDetails,
-    ) { showExitIp, builtin, onBoot, details ->
-        Switches(showExitIp == true, builtin != false, onBoot, details)
+    ) { showExitIp, onBoot, details ->
+        Switches(showExitIp == true, onBoot, details)
     }
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -97,12 +89,11 @@ class SettingsViewModel(
         checking,
         update,
         theme.mode,
-    ) { (app, engine), (showExitIp, builtin, onBoot, details), isChecking, newer, mode ->
+    ) { (app, engine), (showExitIp, onBoot, details), isChecking, newer, mode ->
         SettingsUiState(
             appVersion = app,
             engineVersion = engine,
             showExitIp = showExitIp,
-            builtinDns = builtin,
             startOnBoot = onBoot,
             vpnNotificationDetails = details,
             themeMode = mode,
@@ -113,14 +104,9 @@ class SettingsViewModel(
 
     init {
         viewModelScope.launch { versionPair.value = versions.read() }
-        viewModelScope.launch {
-            builtinDns.applyFailures.collect { _events.tryEmit(SettingsEvent.BuiltinDnsFailed(it)) }
-        }
     }
 
     fun onShowExitIpChange(show: Boolean) = exitIp.set(show)
-
-    fun onBuiltinDnsChange(enabled: Boolean) = builtinDns.set(enabled)
 
     fun onVpnNotificationDetailsChange(enabled: Boolean) {
         try {

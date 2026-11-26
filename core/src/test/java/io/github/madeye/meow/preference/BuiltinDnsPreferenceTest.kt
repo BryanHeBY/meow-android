@@ -1,74 +1,78 @@
 package io.github.madeye.meow.preference
 
 import java.io.File
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class BuiltinDnsPreferenceTest {
-
-    @get:Rule
-    val tmp = TemporaryFolder()
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    @After
-    fun tearDown() = scope.cancel()
-
-    private fun store() = BuiltinDnsStore(File(tmp.root, "builtin_dns"))
+    @get:Rule val tmp = TemporaryFolder()
 
     @Test
-    fun `a flip reaches the VPN after it is saved`() {
-        val store = store()
-        // Each flip applied, with what the store held then.
-        val applied = LinkedBlockingQueue<Pair<Boolean, Boolean>>()
-        val pref = BuiltinDnsPreference(scope, store) { enabled ->
-            applied.put(enabled to store.load())
-            null
+    fun `a failed resolver rebuild leaves the existing DNS preference on disk`() = runBlocking {
+        val store = BuiltinDnsStore(File(tmp.root, "builtin_dns"))
+        val requested = mutableListOf<Boolean>()
+        val preference = BuiltinDnsPreference(store) {
+            store.commit(it) { enabled ->
+                requested.add(enabled)
+                assertTrue(store.load())
+                "rule-set: missing"
+            }
         }
 
-        pref.set(false)
-
-        // So a VPN start the flip did not reach reads it from the store.
-        assertEquals(false to false, applied.poll(10, TimeUnit.SECONDS))
+        assertEquals("rule-set: missing", preference.save(false))
+        assertEquals(listOf(false), requested)
+        assertTrue(preference.load())
     }
 
     @Test
-    fun `a burst of flips is applied in order`() {
-        val applied = LinkedBlockingQueue<Boolean>()
-        val pref = BuiltinDnsPreference(scope, store()) { enabled ->
-            applied.put(enabled)
-            null
+    fun `the preference is published only after a successful live apply`() = runBlocking {
+        val store = BuiltinDnsStore(File(tmp.root, "builtin_dns"))
+        val preference = BuiltinDnsPreference(store) {
+            store.commit(it) { enabled ->
+                assertFalse(enabled)
+                assertTrue(store.load())
+                null
+            }
         }
-
-        pref.set(false)
-        pref.set(true)
-        pref.set(false)
-
-        val order = List(3) { applied.poll(10, TimeUnit.SECONDS) }
-        assertEquals(listOf(false, true, false), order)
+        assertNull(preference.save(false))
+        assertFalse(preference.load())
     }
 
     @Test
-    fun `a flip the VPN refused is reported`() = runBlocking {
-        val pref = BuiltinDnsPreference(scope, store()) { "rule-set: missing" }
-        val failure = async(start = CoroutineStart.UNDISPATCHED) { pref.applyFailures.first() }
+    fun `a disk publication failure rolls back the live change`() {
+        val target = File(tmp.root, "builtin_dns")
+        val store = BuiltinDnsStore(target)
+        val requested = mutableListOf<Boolean>()
+        val failure = store.commit(false) {
+            requested.add(it)
+            // Remove the staged replacement after live apply to fail publication.
+            if (!it) assertTrue(File(target.path + ".tmp").delete())
+            null
+        }
+        assertEquals("Cannot save the DNS preference", failure)
+        assertEquals(listOf(false, true), requested)
+        assertTrue(store.load())
+    }
 
-        pref.set(false)
-
-        assertEquals("rule-set: missing", withTimeout(10_000) { failure.await() })
+    @Test
+    fun `disk failure preserves a running fallback even when the saved preference is profile DNS`() {
+        val target = File(tmp.root, "builtin_dns")
+        val store = BuiltinDnsStore(target)
+        store.save(false)
+        val requested = mutableListOf<Boolean>()
+        val failure = store.commit(true, applied = { true }) {
+            requested.add(it)
+            assertTrue(File(target.path + ".tmp").delete())
+            null
+        }
+        assertEquals("Cannot save the DNS preference", failure)
+        assertEquals(listOf(true), requested)
+        assertFalse(store.load())
     }
 }

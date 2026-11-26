@@ -53,6 +53,8 @@ sealed interface Dest {
 
     @Serializable data object PerAppProxy : Dest
 
+    @Serializable data class ConfigurationOverride(val profileId: Long? = null) : Dest
+
     @Serializable data class YamlEditor(val profileId: Long) : Dest
 
     @Serializable data object Connections : Dest

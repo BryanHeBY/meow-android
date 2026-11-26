@@ -16,6 +16,7 @@ import io.github.madeye.meow.aidl.IMeowServiceCallback
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.preference.BuiltinDnsStore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.*
@@ -182,15 +183,25 @@ object BaseService {
 
         override fun cancelProxyProbe(id: Long) = MeowCore.nativeCancelProxyProbe(id)
 
-        // On the binder thread too: a switch builds a resolver, and waits out
-        // an engine start in progress. With no instance there is no engine,
-        // and the next one reads the store, so the engine library is not
-        // loaded into an idle :vpn just to say so.
-        override fun setBuiltinDns(enabled: Boolean): String? = when {
-            data?.meowInstance == null -> null
-            MeowCore.nativeSetBuiltinDns(enabled) == 0 -> null
-            else -> MeowCore.nativeGetLastError()
-        }
+        // The same lock covers the DNS preference read and native startup.
+        // On a failed live rebuild the old preference and resolver stay in place.
+        override fun setBuiltinDns(enabled: Boolean): String? =
+            BuiltinDnsStore.default.commit(
+                enabled,
+                applied = {
+                    when (if (data?.meowInstance == null) -1 else MeowCore.nativeAppliedBuiltinDns()) {
+                        0 -> false
+                        1 -> true
+                        else -> null
+                    }
+                },
+            ) {
+                when {
+                    data?.meowInstance == null -> null
+                    MeowCore.nativeSetBuiltinDns(it) == 0 -> null
+                    else -> MeowCore.nativeGetLastError().ifEmpty { "The resolver rejected the change" }
+                }
+            }
 
         // On the binder thread: two counter reads, nothing that blocks.
         override fun getSessionStats(): SessionStats? = data?.meowInstance?.sessionStats()

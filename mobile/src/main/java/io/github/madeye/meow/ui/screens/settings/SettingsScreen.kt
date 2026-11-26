@@ -23,12 +23,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +53,7 @@ import io.github.madeye.meow.preference.ThemeMode
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.NavRow
 import io.github.madeye.meow.ui.components.SectionHeader
+import io.github.madeye.meow.ui.screens.overrideconfig.CONFIGURATION_OVERRIDE_TAG
 import io.github.madeye.meow.ui.theme.MeowTextStyles
 import io.github.madeye.meow.ui.theme.meow
 
@@ -62,7 +63,7 @@ fun SettingsScreen(
     contentPadding: PaddingValues,
     onPerAppProxy: () -> Unit,
     onShowExitIpChange: (Boolean) -> Unit,
-    onBuiltinDnsChange: (Boolean) -> Unit,
+    onConfigurationOverride: () -> Unit,
     onStartOnBootChange: (Boolean) -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onPrivacyPolicy: () -> Unit,
@@ -127,15 +128,11 @@ fun SettingsScreen(
                 subtitle = stringResource(R.string.perapp_desc),
             )
             HorizontalDivider(color = MaterialTheme.meow.border)
-            // Off runs on the profile's `dns:` nameservers; on is the way out
-            // when those load but do not answer on this network.
-            SwitchRow(
-                icon = Icons.Filled.Dns,
-                title = stringResource(R.string.settings_builtin_dns),
-                subtitle = stringResource(R.string.settings_builtin_dns_desc),
-                checked = state.builtinDns,
-                onCheckedChange = onBuiltinDnsChange,
-                modifier = Modifier.testTag("settings_builtin_dns"),
+            NavRow(
+                title = stringResource(R.string.override_title),
+                icon = Icons.Filled.Tune,
+                onClick = onConfigurationOverride,
+                modifier = Modifier.testTag(CONFIGURATION_OVERRIDE_TAG),
             )
             HorizontalDivider(color = MaterialTheme.meow.border)
             // The subtitle names the services: every check sends them the

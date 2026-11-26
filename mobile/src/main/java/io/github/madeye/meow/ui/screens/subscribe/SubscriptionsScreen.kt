@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +71,7 @@ import io.github.madeye.meow.subscription.SubscriptionUserInfo
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.NavRow
 import io.github.madeye.meow.ui.components.SectionHeader
+import io.github.madeye.meow.ui.screens.overrideconfig.PROFILE_OVERRIDE_TAG
 import io.github.madeye.meow.ui.theme.meow
 import io.github.madeye.meow.ui.util.Formatters
 
@@ -85,6 +88,7 @@ fun SubscriptionsScreen(
     onSelect: (Long) -> Unit,
     onEdit: (ProfileUi) -> Unit,
     onEditYaml: (Long) -> Unit,
+    onConfigurationOverride: (Long) -> Unit,
     onDuplicate: (id: Long, name: String) -> Unit,
     onRefresh: (Long) -> Unit,
     onUpdateRuleSets: () -> Unit,
@@ -123,6 +127,7 @@ fun SubscriptionsScreen(
                 ruleSets = state.ruleSets,
                 onEdit = { onEdit(selected) },
                 onEditYaml = { onEditYaml(selected.id) },
+                onConfigurationOverride = { onConfigurationOverride(selected.id) },
                 onDuplicate = { onDuplicate(selected.id, nameOfCopy) },
                 onRefresh = { onRefresh(selected.id) },
                 onUpdateRuleSets = onUpdateRuleSets,
@@ -268,6 +273,7 @@ private fun ProfileActions(
     ruleSets: RuleSetsUi,
     onEdit: () -> Unit,
     onEditYaml: () -> Unit,
+    onConfigurationOverride: () -> Unit,
     onDuplicate: () -> Unit,
     onRefresh: () -> Unit,
     onUpdateRuleSets: () -> Unit,
@@ -283,6 +289,14 @@ private fun ProfileActions(
             title = stringResource(R.string.subs_edit),
             icon = Icons.Filled.Edit,
             onClick = onEdit,
+        )
+        HorizontalDivider(color = border)
+        NavRow(
+            title = stringResource(if (profile.url.isNotEmpty()) R.string.override_subscription else R.string.override_profile),
+            subtitle = stringResource(R.string.override_title),
+            icon = Icons.Filled.Tune,
+            onClick = onConfigurationOverride,
+            modifier = Modifier.testTag(PROFILE_OVERRIDE_TAG),
         )
         if (profile.hasYaml) {
             val subscription = profile.url.isNotEmpty()

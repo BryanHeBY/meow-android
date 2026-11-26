@@ -17,6 +17,7 @@ import io.github.madeye.meow.net.IpGeoLookup
 import io.github.madeye.meow.net.ProxyProber
 import io.github.madeye.meow.preference.ApiSecretStore
 import io.github.madeye.meow.preference.BuiltinDnsPreference
+import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.ExitIpPreference
 import io.github.madeye.meow.preference.RouteModeStore
 import io.github.madeye.meow.preference.ThemeModePreference
@@ -40,6 +41,7 @@ import io.github.madeye.meow.ui.screens.home.defaultNetworkIsVpn
 import io.github.madeye.meow.ui.screens.logbook.LogbookKinds
 import io.github.madeye.meow.ui.screens.logbook.LogbookViewModel
 import io.github.madeye.meow.ui.screens.logs.LogsViewModel
+import io.github.madeye.meow.ui.screens.overrideconfig.ConfigurationOverrideViewModel
 import io.github.madeye.meow.ui.screens.perapp.PerAppProxyViewModel
 import io.github.madeye.meow.ui.nav.Dest
 import io.github.madeye.meow.ui.screens.proxies.ProxyDetailViewModel
@@ -97,7 +99,7 @@ object AppGraph {
     /** Settings flips it; Home's exit-IP card follows. */
     val showExitIp: ExitIpPreference by lazy { ExitIpPreference(scope) }
     val builtinDns: BuiltinDnsPreference by lazy {
-        BuiltinDnsPreference(scope) { vpn.applyBuiltinDns(it) }
+        BuiltinDnsPreference(commit = vpn::applyBuiltinDns)
     }
     val exitIpLookup: ExitIpLookup by lazy { ExitIpLookup() }
     val ipGeoLookup: IpGeoLookup by lazy { IpGeoLookup { MeowInstance.homeDir(appContext) } }
@@ -203,13 +205,19 @@ object AppGraph {
                 SettingsViewModel::class.java -> SettingsViewModel(
                     appVersions,
                     showExitIp,
-                    builtinDns,
                     themeMode,
                     startOnBoot,
                     appContext,
                     // Independently signed builds cannot install official Meow updates.
                     latestRelease = null,
                     installedVersion = BuildConfig.VERSION_NAME,
+                )
+
+                ConfigurationOverrideViewModel::class.java -> ConfigurationOverrideViewModel(
+                    extras.createSavedStateHandle().toRoute<Dest.ConfigurationOverride>().profileId,
+                    ConfigurationOverrideStore.default,
+                    builtinDns,
+                    profiles,
                 )
 
                 PerAppProxyViewModel::class.java ->

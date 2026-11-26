@@ -119,6 +119,24 @@ impl LiveDns {
     }
 }
 
+/// The applied switch position, including a profile-load fallback. Used
+/// only as the rollback target when saving the preference fails.
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeAppliedBuiltinDns(
+    _env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+) -> jni::sys::jint {
+    let engine = crate::ENGINE.lock();
+    match engine
+        .as_ref()
+        .map(|state| *state.live_dns.upstreams.lock())
+    {
+        Some(DnsUpstreams::Profile) => 0,
+        Some(DnsUpstreams::Builtin) => 1,
+        None => -1,
+    }
+}
+
 /// Puts the running engine on `upstreams`. Does nothing when it already runs
 /// on them or no engine runs: a start reads the switch itself. On an error
 /// the engine keeps the DNS it had.

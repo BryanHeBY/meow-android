@@ -87,6 +87,7 @@ import io.github.madeye.meow.ui.screens.logs.LogsActions
 import io.github.madeye.meow.ui.screens.logs.LogsScreen
 import io.github.madeye.meow.ui.screens.logs.LogsViewModel
 import io.github.madeye.meow.ui.screens.perapp.AppPickerMenu
+import io.github.madeye.meow.ui.screens.overrideconfig.ConfigurationOverrideRoute
 import io.github.madeye.meow.ui.screens.perapp.PerAppProxyScreen
 import io.github.madeye.meow.ui.screens.perapp.PerAppProxyViewModel
 import io.github.madeye.meow.ui.screens.proxies.ProxyDetailScreen
@@ -257,6 +258,7 @@ private fun MeowNavHost(
             SettingsRoute(
                 snackbarHost = snackbarHost,
                 onPerAppProxy = { navController.navigate(Dest.PerAppProxy) },
+                onConfigurationOverride = { navController.navigate(Dest.ConfigurationOverride()) },
                 bottomBar = { BottomBar(navController, onTab) },
             )
         }
@@ -272,6 +274,7 @@ private fun MeowNavHost(
                 installLink = installLink,
                 onInstallLinkHandled = onInstallLinkHandled,
                 onEditYaml = { navController.navigate(Dest.YamlEditor(it)) },
+                onConfigurationOverride = { navController.navigate(Dest.ConfigurationOverride(it)) },
                 onBack = navController::popBackStack,
             )
         }
@@ -284,6 +287,9 @@ private fun MeowNavHost(
         composable<Dest.ProxyEdit> { ProxyEditRoute(onBack = navController::popBackStack) }
         composable<Dest.PerAppProxy> {
             PerAppProxyRoute(snackbarHost = snackbarHost, onBack = navController::popBackStack)
+        }
+        composable<Dest.ConfigurationOverride> {
+            ConfigurationOverrideRoute(snackbarHost = snackbarHost, onBack = navController::popBackStack)
         }
         composable<Dest.YamlEditor> { entry ->
             YamlEditorRoute(
@@ -547,6 +553,7 @@ private fun SubscriptionsRoute(
     installLink: InstallConfigLink?,
     onInstallLinkHandled: () -> Unit,
     onEditYaml: (Long) -> Unit,
+    onConfigurationOverride: (Long) -> Unit,
     onBack: () -> Unit,
 ) {
     val viewModel: SubscribeViewModel =
@@ -653,6 +660,7 @@ private fun SubscriptionsRoute(
                 onSelect = viewModel::select,
                 onEdit = { dialogFor = it; dialogOpen = true },
                 onEditYaml = onEditYaml,
+                onConfigurationOverride = onConfigurationOverride,
                 onDuplicate = viewModel::duplicate,
                 onRefresh = viewModel::refresh,
                 onUpdateRuleSets = viewModel::updateRuleSets,
@@ -875,6 +883,7 @@ private fun narrowed(
 private fun SettingsRoute(
     snackbarHost: SnackbarHostState,
     onPerAppProxy: () -> Unit,
+    onConfigurationOverride: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = AppGraph.viewModelFactory)
@@ -884,7 +893,6 @@ private fun SettingsRoute(
 
     val upToDateFmt = stringResource(R.string.settings_update_latest)
     val checkFailedFmt = stringResource(R.string.settings_update_failed)
-    val dnsFailedFmt = stringResource(R.string.settings_builtin_dns_failed)
     val notificationFailed = stringResource(R.string.settings_vpn_notification_failed)
     val noApp = stringResource(R.string.settings_update_no_app)
 
@@ -894,7 +902,6 @@ private fun SettingsRoute(
                 is SettingsEvent.UpToDate -> String.format(upToDateFmt, event.version)
                 is SettingsEvent.UpdateCheckFailed -> String.format(checkFailedFmt, event.reason)
                 SettingsEvent.NotificationPreferenceFailed -> notificationFailed
-                is SettingsEvent.BuiltinDnsFailed -> String.format(dnsFailedFmt, event.reason)
             }
             snackbarHost.showSnackbar(message)
         }
@@ -906,7 +913,7 @@ private fun SettingsRoute(
             contentPadding = padding,
             onPerAppProxy = onPerAppProxy,
             onShowExitIpChange = viewModel::onShowExitIpChange,
-            onBuiltinDnsChange = viewModel::onBuiltinDnsChange,
+            onConfigurationOverride = onConfigurationOverride,
             onStartOnBootChange = viewModel::onStartOnBootChange,
             onVpnNotificationDetailsChange = viewModel::onVpnNotificationDetailsChange,
             onSystemVpnNotificationSettings = {
@@ -1289,7 +1296,7 @@ private fun StatisticsRoute(onBack: () -> Unit) {
 }
 
 @Composable
-private fun BackButton(onBack: () -> Unit) {
+internal fun BackButton(onBack: () -> Unit) {
     IconButton(onClick = onBack) {
         Icon(
             Icons.AutoMirrored.Filled.ArrowBack,

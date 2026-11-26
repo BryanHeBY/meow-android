@@ -28,6 +28,9 @@ object MeowCore {
      */
     external fun nativeSetBuiltinDns(builtinDns: Boolean): Int
 
+    /** Resolver mode to restore on a failed preference write: 0 profile, 1 built-in, -1 stopped. */
+    external fun nativeAppliedBuiltinDns(): Int
+
     /** The running engine's API secret; empty when it is stopped or has none. */
     external fun nativeApiSecret(): String?
     /**

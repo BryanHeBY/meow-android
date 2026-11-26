@@ -18,9 +18,8 @@ interface IMeowService {
     String probeProxy(long id, String proxy, String kind, String arg);
     oneway void cancelProxyProbe(long id);
 
-    // Settings' "Built-in DNS" switch, applied to the running engine (see
-    // the FFI crate's src/live_dns.rs). Blocks until it is; returns null
-    // then or when no VPN runs, else why the engine kept the DNS it had.
+    // Save the switch and apply it to a running engine (see src/live_dns.rs).
+    // Returns null on success, else the transaction error.
     String setBuiltinDns(boolean enabled);
 
     // The running session's start time and its traffic per kind of network;

@@ -111,22 +111,16 @@ class MeowInstance(val profile: ClashProfile) {
         // The Home route-mode pick overrides the profile's `mode:`; empty
         // means the user never picked one.
         val routeMode = RouteModeStore.default.load()?.wire.orEmpty()
-        // Settings' "Built-in DNS" switch; off follows the profile's `dns:`.
-        val builtinDns = BuiltinDnsStore.default.load()
         // A fresh secret per start, so no other app on the device can use the
         // API; a profile that sets `secret:` keeps its own instead.
         // Before the start, so the traffic ledger counts days in the
         // device's zone from its first flush.
         pushTimeZone()
-        val result = MeowCore.nativeStartEngine("127.0.0.1:9090", ApiSecretStore.mint(), routeMode, builtinDns)
-        if (result != 0) {
-            throw RuntimeException("Failed to start engine: ${MeowCore.nativeGetLastError()}")
-        }
-        // A flip saved after the read above, and sent before the engine was
-        // up, found nothing to switch; the store has it.
-        val flipped = BuiltinDnsStore.default.load()
-        if (flipped != builtinDns && MeowCore.nativeSetBuiltinDns(flipped) != 0) {
-            Timber.w("MeowInstance: built-in DNS switch: ${MeowCore.nativeGetLastError()}")
+        BuiltinDnsStore.default.withSavedValue { builtinDns ->
+            val result = MeowCore.nativeStartEngine("127.0.0.1:9090", ApiSecretStore.mint(), routeMode, builtinDns)
+            if (result != 0) {
+                throw RuntimeException("Failed to start engine: ${MeowCore.nativeGetLastError()}")
+            }
         }
         val meter = NetworkTrafficMeter(startedAt = System.currentTimeMillis())
         var outbound: Network? = null
