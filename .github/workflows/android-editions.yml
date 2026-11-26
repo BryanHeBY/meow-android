@@ -46,7 +46,15 @@ jobs:
           targets: aarch64-linux-android
       - uses: gradle/actions/setup-gradle@v6
       - name: Install Android SDK components
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "ndk;27.0.12077973" "cmake;3.22.1"
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "ndk;27.0.12077973" "cmake;3.22.1"
+          # Use the NDK's LLVM 19 for the older lwip bindgen, independently
+          # of the hosted runner image's system LLVM.
+          llvm="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64"
+          test -f "$llvm/lib/libclang.so"
+          echo "LIBCLANG_PATH=$llvm/lib" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=$llvm/bin/clang" >> "$GITHUB_ENV"
       - name: Test and build
         env:
           ZEROTIER: ${{ matrix.zerotier }}
