@@ -35,6 +35,8 @@ def main():
     parser.add_argument("apk", type=Path)
     parser.add_argument("--aapt", required=True)
     parser.add_argument("--readelf", default="readelf")
+    parser.add_argument("--release", action="store_true",
+                        help="Check stable class names in an R8-minified release APK")
     args = parser.parse_args()
     full = args.edition == "full"
     package = "io.github.bryanheby.meowz" + ("" if full else ".lite")
@@ -73,8 +75,13 @@ def main():
         }
         for name in (b"core/ZeroTierNative;", b"repo/OverlaySettingsRepository;",
                      b"ui/nav/ZeroTierDestination;", b"ui/screens/zerotier/ZeroTierScreenKt;"):
-            require((prefix + name in classes) == full,
-                    f"Incorrect DEX presence for {args.edition}: {name.decode()}")
+            # R8 may inline or rename implementation classes. Full release still
+            # has to expose JNI and the navigation destination. Lite must contain
+            # none of the named ZeroTier classes in either build type.
+            stable = {b"core/ZeroTierNative;", b"ui/nav/ZeroTierDestination;"}
+            if not full or not args.release or name in stable:
+                require((prefix + name in classes) == full,
+                        f"Incorrect DEX presence for {args.edition}: {name.decode()}")
     manifest = subprocess.check_output(
         [args.aapt, "dump", "xmltree", args.apk, "AndroidManifest.xml"], text=True)
     badging = subprocess.check_output([args.aapt, "dump", "badging", args.apk], text=True)
@@ -85,12 +92,15 @@ def main():
     for value in ('"clash"', '"clashmeta"', '"install-config"'):
         require(value in manifest, f"Missing shared subscription deep link: {value}")
     resources = subprocess.check_output([args.aapt, "dump", "resources", args.apk], text=True)
+    for shared in ("perapp_show_system", "perapp_hide_system", "perapp_invert_visible"):
+        require(f":string/{shared}:" in resources,
+                f"Missing shared per-app menu string: {shared}")
     overlay_strings = set(re.findall(
         r":string/((?:zt_apps_|home_meow_forwarding)[a-z_]*|tab_zerotier):", resources,
     ))
     expected = {
         "tab_zerotier", "zt_apps_title", "zt_apps_mode_all", "zt_apps_mode_allow",
-        "zt_apps_mode_exclude", "zt_apps_scope", "zt_apps_show_system",
+        "zt_apps_mode_exclude", "zt_apps_scope",
         "zt_apps_none_allowed", "home_meow_forwarding", "home_meow_forwarding_scope",
         "home_meow_forwarding_requires_zt", "home_meow_forwarding_failed",
     } if full else set()
