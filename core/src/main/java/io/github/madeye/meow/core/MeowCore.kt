@@ -35,6 +35,12 @@ object MeowCore {
      * for an explicit `ipv6: false`, as in mihomo. False when it is stopped.
      */
     external fun nativeTunIpv6(): Boolean
+    /** Overrides the top-level IPv6 key in a runtime copy of the profile. */
+    external fun nativeOverrideIpv6(yaml: String, enabled: Boolean): String
+
+    /** Profile IPv6 for the preview: 0 off, 1 on, -1 unset, -2 unreadable. */
+    external fun nativeProfileIpv6(yaml: String): Int
+
     external fun nativeStopEngine()
     external fun nativeStartTun2Socks(
         vpnService: Any,
@@ -42,6 +48,7 @@ object MeowCore {
         dnsPort: Int,
         overlayRoot: String,
         overlaySettings: String,
+        blockAppUdp443: Boolean,
     ): Int
     /** Stop the forwarding stack only; keep the live engine and controller. Off Main. */
     external fun nativeStopTun2Socks(): Boolean

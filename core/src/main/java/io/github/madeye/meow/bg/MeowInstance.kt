@@ -9,6 +9,8 @@ import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.preference.ApiSecretStore
 import io.github.madeye.meow.preference.BuiltinDnsStore
+import io.github.madeye.meow.preference.ConfigurationOverrideStore
+import io.github.madeye.meow.preference.Ipv6Override
 import io.github.madeye.meow.preference.RouteModeStore
 import io.github.madeye.meow.traffic.TrafficNetwork
 import java.time.Instant
@@ -65,6 +67,8 @@ class MeowInstance(val profile: ClashProfile) {
         }
     }
 
+    private var blockAppUdp443 = false
+
     private var prevTx: Long = 0
     private var prevRx: Long = 0
     private var lastUpdate: Long = 0
@@ -95,7 +99,14 @@ class MeowInstance(val profile: ClashProfile) {
         // fake-IP, on the Rust side by `engine::strip_and_inject`.
         val yaml = profile.yamlContent
             .replace(Regex("(?m)^subscriptions:.*?(?=^[a-z]|\\Z)", RegexOption.DOT_MATCHES_ALL), "")
-        configFile.writeText(yaml)
+        val override = ConfigurationOverrideStore.default.effective(profile.id.takeIf { it > 0 })
+        blockAppUdp443 = override.blocksAppUdp443
+        val runtimeYaml = when (override.ipv6) {
+            Ipv6Override.INHERIT -> yaml
+            Ipv6Override.FORCE_ON -> MeowCore.nativeOverrideIpv6(yaml, true)
+            Ipv6Override.FORCE_OFF -> MeowCore.nativeOverrideIpv6(yaml, false)
+        }
+        configFile.writeText(runtimeYaml)
         MeowCore.nativeSetHomeDir(configDir.absolutePath)
         // The Home route-mode pick overrides the profile's `mode:`; empty
         // means the user never picked one.
@@ -172,7 +183,9 @@ class MeowInstance(val profile: ClashProfile) {
     fun tunIpv6(): Boolean = MeowCore.nativeTunIpv6()
 
     fun startTun2Socks(vpnService: android.net.VpnService, fd: Int, overlayConfig: String) {
-        val result = MeowCore.nativeStartTun2Socks(vpnService, fd, 1053, OverlayPlatform.rootPath(), overlayConfig)
+        val result = MeowCore.nativeStartTun2Socks(
+            vpnService, fd, 1053, OverlayPlatform.rootPath(), overlayConfig, blockAppUdp443,
+        )
         if (result != 0) {
             throw RuntimeException("Failed to start tun2socks: ${MeowCore.nativeGetLastError()}")
         }

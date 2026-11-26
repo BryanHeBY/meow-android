@@ -104,6 +104,13 @@ async fn flow_exit(_: Option<&ClashGate>, _: i32, _: SocketAddr, _: SocketAddr) 
     FlowExit::Clash
 }
 
+/// Called only for app UDP from the TUN stack, after ownership and overlay
+/// handling. A blocked Meow datagram is dropped before Rule, Global, or
+/// Direct can open an outbound session.
+fn drop_app_udp(exit: &FlowExit, block_app_udp443: bool, dst: SocketAddr) -> bool {
+    matches!(exit, FlowExit::Clash) && block_app_udp443 && dst.port() == 443
+}
+
 static TUN2SOCKS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TUN2SOCKS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 // Wakes the TUN reader, which sleeps until the fd is readable and so would
@@ -223,10 +230,16 @@ fn warn_capped(slot: &AtomicU64, msg: &str) {
     }
 }
 
+#[cfg(test)]
+fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
+    start_with_udp443_policy(fd, false)
+}
+
 #[cfg(any(test, not(target_os = "android")))]
-pub fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
+pub fn start_with_udp443_policy(fd: i32, block_app_udp443: bool) -> Result<(), String> {
     start_inner(
         fd,
+        block_app_udp443,
         #[cfg(all(target_os = "android", feature = "zerotier"))]
         None,
         #[cfg(target_os = "android")]
@@ -242,12 +255,14 @@ type Overlay = Option<(std::path::PathBuf, crate::zerotier_config::Config)>;
 #[cfg(target_os = "android")]
 pub fn start_android(
     fd: i32,
+    block_app_udp443: bool,
     #[cfg(feature = "zerotier")] config: Overlay,
     report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(feature = "zerotier")] meow_enabled: bool,
 ) -> Result<(), String> {
     start_inner(
         fd,
+        block_app_udp443,
         #[cfg(feature = "zerotier")]
         config,
         report_exit,
@@ -258,6 +273,7 @@ pub fn start_android(
 
 fn start_inner(
     fd: i32,
+    block_app_udp443: bool,
     #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(all(target_os = "android", feature = "zerotier"))] meow_enabled: bool,
@@ -309,6 +325,7 @@ fn start_inner(
     let handle = rt.spawn(async move {
         let run = run_tun2socks(
             tun_fd,
+            block_app_udp443,
             #[cfg(all(target_os = "android", feature = "zerotier"))]
             overlay,
             #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -389,6 +406,7 @@ pub fn stop() -> bool {
 
 async fn run_tun2socks(
     fd: OwnedFd,
+    block_app_udp443: bool,
     #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(all(target_os = "android", feature = "zerotier"))] mut overlay_control: Option<
         mpsc::Receiver<OverlayCommand>,
@@ -506,7 +524,11 @@ async fn run_tun2socks(
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let direct = direct_udp.clone();
                             let handle = tokio::spawn(async move {
-                                match flow_exit(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await {
+                                let exit = flow_exit(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await;
+                                if drop_app_udp(&exit, block_app_udp443, dst) {
+                                    return;
+                                }
+                                match exit {
                                     FlowExit::Clash => dispatch_udp(payload, src, dst, reply_tx, readers).await,
                                     #[cfg(all(target_os = "android", feature = "zerotier"))]
                                     FlowExit::Direct(owner) => direct.transmit((src, dst), owner, payload, reply_tx),
@@ -1459,6 +1481,27 @@ fn ipv4_header_checksum(h: &[u8]) -> u16 {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn app_udp443_gate_applies_only_to_the_meow_exit_for_both_address_families() {
+        for ip in ["192.0.2.1", "2001:db8::1"] {
+            let ip = ip.parse().unwrap();
+            for port in [53, 442, 443, 444, 8443] {
+                let dst = std::net::SocketAddr::new(ip, port);
+                assert_eq!(
+                    super::drop_app_udp(&super::FlowExit::Clash, true, dst),
+                    port == 443
+                );
+                assert!(!super::drop_app_udp(&super::FlowExit::Clash, false, dst));
+                #[cfg(feature = "zerotier")]
+                {
+                    let direct = super::FlowExit::Direct(vec!["underlay".into()]);
+                    assert!(!super::drop_app_udp(&direct, true, dst));
+                    assert!(!super::drop_app_udp(&super::FlowExit::Drop, true, dst));
+                }
+            }
+        }
+    }
+
+    #[test]
     #[cfg(feature = "zerotier")]
     fn apply_deadline_and_reader_claim_are_exclusive() {
         let cancelled = CommandClaim::default();
@@ -1888,6 +1931,7 @@ mod tests {
                     Duration::from_secs(2),
                     run_tun2socks(
                         socket.into(),
+                        false,
                         #[cfg(all(target_os = "android", feature = "zerotier"))]
                         None,
                         #[cfg(all(target_os = "android", feature = "zerotier"))]

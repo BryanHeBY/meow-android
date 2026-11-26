@@ -27,3 +27,21 @@ internal data class TunEnvelope(
 
 private fun VpnAppCapture.canonical(): VpnAppCapture =
     if (mode == "all" || (mode == "exclude" && packages.isEmpty())) VpnAppCapture("all") else this
+
+/** IPv4 DNS always enters the TUN. With no IPv6 address, route, DNS server,
+ * or allowFamily call, Android blocks IPv6 for the apps covered by the VPN.
+ */
+internal fun configureVpnIp(
+    ipv6: Boolean,
+    addAddress: (String, Int) -> Unit,
+    addRoute: (String, Int) -> Unit,
+    addDnsServer: (String) -> Unit,
+) {
+    addAddress("172.19.0.1", 30)
+    addDnsServer("172.19.0.2")
+    addRoute("0.0.0.0", 0)
+    if (ipv6) {
+        addAddress("fdfe:dcba:9876::1", 126)
+        addRoute("::", 0)
+    }
+}

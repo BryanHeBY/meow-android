@@ -1,0 +1,69 @@
+package io.github.madeye.meow.preference
+
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+
+class ConfigurationOverrideStoreTest {
+    @get:Rule val tmp = TemporaryFolder()
+    private val directory get() = File(tmp.root, "configuration_overrides")
+    private val store get() = ConfigurationOverrideStore(directory)
+
+    @Test
+    fun `missing overrides keep legacy configuration and reuse the existing DNS file`() {
+        val existingDns = File(tmp.root, "builtin_dns")
+        existingDns.writeText("profile")
+        assertEquals(ConfigurationOverride(), store.effective(7L))
+        assertEquals(ConfigurationOverride(), store.effective(null))
+        assertFalse(BuiltinDnsStore(existingDns).load())
+        assertEquals("profile", existingDns.readText())
+        assertFalse(directory.exists())
+    }
+
+    @Test
+    fun `profile choices beat global independently and explicit no-block overrides global block`() {
+        val global = ConfigurationOverride(Ipv6Override.FORCE_OFF, AppQuicOverride.BLOCK_UDP_443)
+        store.save(null, global)
+        store.save(7L, ConfigurationOverride(Ipv6Override.FORCE_ON))
+        store.save(8L, ConfigurationOverride(appQuic = AppQuicOverride.DO_NOT_BLOCK))
+        assertEquals(ConfigurationOverride(Ipv6Override.FORCE_ON, global.appQuic), store.effective(7L))
+        assertEquals(ConfigurationOverride(global.ipv6, AppQuicOverride.DO_NOT_BLOCK), store.effective(8L))
+        assertEquals(global, store.effective(9L))
+        assertTrue(store.effective(7L).blocksAppUdp443)
+        assertFalse(store.effective(8L).blocksAppUdp443)
+    }
+
+    @Test
+    fun `reset only removes the chosen scope`() {
+        val global = ConfigurationOverride(Ipv6Override.FORCE_ON, AppQuicOverride.BLOCK_UDP_443)
+        val local = ConfigurationOverride(Ipv6Override.FORCE_OFF, AppQuicOverride.DO_NOT_BLOCK)
+        store.save(null, global)
+        store.save(7L, local)
+        store.save(8L, local)
+
+        store.save(7L, ConfigurationOverride())
+        assertEquals(global, store.effective(7L))
+        assertEquals(local, store.effective(8L))
+        store.save(null, ConfigurationOverride())
+        assertEquals(ConfigurationOverride(), store.effective(7L))
+        assertEquals(local, store.effective(8L))
+    }
+
+    @Test
+    fun `subscription refresh changes the YAML but keeps override identity and never rewrites source`() {
+        val profileId = 17L
+        val original = File(tmp.root, "provider.yaml").apply { writeText("ipv6: true\n") }
+        store.save(profileId, ConfigurationOverride(Ipv6Override.FORCE_OFF))
+        assertEquals("ipv6: true\n", original.readText())
+
+        val refreshed = "ipv6: true\n# downloaded update\n"
+        original.writeText(refreshed)
+        assertEquals(Ipv6Override.FORCE_OFF, store.effective(profileId).ipv6)
+        assertEquals(Ipv6Override.INHERIT, store.effective(profileId + 1).ipv6)
+        assertEquals(refreshed, original.readText())
+    }
+}

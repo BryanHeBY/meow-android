@@ -13,6 +13,7 @@
 //! the tun2socks UDP/53 intercept hands every in-TUN DNS datagram straight to
 //! `meow_dns::DnsServer::handle_query`.
 
+mod configuration_override;
 mod diagnostics;
 #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 mod direct_exit;
@@ -678,6 +679,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
     dns_port: jint,
     overlay_root: JString,
     overlay_settings: JString,
+    block_app_udp443: jboolean,
 ) -> jint {
     logging::bridge_log(&format!(
         "nativeStartTun2Socks: fd={}, dns={}",
@@ -736,6 +738,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
         });
         tun2socks::start_android(
             fd,
+            block_app_udp443 != JNI_FALSE,
             #[cfg(feature = "zerotier")]
             config.map(|config| (root.into(), config)),
             report_exit,
@@ -746,7 +749,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
     #[cfg(not(target_os = "android"))]
     let start = {
         let _ = (overlay_root, overlay_settings);
-        tun2socks::start(fd, dns_port as u16)
+        tun2socks::start_with_udp443_policy(fd, block_app_udp443 != JNI_FALSE)
     };
     match start {
         Ok(()) => {

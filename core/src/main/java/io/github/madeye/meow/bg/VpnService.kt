@@ -38,10 +38,6 @@ import android.net.VpnService as BaseVpnService
 class VpnService : BaseVpnService(), BaseService.Interface {
     companion object {
         private const val VPN_MTU = 1500
-        private const val PRIVATE_VLAN4_CLIENT = "172.19.0.1"
-        private const val PRIVATE_VLAN4_ROUTER = "172.19.0.2"
-        private const val PRIVATE_VLAN6_CLIENT = "fdfe:dcba:9876::1"
-        private const val PRIVATE_VLAN6_ROUTER = "fdfe:dcba:9876::2"
 
         /** `android.os.Process.INVALID_UID`, a constant that only exists from API 29. */
         private const val INVALID_UID = -1
@@ -300,12 +296,7 @@ class VpnService : BaseVpnService(), BaseService.Interface {
         val builder = Builder()
             .setSession("Meow VPN")
             .setMtu(VPN_MTU)
-            .addAddress(PRIVATE_VLAN4_CLIENT, 30)
-            .addDnsServer(PRIVATE_VLAN4_ROUTER)
-            .addRoute("0.0.0.0", 0)
-        if (plan.envelope.ipv6) {
-            builder.addAddress(PRIVATE_VLAN6_CLIENT, 126).addRoute("::", 0)
-        }
+        configureVpnIp(plan.envelope.ipv6, builder::addAddress, builder::addRoute, builder::addDnsServer)
         val capture = plan.envelope.capture
         when (capture.mode) {
             "exclude" -> for (pkg in capture.packages) {
