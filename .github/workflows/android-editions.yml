@@ -1,0 +1,67 @@
+name: Android editions
+
+on:
+  push:
+    paths:
+      - 'buildSrc/**'
+      - 'core/**'
+      - 'mobile/**'
+      - 'tools/verify-android-edition.py'
+      - '.github/workflows/android-editions.yml'
+  pull_request:
+    paths:
+      - 'buildSrc/**'
+      - 'core/**'
+      - 'mobile/**'
+      - 'tools/verify-android-edition.py'
+      - '.github/workflows/android-editions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # The pinned lwip's bindgen 0.69 needs an older libclang.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: full
+            zerotier: 'true'
+          - edition: lite
+            zerotier: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "ndk;27.0.12077973" "cmake;3.22.1"
+      - name: Test and build
+        env:
+          ZEROTIER: ${{ matrix.zerotier }}
+        run: |
+          ./gradlew -PTARGET_ABI=arm64 -PCARGO_PROFILE=debug "-PZEROTIER=$ZEROTIER" \
+            :core:testDebugUnitTest :mobile:testDebugUnitTest :mobile:assembleDebug
+      - name: Verify APK feature isolation
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          python3 tools/verify-android-edition.py "$EDITION" \
+            mobile/build/outputs/apk/debug/mobile-debug.apk \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meowz-${{ matrix.edition }}-arm64-v8a-debug
+          path: mobile/build/outputs/apk/debug/mobile-debug.apk
+          compression-level: 0
