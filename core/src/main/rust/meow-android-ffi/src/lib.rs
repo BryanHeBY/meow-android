@@ -377,6 +377,9 @@ async fn start_engine_async(
     tunnel.set_dialer_registry(config.provider_dialer_registry.clone());
     tunnel.set_mode(config.general.mode);
     tunnel.set_connection_notes(config.general.connection_notes);
+    // The health mode is process-wide in meow-proxy. Apply it on every
+    // engine start, including the default, before any health checks start.
+    engine::apply_unified_delay(&config.raw);
     // The profile's `tcp-idle-timeout` (off unless set): ends relays silent
     // in both directions, which TUN netstack flows need since keepalive
     // never reaches them.

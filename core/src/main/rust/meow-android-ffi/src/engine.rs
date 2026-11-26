@@ -30,6 +30,11 @@ pub fn tunnel() -> Option<Tunnel> {
     crate::ENGINE.lock().as_ref().map(|s| s.tunnel.clone())
 }
 
+/// Match meow-app's per-load setting, including resetting a previous profile.
+pub(crate) fn apply_unified_delay(raw: &meow_config::raw::RawConfig) {
+    meow_proxy::health::set_unified_delay(raw.unified_delay.unwrap_or(false));
+}
+
 /// Built-in upstreams, used when the profile names none. CN-side resolvers
 /// over TCP (UDP/53 is filtered on some networks), as IP literals so nothing
 /// needs bootstrapping. CN-side only because meow's `query_pool` races every
@@ -304,6 +309,153 @@ pub fn sibling_stripped_path(config_path: &str) -> PathBuf {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn unified_delay_profile_controls_cold_and_warm_probes_and_resets() {
+        use async_trait::async_trait;
+        use meow_common::{
+            AdapterType, Metadata, ProxyAdapter, ProxyConn, ProxyHealth, ProxyPacketConn,
+        };
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::sync::mpsc;
+        use tokio::time::{sleep, Duration};
+
+        struct Conn(DuplexStream);
+        impl AsyncRead for Conn {
+            fn poll_read(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &mut ReadBuf<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.0).poll_read(cx, buf)
+            }
+        }
+        impl AsyncWrite for Conn {
+            fn poll_write(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &[u8],
+            ) -> Poll<std::io::Result<usize>> {
+                Pin::new(&mut self.0).poll_write(cx, buf)
+            }
+            fn poll_flush(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.0).poll_flush(cx)
+            }
+            fn poll_shutdown(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.0).poll_shutdown(cx)
+            }
+        }
+        impl ProxyConn for Conn {}
+
+        struct Fixture {
+            health: ProxyHealth,
+            dials: AtomicUsize,
+            requests: mpsc::UnboundedSender<String>,
+        }
+        #[async_trait]
+        impl ProxyAdapter for Fixture {
+            fn name(&self) -> &str {
+                "synthetic"
+            }
+            fn adapter_type(&self) -> AdapterType {
+                AdapterType::Direct
+            }
+            fn addr(&self) -> &str {
+                ""
+            }
+            fn support_udp(&self) -> bool {
+                false
+            }
+            fn health(&self) -> &ProxyHealth {
+                &self.health
+            }
+            async fn dial_udp(
+                &self,
+                _: &Metadata,
+            ) -> meow_common::Result<Box<dyn ProxyPacketConn>> {
+                Err(meow_common::MeowError::UdpNotSupported)
+            }
+            async fn dial_tcp(
+                &self,
+                metadata: &Metadata,
+            ) -> meow_common::Result<Box<dyn ProxyConn>> {
+                assert_eq!(metadata.host.as_str(), "probe.invalid");
+                assert_eq!(metadata.dst_port, 80);
+                let count = self.dials.fetch_add(1, Ordering::Relaxed) + 1;
+                let requests = self.requests.clone();
+                let (client, mut stream) = tokio::io::duplex(4096);
+                tokio::spawn(async move {
+                    for index in 0..count {
+                        let mut request = Vec::new();
+                        while !request.ends_with(b"\r\n\r\n") {
+                            let mut byte = [0];
+                            stream.read_exact(&mut byte).await.unwrap();
+                            request.push(byte[0]);
+                        }
+                        requests.send(String::from_utf8(request).unwrap()).unwrap();
+                        if index == 0 {
+                            sleep(Duration::from_millis(250)).await;
+                        }
+                        stream
+                            .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                            .await
+                            .unwrap();
+                    }
+                });
+                Ok(Box::new(Conn(client)))
+            }
+        }
+
+        // One in-memory node and URL; the first response is delayed to
+        // model setup cost, not to claim a physical network comparison.
+        let (requests, mut received) = mpsc::unbounded_channel();
+        let node = Fixture {
+            health: ProxyHealth::new(),
+            dials: AtomicUsize::new(0),
+            requests,
+        };
+        let url = "http://probe.invalid/generate_204";
+        let apply = |profile: &str| {
+            let stripped = strip_and_inject(profile, DnsUpstreams::Builtin).unwrap();
+            let raw: meow_config::raw::RawConfig = serde_yaml::from_str(&stripped).unwrap();
+            apply_unified_delay(&raw);
+        };
+        apply("unified-delay: false\n");
+        assert!(!meow_proxy::health::unified_delay());
+        assert_eq!(node.dials.load(Ordering::Relaxed), 0);
+        let cold = meow_proxy::health::url_test(&node, url, None, Duration::from_secs(3))
+            .await
+            .unwrap();
+        apply("unified-delay: true\n");
+        assert!(meow_proxy::health::unified_delay());
+        let warm = meow_proxy::health::url_test(&node, url, None, Duration::from_secs(3))
+            .await
+            .unwrap();
+        apply("unified-delay: false\n");
+        assert!(!meow_proxy::health::unified_delay());
+        apply("unified-delay: true\n");
+        apply("{}\n");
+        assert!(!meow_proxy::health::unified_delay());
+        assert_eq!(node.dials.load(Ordering::Relaxed), 2);
+        let requests: Vec<_> = (0..3).map(|_| received.try_recv().unwrap()).collect();
+        assert!(requests[0].starts_with("GET /generate_204 HTTP/1.1\r\n"));
+        assert!(requests[1..]
+            .iter()
+            .all(|r| r.starts_with("HEAD /generate_204 HTTP/1.1\r\n")));
+        assert!(
+            cold >= 200 && cold > warm.saturating_add(150),
+            "cold={cold}ms warm={warm}ms"
+        );
+    }
 
     fn dns_of(stripped: &str) -> serde_yaml::Mapping {
         let doc: serde_yaml::Value = serde_yaml::from_str(stripped).unwrap();
