@@ -365,6 +365,7 @@
     <string name="perapp_search">Uygulama ara…</string>
     <string name="perapp_show_system">Sistem uygulamalarını göster</string>
     <string name="perapp_hide_system">Sistem uygulamalarını gizle</string>
+    <string name="perapp_invert_visible">Görünen uygulamaların seçimini tersine çevir</string>
     <string name="perapp_select_all">Tümünü seç</string>
     <string name="perapp_deselect_all">Tüm seçimleri kaldır</string>
     <string name="perapp_export">Dışa aktar</string>

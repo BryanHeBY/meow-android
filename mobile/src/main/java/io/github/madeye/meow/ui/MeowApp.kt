@@ -86,6 +86,7 @@ import io.github.madeye.meow.ui.screens.logbook.LogbookViewModel
 import io.github.madeye.meow.ui.screens.logs.LogsActions
 import io.github.madeye.meow.ui.screens.logs.LogsScreen
 import io.github.madeye.meow.ui.screens.logs.LogsViewModel
+import io.github.madeye.meow.ui.screens.perapp.AppPickerMenu
 import io.github.madeye.meow.ui.screens.perapp.PerAppProxyScreen
 import io.github.madeye.meow.ui.screens.perapp.PerAppProxyViewModel
 import io.github.madeye.meow.ui.screens.proxies.ProxyDetailScreen
@@ -937,7 +938,6 @@ private fun SettingsRoute(
 private fun PerAppProxyRoute(snackbarHost: SnackbarHostState, onBack: () -> Unit) {
     val viewModel: PerAppProxyViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var menuOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboardText = rememberClipboardText()
 
@@ -960,97 +960,19 @@ private fun PerAppProxyRoute(snackbarHost: SnackbarHostState, onBack: () -> Unit
         title = stringResource(R.string.perapp_title),
         navigationIcon = { BackButton(onBack) },
         actions = {
-            Box {
-                // Gated like the ✓ button: during the initial load Export
-                // would emit the default empty config and Import would race
-                // the init-time load.
-                IconButton(onClick = { menuOpen = true }, enabled = !state.loading) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = stringResource(R.string.common_more_options),
-                    )
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    // The action acts on the filtered list, so during a search
-                    // it means "all of these". One item serves both directions
-                    // — partial selection counts as "not all" so tapping
-                    // completes the set. Select skips system apps (its job is
-                    // "all third-party apps"), so the predicate and the gate
-                    // track the selectable subset; deselect still clears
-                    // visible system picks.
-                    val visible = state.visibleApps
-                    val selectable = visible.filter { !it.isSystem }
-                    val allSelectableSelected = selectable.isNotEmpty() &&
-                        selectable.all { it.packageName in state.selected }
-                    // Edge case: a filter showing only manually-selected
-                    // system apps — nothing selectable, but deselect still
-                    // has real work to do.
-                    val deselectOnlySystem = selectable.isEmpty() &&
-                        visible.isNotEmpty() &&
-                        visible.all { it.packageName in state.selected }
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(
-                                    if (allSelectableSelected || deselectOnlySystem) {
-                                        R.string.perapp_deselect_all
-                                    } else {
-                                        R.string.perapp_select_all
-                                    },
-                                ),
-                            )
-                        },
-                        // No-op without a gate during loading / empty search /
-                        // a filter that shows only unselected system apps.
-                        enabled = selectable.isNotEmpty() || deselectOnlySystem,
-                        onClick = {
-                            menuOpen = false
-                            if (allSelectableSelected || deselectOnlySystem) {
-                                viewModel.onDeselectAllVisible(visible)
-                            } else {
-                                viewModel.onSelectAllVisible(visible)
-                            }
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(
-                                    if (state.showSystemApps) {
-                                        R.string.perapp_hide_system
-                                    } else {
-                                        R.string.perapp_show_system
-                                    },
-                                ),
-                            )
-                        },
-                        // Toggle stays open so the flipped label is visible.
-                        onClick = viewModel::onToggleSystemApps,
-                    )
-                    // The store wire format verbatim; the share sheet hands
-                    // out copy-to-clipboard and save for free.
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.perapp_export)) },
-                        onClick = {
-                            menuOpen = false
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, viewModel.exportText())
-                            }
-                            context.startActivity(Intent.createChooser(send, null))
-                        },
-                    )
-                    // Stages into the working selection only — the ✓ button
-                    // stays the commit point.
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.perapp_import)) },
-                        onClick = {
-                            menuOpen = false
-                            viewModel.importText(clipboardText())
-                        },
-                    )
-                }
-            }
+            AppPickerMenu(
+                state = state,
+                onBulkSelection = viewModel::onBulkSelection,
+                onToggleSystemApps = viewModel::onToggleSystemApps,
+                onExport = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, viewModel.exportText())
+                    }
+                    context.startActivity(Intent.createChooser(send, null))
+                },
+                onImport = { viewModel.importText(clipboardText()) },
+            )
             IconButton(
                 onClick = { viewModel.save(onBack) },
                 enabled = !state.loading,

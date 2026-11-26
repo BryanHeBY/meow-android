@@ -356,6 +356,7 @@
     <string name="perapp_search">Tìm ứng dụng…</string>
     <string name="perapp_show_system">Hiển thị ứng dụng hệ thống</string>
     <string name="perapp_hide_system">Ẩn ứng dụng hệ thống</string>
+    <string name="perapp_invert_visible">Đảo ngược lựa chọn ứng dụng đang hiển thị</string>
     <string name="perapp_select_all">Chọn tất cả</string>
     <string name="perapp_deselect_all">Bỏ chọn tất cả</string>
     <string name="perapp_export">Xuất</string>

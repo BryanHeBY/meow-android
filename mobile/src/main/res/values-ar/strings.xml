@@ -413,6 +413,7 @@
     <string name="perapp_search">البحث في التطبيقات…</string>
     <string name="perapp_show_system">عرض تطبيقات النظام</string>
     <string name="perapp_hide_system">إخفاء تطبيقات النظام</string>
+    <string name="perapp_invert_visible">عكس تحديد التطبيقات المعروضة</string>
     <string name="perapp_select_all">تحديد الكل</string>
     <string name="perapp_deselect_all">إلغاء تحديد الكل</string>
     <string name="perapp_export">تصدير</string>

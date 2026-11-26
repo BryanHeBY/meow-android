@@ -356,6 +356,7 @@
     <string name="perapp_search">搜索应用…</string>
     <string name="perapp_show_system">显示系统应用</string>
     <string name="perapp_hide_system">隐藏系统应用</string>
+    <string name="perapp_invert_visible">反选当前列表</string>
     <string name="perapp_select_all">全选</string>
     <string name="perapp_deselect_all">取消全选</string>
     <string name="perapp_export">导出</string>

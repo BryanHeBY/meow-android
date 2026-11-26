@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -29,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,6 +50,7 @@ import io.github.madeye.meow.R
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.core.ZeroTierNative
+import io.github.madeye.meow.repo.InstalledApp
 import io.github.madeye.meow.repo.MoonSetting
 import io.github.madeye.meow.repo.OverlaySettings
 import io.github.madeye.meow.repo.OverlaySettingsRepository
@@ -52,11 +58,16 @@ import io.github.madeye.meow.repo.OverlayStatus
 import io.github.madeye.meow.repo.SavedOverlayNetwork
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.MeowScaffold
+import io.github.madeye.meow.ui.screens.perapp.AppPickerMenu
+import io.github.madeye.meow.ui.screens.perapp.PerAppUiState
+import io.github.madeye.meow.ui.screens.perapp.updateVisibleSelection
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 @Composable
 private fun isChinese(): Boolean =
@@ -325,6 +336,29 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
             },
         )
     }
+    var appQuery by rememberSaveable { mutableStateOf("") }
+    var showSystemApps by rememberSaveable { mutableStateOf(false) }
+    val appPickerState = if (page == "apps") {
+        val installed by produceState<List<InstalledApp>?>(null) {
+            value = try {
+                AppGraph.installedApps.load()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.w(e, "ZeroTier app list could not be loaded")
+                emptyList()
+            }
+        }
+        PerAppUiState(
+            loading = installed == null,
+            selected = appSelection.toSet(),
+            query = appQuery,
+            showSystemApps = showSystemApps,
+            apps = installed.orEmpty(),
+        )
+    } else {
+        PerAppUiState()
+    }
     val currentNode = actual?.takeIf { config.enabled && it.network == config.network }
     val heading = when (page) {
         "add" -> tr("Join network", "加入网络")
@@ -361,10 +395,30 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
                             more = false
                             appMode = ZeroTierAppMode.fromStored(config.appMode)
                             appSelection = ArrayList(config.packages)
+                            appQuery = ""
+                            showSystemApps = false
                             page = "apps"
                             info = ""
                         },
                     )
+                }
+            } else if (page == "apps") {
+                AppPickerMenu(
+                    state = appPickerState,
+                    enabled = loaded && !busy && appMode != ZeroTierAppMode.All,
+                    onBulkSelection = { action, visible ->
+                        appSelection = ArrayList(updateVisibleSelection(appSelection.toSet(), visible, action))
+                    },
+                    onToggleSystemApps = { showSystemApps = !showSystemApps },
+                )
+                IconButton(
+                    onClick = {
+                        persist(config.withAppRules(appMode, appSelection.toSet()), false) { up() }
+                    },
+                    enabled = loaded && !busy && !appPickerState.loading,
+                    modifier = Modifier.testTag("zt_app_save"),
+                ) {
+                    Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.common_save))
                 }
             }
         },
@@ -373,15 +427,13 @@ internal fun ZeroTierRoute(bottomBar: @Composable () -> Unit) {
         if (page == "apps") {
             ZeroTierAppRules(
                 mode = appMode,
-                selected = appSelection.toSet(),
+                state = appPickerState,
                 busy = busy || !loaded,
                 message = info,
                 contentPadding = padding,
                 onModeChange = { appMode = it },
+                onQueryChange = { appQuery = it },
                 onToggle = { appSelection = updateAppSelection(appSelection.toSet(), it) },
-                onSave = {
-                    persist(config.withAppRules(appMode, appSelection.toSet()), false) { up() }
-                },
             )
             return@MeowScaffold
         }

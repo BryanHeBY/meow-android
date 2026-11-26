@@ -376,6 +376,7 @@
     <string name="perapp_search">Search apps…</string>
     <string name="perapp_show_system">Show system apps</string>
     <string name="perapp_hide_system">Hide system apps</string>
+    <string name="perapp_invert_visible">Invert visible selection</string>
     <string name="perapp_select_all">Select All</string>
     <string name="perapp_deselect_all">Deselect All</string>
     <string name="perapp_export">Export</string>

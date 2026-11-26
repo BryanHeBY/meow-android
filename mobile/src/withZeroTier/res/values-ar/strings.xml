@@ -6,7 +6,6 @@
     <string name="zt_apps_mode_allow">التطبيقات المحددة فقط مؤهلة (قائمة السماح)</string>
     <string name="zt_apps_mode_exclude">تتجاوز التطبيقات المحددة شبكة ZeroTier (قائمة الحظر)</string>
     <string name="zt_apps_scope">يؤثر هذا في مسارات ZeroTier فقط، ولا يغيّر قواعد Meow.</string>
-    <string name="zt_apps_show_system">عرض تطبيقات النظام</string>
     <string name="zt_apps_none_allowed">لم تُحدد تطبيقات: لا يمكن لأي تطبيق استخدام ZeroTier.</string>
     <string name="home_meow_forwarding">تمرير حركة المرور عبر Meow</string>
     <string name="home_meow_forwarding_scope">لهذه الجلسة فقط. عند الإيقاف تُحجب حركة مرور VPN غير المخصصة لـ ZeroTier ولا تمر مباشرة.</string>

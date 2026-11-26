@@ -147,22 +147,9 @@ class PerAppProxyViewModel(
         )
     }
 
-    /**
-     * Applies to the currently filtered list only — and stays third-party:
-     * "select all" means "every user app", so system apps keep their
-     * per-row opt-in here.
-     */
-    fun onSelectAllVisible(visible: List<InstalledApp>) {
-        val adding = visible.filter { !it.isSystem }.map { it.packageName }
+    internal fun onBulkSelection(action: AppSelectionAction, visible: List<InstalledApp>) {
         config.value = config.value.copy(
-            packages = config.value.packages + adding,
-        )
-    }
-
-    fun onDeselectAllVisible(visible: List<InstalledApp>) {
-        val removing = visible.map { it.packageName }.toSet()
-        config.value = config.value.copy(
-            packages = config.value.packages - removing,
+            packages = updateVisibleSelection(config.value.packages, visible, action),
         )
     }
 

@@ -361,6 +361,7 @@
     <string name="perapp_search">အက်ပ်များ ရှာရန်…</string>
     <string name="perapp_show_system">စနစ် အက်ပ်များ ပြရန်</string>
     <string name="perapp_hide_system">စနစ် အက်ပ်များ ဖျောက်ရန်</string>
+    <string name="perapp_invert_visible">ပြထားသောအက်ပ်များ၏ ရွေးချယ်မှုကို ပြောင်းပြန်လုပ်ရန်</string>
     <string name="perapp_select_all">အားလုံး ရွေးရန်</string>
     <string name="perapp_deselect_all">ရွေးချယ်မှု အားလုံး ဖြုတ်ရန်</string>
     <string name="perapp_export">ထုတ်ယူရန်</string>

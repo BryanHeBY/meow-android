@@ -383,6 +383,7 @@
     <string name="perapp_search">Поиск приложений…</string>
     <string name="perapp_show_system">Показывать системные приложения</string>
     <string name="perapp_hide_system">Скрывать системные приложения</string>
+    <string name="perapp_invert_visible">Инвертировать выбор видимых приложений</string>
     <string name="perapp_select_all">Выбрать все</string>
     <string name="perapp_deselect_all">Снять выбор</string>
     <string name="perapp_export">Экспорт</string>

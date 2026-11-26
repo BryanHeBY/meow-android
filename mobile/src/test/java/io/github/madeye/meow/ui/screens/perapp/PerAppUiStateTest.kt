@@ -28,4 +28,30 @@ class PerAppUiStateTest {
         assertEquals(listOf(store, services, browser), state.copy(selected = setOf(services.packageName)).visibleApps)
         assertEquals(listOf(browser), state.copy(selected = setOf(services.packageName), query = "browser").visibleApps)
     }
+
+    @Test
+    fun invertUsesTheVisibleSnapshotAndPreservesHiddenSelections() {
+        val selected = setOf(browser.packageName, "com.example.hidden")
+        val visible = state.copy(selected = selected).visibleApps
+        assertEquals(
+            setOf(store.packageName, "com.example.hidden"),
+            updateVisibleSelection(selected, visible, AppSelectionAction.Invert),
+        )
+        val searched = state.copy(query = "play services").visibleApps
+        assertEquals(
+            selected + services.packageName,
+            updateVisibleSelection(selected, searched, AppSelectionAction.Invert),
+        )
+        assertEquals(selected, updateVisibleSelection(selected, emptyList(), AppSelectionAction.Invert))
+    }
+
+    @Test
+    fun selectAllStillAvoidsNewSystemPackagesAndDeselectClearsVisibleOnly() {
+        val selected = setOf(services.packageName)
+        val visible = listOf(store, browser)
+        val all = updateVisibleSelection(selected, visible, AppSelectionAction.Select)
+        assertEquals(selected + browser.packageName, all)
+        assertEquals(selected, updateVisibleSelection(all, visible, AppSelectionAction.Deselect))
+    }
+
 }

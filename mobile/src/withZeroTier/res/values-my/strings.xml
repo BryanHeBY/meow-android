@@ -6,7 +6,6 @@
     <string name="zt_apps_mode_allow">ရွေးထားသည့် အက်ပ်များသာ သုံးနိုင်သည် (ခွင့်ပြုစာရင်း)</string>
     <string name="zt_apps_mode_exclude">ရွေးထားသည့် အက်ပ်များ ZeroTier မသုံးပါ (ပိတ်ပင်စာရင်း)</string>
     <string name="zt_apps_scope">ZeroTier လမ်းကြောင်းများအတွက်သာ ဖြစ်ပြီး Meow စည်းမျဉ်းများ မပြောင်းပါ။</string>
-    <string name="zt_apps_show_system">စနစ်အက်ပ်များ ပြရန်</string>
     <string name="zt_apps_none_allowed">အက်ပ်မရွေးထားပါ။ မည်သည့်အက်ပ်မှ ZeroTier မသုံးနိုင်ပါ။</string>
     <string name="home_meow_forwarding">Meow ဒေတာ လမ်းကြောင်း</string>
     <string name="home_meow_forwarding_scope">ယခု VPN ချိတ်ဆက်မှုအတွက်သာ ဖြစ်သည်။ ပိတ်ထားလျှင် VPN က လက်ခံထားပြီး ZeroTier မသုံးသည့် ဒေတာကို ပိတ်ဆို့မည်၊ တိုက်ရိုက်မပို့ပါ။</string>

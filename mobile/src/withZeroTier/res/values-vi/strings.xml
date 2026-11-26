@@ -6,7 +6,6 @@
     <string name="zt_apps_mode_allow">Chỉ ứng dụng đã chọn được phép (danh sách cho phép)</string>
     <string name="zt_apps_mode_exclude">Ứng dụng đã chọn bỏ qua ZeroTier (danh sách chặn)</string>
     <string name="zt_apps_scope">Chỉ ảnh hưởng đến các tuyến ZeroTier, không thay đổi quy tắc Meow.</string>
-    <string name="zt_apps_show_system">Hiện ứng dụng hệ thống</string>
     <string name="zt_apps_none_allowed">Chưa chọn ứng dụng: không ứng dụng nào có thể dùng ZeroTier.</string>
     <string name="home_meow_forwarding">Chuyển tiếp lưu lượng Meow</string>
     <string name="home_meow_forwarding_scope">Chỉ áp dụng cho phiên VPN này. Khi tắt, lưu lượng do VPN xử lý mà không qua ZeroTier sẽ bị chặn, không đi trực tiếp.</string>
