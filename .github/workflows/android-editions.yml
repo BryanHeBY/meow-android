@@ -7,6 +7,7 @@ on:
       - 'core/**'
       - 'mobile/**'
       - 'tools/verify-android-edition.py'
+      - 'tools/gradle-ci.sh'
       - '.github/workflows/android-editions.yml'
   pull_request:
     paths:
@@ -14,6 +15,7 @@ on:
       - 'core/**'
       - 'mobile/**'
       - 'tools/verify-android-edition.py'
+      - 'tools/gradle-ci.sh'
       - '.github/workflows/android-editions.yml'
   workflow_dispatch:
 
@@ -45,6 +47,8 @@ jobs:
         with:
           targets: aarch64-linux-android
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event.repository.default_branch != github.ref_name && (github.event_name != 'push' || github.ref != 'refs/heads/feat/zerotier-overlay-policy') }}
       - name: Install Android SDK components
         run: |
           echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
@@ -59,7 +63,7 @@ jobs:
         env:
           ZEROTIER: ${{ matrix.zerotier }}
         run: |
-          ./gradlew -PTARGET_ABI=arm64 -PCARGO_PROFILE=debug "-PZEROTIER=$ZEROTIER" \
+          bash tools/gradle-ci.sh -PTARGET_ABI=arm64 -PCARGO_PROFILE=debug "-PZEROTIER=$ZEROTIER" \
             :core:testDebugUnitTest :mobile:testDebugUnitTest :mobile:assembleDebug
       - name: Verify APK feature isolation
         env:
