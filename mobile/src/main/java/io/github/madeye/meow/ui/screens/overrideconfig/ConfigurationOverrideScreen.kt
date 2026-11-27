@@ -45,12 +45,18 @@ import io.github.madeye.meow.ui.components.SectionHeader
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverrideFields
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverridePage
 import io.github.madeye.meow.ui.screens.advancedconfig.DnsHostsEditor
+import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedRouteModeEditor
+import io.github.madeye.meow.ui.screens.home.HomeViewModel
 
 internal const val CONFIGURATION_OVERRIDE_TAG = "configuration_override"
 internal const val PROFILE_OVERRIDE_TAG = "profile_configuration_override"
 
 @Composable
-internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack: () -> Unit) {
+internal fun ConfigurationOverrideRoute(
+    routeModeOwner: HomeViewModel,
+    snackbarHost: SnackbarHostState,
+    onBack: () -> Unit,
+) {
     val viewModel: ConfigurationOverrideViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val (form, profile) = state
@@ -112,7 +118,10 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
                         DnsOverrideFields(it, form, profile, dnsStatus, viewModel::editDns) { viewModel.saveDns(profile?.id) }
                     }
                     OverrideFields(form, profile, global, viewModel::edit) { viewModel.save(OverrideSection.MAIN) }
-                    TextButton(onClick = { advanced = AdvancedOverridePage.INDEX }, enabled = !saving) {
+                    TextButton(
+                        onClick = { advanced = AdvancedOverridePage.INDEX }, enabled = !saving,
+                        modifier = Modifier.testTag("open_advanced_override"),
+                    ) {
                         Text(stringResource(R.string.advanced_title))
                     }
                 } else if (page == AdvancedOverridePage.HOSTS) {
@@ -125,6 +134,9 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
                         page, form, profile, global, { advanced = it },
                         onEdit = { viewModel.edit(form.draft.copy(coreBehavior = it)) },
                         onSave = { viewModel.save(OverrideSection.CORE) },
+                        routeModeEditor = if (global) {
+                            { AdvancedRouteModeEditor(routeModeOwner, snackbarHost) }
+                        } else null,
                     )
                 }
             }

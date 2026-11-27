@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import io.github.madeye.meow.R
 import io.github.madeye.meow.preference.CoreBehaviorOverride
@@ -44,20 +45,30 @@ internal fun AdvancedOverrideFields(
     onNavigate: (AdvancedOverridePage) -> Unit,
     onEdit: (CoreBehaviorOverride) -> Unit,
     onSave: () -> Unit,
+    routeModeEditor: (@Composable () -> Unit)? = null,
 ) {
     when (page) {
         AdvancedOverridePage.INDEX -> GlassCard {
             for (child in AdvancedOverridePage.entries.drop(1)) {
-                TextButton(onClick = { onNavigate(child) }, modifier = Modifier.fillMaxWidth()) {
+                TextButton(
+                    onClick = { onNavigate(child) }, modifier = Modifier.fillMaxWidth()
+                        .testTag("advanced_override_${child.name.lowercase()}"),
+                ) {
                     Text(stringResource(child.title))
                 }
             }
         }
         AdvancedOverridePage.CORE -> CoreBehaviorEditor(form, profile, global, onEdit, onSave)
-        else -> GlassCard {
-            Text(stringResource(R.string.settings_version_unavailable), style = MaterialTheme.typography.titleMedium)
-            Text(stringResource(requireNotNull(page.unavailableReason)), style = MaterialTheme.typography.bodyMedium)
-        }
+        AdvancedOverridePage.ROUTING -> if (routeModeEditor != null) routeModeEditor() else Unavailable(page)
+        else -> Unavailable(page)
+    }
+}
+
+@Composable
+private fun Unavailable(page: AdvancedOverridePage) {
+    GlassCard {
+        Text(stringResource(R.string.settings_version_unavailable), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(requireNotNull(page.unavailableReason)), style = MaterialTheme.typography.bodyMedium)
     }
 }
 

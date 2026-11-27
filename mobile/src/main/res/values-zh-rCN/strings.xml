@@ -511,4 +511,7 @@
     <string name="advanced_dns_hosts_replace">替换 Hosts 表</string>
     <string name="advanced_dns_hosts_format">每行填写一个主机名和一个 IP 地址。空表会清除继承的记录。</string>
     <string name="advanced_dns_hosts_invalid">请输入不重复的主机名及 IPv4 或 IPv6 地址。</string>
+    <string name="advanced_route_mode_next">下次启动的路由模式</string>
+    <string name="advanced_route_mode_next_detail">立即保存，下次启动 Meow 时生效，不改动当前连接。如需立即切换，请在首页操作。</string>
+    <string name="advanced_route_mode_save_failed">无法保存下次启动的路由模式。</string>
 </resources>

@@ -126,8 +126,8 @@ class MeowInstance(profile: ClashProfile) {
             Ipv6Override.FORCE_ON -> MeowCore.nativeOverrideIpv6(yaml, true)
             Ipv6Override.FORCE_OFF -> MeowCore.nativeOverrideIpv6(yaml, false)
         }
-        // The Home route-mode pick overrides the profile's `mode:`; empty
-        // means the user never picked one.
+        // The shared user route-mode pick overrides the profile's `mode:`; empty
+        // follows the profile.
         val routeMode = RouteModeStore.default.load()?.wire.orEmpty()
         val capability = mintCredential()
         // Before the start, so the traffic ledger counts days in the

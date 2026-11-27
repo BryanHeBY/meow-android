@@ -15,6 +15,23 @@ class ConfigurationOverrideNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
+    fun advancedRoutingExposesTheSharedNextStartSetting() {
+        compose.onNodeWithTag("tab_settings").performClick()
+        compose.onNodeWithTag("configuration_override").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag("open_advanced_override").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("open_advanced_override").performScrollTo().performClick()
+        compose.onNodeWithTag("advanced_override_routing").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag("advanced_route_mode_inherit").fetchSemanticsNodes().isNotEmpty()
+        }
+        for (mode in listOf("inherit", "rule", "global", "direct")) {
+            compose.onNodeWithTag("advanced_route_mode_$mode").assertIsEnabled()
+        }
+    }
+
+    @Test
     fun settingsNetworkOpensTheGlobalFormWithAnUnsavedDraft() {
         compose.onNodeWithTag("tab_settings").performClick()
         compose.onNodeWithTag("dns_mode").assertDoesNotExist()

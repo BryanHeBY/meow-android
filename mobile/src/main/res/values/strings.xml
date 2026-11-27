@@ -532,4 +532,7 @@
     <string name="advanced_dns_hosts_replace">Replace hosts table</string>
     <string name="advanced_dns_hosts_format">One hostname and IP address per line. An empty table removes inherited records.</string>
     <string name="advanced_dns_hosts_invalid">Enter unique hostnames with literal IPv4 or IPv6 addresses.</string>
+    <string name="advanced_route_mode_next">Route mode on next start</string>
+    <string name="advanced_route_mode_next_detail">Saved immediately for the next Meow start. This does not change the current connection. To switch now, use Home.</string>
+    <string name="advanced_route_mode_save_failed">Could not save the route mode for the next start.</string>
 </resources>

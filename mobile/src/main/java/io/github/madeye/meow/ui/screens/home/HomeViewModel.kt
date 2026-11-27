@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import io.github.madeye.meow.vpn.ControllerSession
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -59,6 +60,10 @@ data class HomeUiState(
         get() = state == BaseService.State.Connecting || state == BaseService.State.Stopping
 }
 
+/** Loading is separate from a loaded, intentionally unset override. */
+@Immutable
+internal data class NextRouteMode(val override: RouteMode?)
+
 class HomeViewModel(
     private val vpn: VpnStateRepository,
     private val controller: ControllerAccess,
@@ -69,8 +74,10 @@ class HomeViewModel(
     private val routeChanges: RouteChanges,
 ) : ViewModel() {
 
-    /** The user's persisted pick; `null` until they make one. */
-    private val savedMode = MutableStateFlow<RouteMode?>(null)
+    private val savedMode = MutableStateFlow<NextRouteMode?>(null)
+    internal val nextRouteMode = savedMode.asStateFlow()
+    private val _nextRouteModeSaveFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    internal val nextRouteModeSaveFailed = _nextRouteModeSaveFailed.asSharedFlow()
 
     private val reloadMode = MutableStateFlow(0L)
     private val _routeModeFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -84,7 +91,7 @@ class HomeViewModel(
     private val configuredMode = combine(
         savedMode,
         profiles.observeSelected().map { it?.yamlContent }.distinctUntilChanged(),
-    ) { saved, yaml -> saved ?: yaml?.let(RouteMode::configured) ?: RouteMode.Rule }
+    ) { saved, yaml -> saved?.override ?: yaml?.let(RouteMode::configured) ?: RouteMode.Rule }
 
     private val runtimeMode = controller.observe(reloadMode) { session ->
         modeSwitch.withLock { apiForSession(session).configs() }
@@ -109,7 +116,9 @@ class HomeViewModel(
 
     init {
         viewModelScope.launch {
-            savedMode.value = withContext(Dispatchers.IO) { routeModes.load() }
+            modeSwitch.withLock {
+                savedMode.value = NextRouteMode(withContext(Dispatchers.IO) { routeModes.load() })
+            }
         }
     }
 
@@ -154,6 +163,31 @@ class HomeViewModel(
         }
     }
 
+    /** Advanced writes only the next-start setting; it must not change live routes. */
+    internal fun setNextRouteMode(mode: RouteMode?) {
+        viewModelScope.launch {
+            modeSwitch.withLock {
+                val current = savedMode.value ?: return@withLock
+                if (current.override == mode) return@withLock
+                try {
+                    saveRouteMode(mode)
+                } catch (e: IOException) {
+                    Timber.w(e, "saving next route mode failed")
+                    _nextRouteModeSaveFailed.tryEmit(Unit)
+                }
+            }
+        }
+    }
+
+    private suspend fun saveRouteMode(mode: RouteMode?, session: ControllerSession? = null) {
+        val saved = withContext(Dispatchers.IO) {
+            if (session != null && !controller.isCurrent(session)) return@withContext false
+            if (mode == null) routeModes.clear() else routeModes.save(mode)
+            true
+        }
+        if (saved) savedMode.value = NextRouteMode(mode)
+    }
+
     private suspend fun switchRouteMode(mode: RouteMode, session: ControllerSession?) {
         if (session != null) {
             try {
@@ -167,12 +201,7 @@ class HomeViewModel(
             }
         }
         try {
-            val saved = withContext(Dispatchers.IO) {
-                if (session != null && !controller.isCurrent(session)) return@withContext false
-                routeModes.save(mode)
-                true
-            }
-            if (saved) savedMode.value = mode
+            saveRouteMode(mode, session)
         } catch (e: IOException) {
             Timber.w(e, "saving route mode failed")
         }

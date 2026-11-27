@@ -295,8 +295,13 @@ private fun MeowNavHost(
         composable<Dest.PerAppProxy> {
             PerAppProxyRoute(snackbarHost = snackbarHost, onBack = navController::popBackStack)
         }
-        composable<Dest.ConfigurationOverride> {
-            ConfigurationOverrideRoute(snackbarHost = snackbarHost, onBack = navController::popBackStack)
+        composable<Dest.ConfigurationOverride> { entry ->
+            val home = remember(entry) { navController.getBackStackEntry<Dest.Home>() }
+            val routeModeOwner: HomeViewModel = viewModel(
+                viewModelStoreOwner = home,
+                factory = AppGraph.viewModelFactory,
+            )
+            ConfigurationOverrideRoute(routeModeOwner, snackbarHost, onBack = navController::popBackStack)
         }
         composable<Dest.YamlEditor> { entry ->
             YamlEditorRoute(

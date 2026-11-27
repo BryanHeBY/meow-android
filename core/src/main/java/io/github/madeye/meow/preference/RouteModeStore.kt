@@ -6,8 +6,8 @@ import java.io.File
 import java.io.IOException
 
 /**
- * The route mode the user picked on Home, replayed into every engine start so
- * it survives reconnects and `:vpn` restarts. `null` until the user picks one,
+ * The route mode the user picked on Home or in Advanced settings, replayed into every engine start so
+ * it survives reconnects and `:vpn` restarts. Absent when unset,
  * meaning "follow the profile's `mode:`".
  *
  * The UI process writes it and `:vpn` reads it, so it cannot live in
@@ -36,6 +36,11 @@ class RouteModeStore(private val file: File) {
         } finally {
             tmp.delete()
         }
+    }
+
+    /** Remove the override so the engine can read the next profile's own mode. */
+    fun clear() {
+        if (!file.delete() && file.exists()) throw IOException("cannot remove $file")
     }
 
     companion object {
