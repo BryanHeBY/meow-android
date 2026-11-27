@@ -31,6 +31,7 @@ internal enum class AdvancedOverridePage(val title: Int, val unavailableReason: 
     HOSTS(R.string.advanced_dns_hosts),
     FAKE_IP(R.string.advanced_fake_ip_filter),
     NAMESERVER_POLICY(R.string.advanced_nameserver_policy),
+    DNS_IPV6(R.string.advanced_dns_ipv6),
     DNS(R.string.override_dns, R.string.advanced_dns_unavailable),
     LISTENERS(R.string.advanced_listeners, R.string.advanced_listeners_unavailable),
     CONTROLLER(R.string.advanced_controller, R.string.advanced_controller_unavailable),
@@ -64,6 +65,20 @@ internal fun AdvancedOverrideFields(
         AdvancedOverridePage.CORE -> CoreBehaviorEditor(form, profile, global, onEdit, onSave)
         AdvancedOverridePage.ROUTING -> if (routeModeEditor != null) routeModeEditor() else Unavailable(page)
         else -> Unavailable(page)
+    }
+}
+
+@Composable
+internal fun DnsIpv6Editor(form: OverrideForm, global: Boolean, onEdit: (Boolean?) -> Unit, onSave: () -> Unit) {
+    val value = form.draft.dnsIpv6
+    val inherit = if (global) R.string.override_follow_profile else R.string.override_inherit_global
+    Text(stringResource(R.string.advanced_next_start), style = MaterialTheme.typography.bodySmall)
+    Text(stringResource(R.string.advanced_dns_ipv6_detail), style = MaterialTheme.typography.bodySmall)
+    BooleanSetting(R.string.advanced_dns_ipv6, value, inherit, !form.saving, onEdit)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Button(onClick = onSave, enabled = form.canSave(OverrideSection.DNS_IPV6)) {
+            Text(stringResource(R.string.common_save))
+        }
     }
 }
 

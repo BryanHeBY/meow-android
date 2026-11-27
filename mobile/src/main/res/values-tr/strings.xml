@@ -539,6 +539,8 @@
     <string name="advanced_fake_ip_filter_replace">Kalıpları değiştir</string>
     <string name="advanced_fake_ip_filter_format">Her satıra bir alan adı veya +.example.test gibi bir son ek girin. Boş liste iki modda da filtreleme yapmaz.</string>
     <string name="advanced_fake_ip_filter_invalid">Benzersiz alan adları veya +. son ekleri girin. Kurallar desteklenmez.</string>
+    <string name="advanced_dns_ipv6">IPv6 DNS yanıtları (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">Yalnızca DNS yanıtlarını kontrol eder; IPv6 yönlendirmesini veya ZeroTier’i etkilemez. Yerleşik DNS modunda devralma, bu modun varsayılan davranışını kullanır.</string>
     <string name="advanced_nameserver_policy">DNS sunucusu ilkesi</string>
     <string name="advanced_nameserver_policy_detail">Üst sunucuya ulaşan sorguları yönlendirir. Yerel Fake-IP yanıtları bu kuralları kullanmaz.</string>
     <string name="advanced_nameserver_policy_rows">Sıralı kurallar</string>

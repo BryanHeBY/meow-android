@@ -550,6 +550,8 @@
     <string name="advanced_fake_ip_filter_replace">Replace patterns</string>
     <string name="advanced_fake_ip_filter_format">One domain or +.example.test suffix per line. Empty means no filtering in either mode.</string>
     <string name="advanced_fake_ip_filter_invalid">Enter unique domains or +. suffixes. Rule entries are not supported.</string>
+    <string name="advanced_dns_ipv6">IPv6 DNS answers (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">Controls DNS answers only, not IPv6 routing or ZeroTier. In Built-in DNS, inheriting uses the Built-in default.</string>
     <string name="advanced_nameserver_policy">DNS nameserver policy</string>
     <string name="advanced_nameserver_policy_detail">Routes queries that reach an upstream. Fake-IP answers generated locally do not use these rules.</string>
     <string name="advanced_nameserver_policy_rows">Ordered rules</string>

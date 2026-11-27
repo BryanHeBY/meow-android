@@ -194,7 +194,7 @@ class ConfigReloader(
                     val store = DnsSettingsStore.default
                     val settings = store.load().settings
                     val policy = try {
-                        ConfigurationOverrideStore.default.effective(candidate.profileId).nameserverPolicy
+                        ConfigurationOverrideStore.default.effective(candidate.profileId).dnsWireOverride
                     } catch (_: java.io.IOException) {
                         return@validateCandidate Outcome.CheckDns
                     }

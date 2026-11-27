@@ -591,6 +591,8 @@
     <string name="advanced_fake_ip_filter_replace">استبدال الأنماط</string>
     <string name="advanced_fake_ip_filter_format">نطاق واحد أو لاحقة مثل +.example.test في كل سطر. القائمة الفارغة تعني عدم الترشيح في كلا الوضعين.</string>
     <string name="advanced_fake_ip_filter_invalid">أدخل نطاقات أو لواحق +. فريدة. لا تُدعم القواعد.</string>
+    <string name="advanced_dns_ipv6">إجابات DNS لبروتوكول IPv6 (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">يتحكم في إجابات DNS فقط، دون تأثير على توجيه IPv6 أو ZeroTier. عند استخدام DNS المدمج، يؤدي التوريث إلى استخدام السلوك الافتراضي المدمج.</string>
     <string name="advanced_nameserver_policy">سياسة خوادم DNS</string>
     <string name="advanced_nameserver_policy_detail">توجّه الاستعلامات التي تصل إلى خادم علوي. إجابات Fake-IP المحلية لا تستخدم هذه القواعد.</string>
     <string name="advanced_nameserver_policy_rows">القواعد بالترتيب</string>

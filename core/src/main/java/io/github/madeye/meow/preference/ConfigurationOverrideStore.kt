@@ -54,6 +54,7 @@ data class ConfigurationOverride(
     val dnsHosts: DnsHostsOverride = DnsHostsOverride(),
     val fakeIpFilter: FakeIpFilterOverride = FakeIpFilterOverride(),
     val nameserverPolicy: List<NameserverPolicyRow>? = null,
+    val dnsIpv6: Boolean? = null,
 ) {
     fun withInherited(global: ConfigurationOverride) = ConfigurationOverride(
         ipv6.takeUnless { it == Ipv6Override.INHERIT } ?: global.ipv6,
@@ -62,14 +63,17 @@ data class ConfigurationOverride(
         dnsHosts.withInherited(global.dnsHosts),
         fakeIpFilter.withInherited(global.fakeIpFilter),
         nameserverPolicy ?: global.nameserverPolicy,
+        dnsIpv6 ?: global.dnsIpv6,
     )
+
+    val dnsWireOverride get() = DnsWireOverride(nameserverPolicy, dnsIpv6)
 
     val blocksAppUdp443: Boolean get() = appQuic == AppQuicOverride.BLOCK_UDP_443
 }
 
 /** Both the editor and the store use this section boundary. */
 enum class OverrideSection {
-    MAIN, CORE, HOSTS, FAKE_IP, NAMESERVER_POLICY;
+    MAIN, CORE, HOSTS, FAKE_IP, NAMESERVER_POLICY, DNS_IPV6;
 
     fun patch(target: ConfigurationOverride, source: ConfigurationOverride): ConfigurationOverride = when (this) {
         MAIN -> target.copy(ipv6 = source.ipv6, appQuic = source.appQuic)
@@ -77,6 +81,7 @@ enum class OverrideSection {
         HOSTS -> target.copy(dnsHosts = source.dnsHosts)
         FAKE_IP -> target.copy(fakeIpFilter = source.fakeIpFilter)
         NAMESERVER_POLICY -> target.copy(nameserverPolicy = source.nameserverPolicy?.toList())
+        DNS_IPV6 -> target.copy(dnsIpv6 = source.dnsIpv6)
     }
 
     fun matches(left: ConfigurationOverride, right: ConfigurationOverride): Boolean =
@@ -102,7 +107,7 @@ class ConfigurationOverrideStore(private val directory: File) {
                 return ConfigurationOverride(ipv6 ?: Ipv6Override.INHERIT, quic ?: AppQuicOverride.INHERIT)
             }
             val root = Json.parseToJsonElement(text) as? JsonObject ?: error("expected object")
-            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts", "fakeIpFilter", "nameserverPolicy") }) { "unknown override field" }
+            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts", "fakeIpFilter", "nameserverPolicy", "dnsIpv6") }) { "unknown override field" }
             val version = root["version"]?.jsonPrimitive
             require(version?.isString == false && version.intOrNull == 1) { "unsupported override version" }
             fun enumName(key: String) = root[key]?.jsonPrimitive?.let {
@@ -157,6 +162,10 @@ class ConfigurationOverrideStore(private val directory: File) {
                 DnsHostsOverride(hosts, useHosts),
                 FakeIpFilterOverride(patterns, filterMode),
                 root["nameserverPolicy"]?.let(NameserverPolicyOverride::fromJson),
+                root["dnsIpv6"]?.jsonPrimitive?.let {
+                    require(!it.isString) { "invalid dnsIpv6" }
+                    it.booleanOrNull ?: error("invalid dnsIpv6")
+                },
             )
         } catch (e: IllegalArgumentException) {
             throw IOException("Cannot read configuration override", e)
@@ -217,6 +226,7 @@ class ConfigurationOverrideStore(private val directory: File) {
             val fakeIp = override.fakeIpFilter.toJson()
             if (fakeIp.isNotEmpty()) put("fakeIpFilter", fakeIp)
             override.nameserverPolicy?.let { put("nameserverPolicy", NameserverPolicyOverride.toJson(it)) }
+            override.dnsIpv6?.let { put("dnsIpv6", JsonPrimitive(it)) }
         })
         val temp = File.createTempFile("override-", ".tmp", directory)
         try {

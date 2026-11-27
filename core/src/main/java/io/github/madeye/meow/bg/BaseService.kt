@@ -224,9 +224,9 @@ object BaseService {
                 MeowCore::nativeCheckCachedDns,
                 policyFor = { profile ->
                     if (state == State.Connected && running?.activeConfig == profile) {
-                        running?.appliedOverride?.nameserverPolicy
+                        running?.appliedOverride?.dnsWireOverride
                     } else {
-                        ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                        ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
                     }
                 },
             ) { selected, scoped, staged, target ->
@@ -268,9 +268,9 @@ object BaseService {
             val running = data?.meowInstance
             val issue = rejection ?: store.activationIssue(saved.settings, selected, policyFor = { profile ->
                 if (data?.state == State.Connected && running?.activeConfig == profile) {
-                    running?.appliedOverride?.nameserverPolicy
+                    running?.appliedOverride?.dnsWireOverride
                 } else {
-                    ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                    ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
                 }
             }, validate = MeowCore::nativeCheckCachedDns)
             val lastSave = data?.dnsSaveRejection?.takeIf { it.selection == selected }?.issue
@@ -382,7 +382,7 @@ object BaseService {
                     val settings = store.load().settings
                     val issue = withContext(Dispatchers.IO) {
                         store.activationIssue(settings, candidate, policyFor = { profile ->
-                            ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                            ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
                         }, validate = MeowCore::nativeCheckCachedDns)
                     }
                     if (data.state != State.Connected || data.meowInstance !== running) return@launch

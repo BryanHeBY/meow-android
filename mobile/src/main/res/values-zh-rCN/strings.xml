@@ -529,6 +529,8 @@
     <string name="advanced_fake_ip_filter_replace">替换域名模式</string>
     <string name="advanced_fake_ip_filter_format">每行一个域名或 +.example.test 后缀。两种模式下，空列表均表示不过滤。</string>
     <string name="advanced_fake_ip_filter_invalid">请输入不重复的域名或 +. 后缀。不支持规则条目。</string>
+    <string name="advanced_dns_ipv6">IPv6 DNS 应答（AAAA）</string>
+    <string name="advanced_dns_ipv6_detail">仅控制 DNS 应答，不影响 IPv6 路由或 ZeroTier。使用内置 DNS 时，继承采用内置默认行为。</string>
     <string name="advanced_nameserver_policy">DNS 上游策略</string>
     <string name="advanced_nameserver_policy_detail">策略用于发往上游的查询。本地生成的 Fake-IP 应答不会使用这些规则。</string>
     <string name="advanced_nameserver_policy_rows">有序规则</string>

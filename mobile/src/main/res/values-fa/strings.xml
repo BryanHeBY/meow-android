@@ -547,6 +547,8 @@
     <string name="advanced_fake_ip_filter_replace">جایگزینی الگوها</string>
     <string name="advanced_fake_ip_filter_format">در هر خط یک دامنه یا پسوند مانند +.example.test وارد کنید. فهرست خالی در هر دو حالت یعنی بدون فیلتر.</string>
     <string name="advanced_fake_ip_filter_invalid">دامنه‌ها یا پسوندهای +. یکتا وارد کنید. قواعد پشتیبانی نمی‌شوند.</string>
+    <string name="advanced_dns_ipv6">پاسخ‌های DNS برای IPv6 (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">فقط پاسخ‌های DNS را کنترل می‌کند، نه مسیریابی IPv6 یا ZeroTier. در DNS داخلی، ارث‌بری از رفتار پیش‌فرض داخلی استفاده می‌کند.</string>
     <string name="advanced_nameserver_policy">سیاست سرورهای DNS</string>
     <string name="advanced_nameserver_policy_detail">درخواست‌هایی را که به بالادست می‌رسند مسیریابی می‌کند. پاسخ‌های محلی Fake-IP از این قواعد استفاده نمی‌کنند.</string>
     <string name="advanced_nameserver_policy_rows">قواعد مرتب</string>

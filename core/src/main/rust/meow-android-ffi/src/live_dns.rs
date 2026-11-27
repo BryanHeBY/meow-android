@@ -515,6 +515,111 @@ mod tests {
     }
 
     #[test]
+    fn dns_ipv6_wire_override_survives_builtin_start_and_live_profile_switch() {
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let profile = "ipv6: false\nhosts: { 'wire.test': '2001:db8::53' }\ndns:\n  ipv6: true\n  use-hosts: true\n  nameserver: ['rcode://refused']\nrules: ['MATCH,DIRECT']\n";
+        let explicit_off = NameserverPolicyOverride::decode(r#"{"ipv6":false}"#).unwrap();
+        let ask = |dns: &meow_dns::Resolver, answers| {
+            let query = dns_query("wire.test", 28);
+            let reply = rt
+                .block_on(meow_dns::DnsServer::handle_query(&query, dns))
+                .unwrap();
+            assert_eq!(reply[3] & 0xf, 0);
+            assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), answers);
+        };
+
+        // Real Built-in startup overlay, with all unrelated upstreams replaced
+        // by local synthetic REFUSED before any query can leave this fixture.
+        let builtin_fixture = rt
+            .block_on(engine::load_profile_with_policy(
+                profile,
+                &DnsUpstreams::Builtin,
+                &explicit_off,
+                |stripped| async move {
+                    let mut raw = meow_config::parse_raw_yaml(&stripped)?;
+                    let dns = raw.dns.as_mut().unwrap();
+                    dns.nameserver = Some(vec!["rcode://refused".into()]);
+                    dns.default_nameserver = dns.nameserver.clone();
+                    dns.proxy_server_nameserver = dns.nameserver.clone();
+                    engine::build_startup_config(raw, None).await
+                },
+            ))
+            .unwrap();
+        ask(&builtin_fixture.config.dns.resolver, 0);
+
+        let running = start_with_policy(
+            Some(profile),
+            DnsUpstreams::Builtin,
+            "dns-ipv6-live",
+            false,
+            explicit_off,
+        );
+        apply(DnsUpstreams::Profile).unwrap();
+        ask(&resolver(), 0);
+        drop(running);
+
+        let _cold = start_with_policy(
+            Some(profile),
+            DnsUpstreams::Profile,
+            "dns-ipv6-cold",
+            false,
+            NameserverPolicyOverride::default(),
+        );
+        ask(&resolver(), 1);
+    }
+
+    #[test]
+    fn dns_ipv6_custom_mode_uses_authored_or_explicit_policy_with_outbound_ipv6_disabled() {
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let custom = DnsUpstreams::decode(
+            r#"{"version":1,"mode":"custom","profileId":41,"upstreams":[{"transport":"tcp","endpoint":"127.0.0.1:1","egress":"proxy","proxy":"Node"}]}"#,
+        ).unwrap();
+        for (authored, wire, expected) in [
+            (true, "null", true),
+            (true, r#"{"ipv6":false}"#, false),
+            (false, r#"{"ipv6":true}"#, true),
+        ] {
+            let profile = format!(
+                "ipv6: false\nproxies: [{{name: Node, type: http, server: 127.0.0.1, port: 1}}]\ndns:\n  ipv6: {authored}\n  fake-ip-range6: 'fdfe:dcba:9877::/64'\n  nameserver: ['rcode://refused']\nrules: ['MATCH,DIRECT']\n"
+            );
+            let snapshot = NameserverPolicyOverride::decode(wire).unwrap();
+            custom.check_cached_profile(&profile, &snapshot).unwrap();
+            let loaded = rt
+                .block_on(engine::load_profile_with_policy(
+                    &profile,
+                    &custom,
+                    &snapshot,
+                    |stripped| async move {
+                        let raw = meow_config::parse_raw_yaml(&stripped)?;
+                        assert!(!meow_config::effective_ipv6(raw.ipv6));
+                        engine::build_startup_config(raw, None).await
+                    },
+                ))
+                .unwrap();
+            let resolver = &loaded.config.dns.resolver;
+            for (qtype, present) in [(1, true), (28, expected)] {
+                let query = dns_query("wire.test", qtype);
+                let reply = rt
+                    .block_on(meow_dns::DnsServer::handle_query(&query, resolver))
+                    .unwrap();
+                assert_eq!(reply[3] & 0xf, 0, "{authored}: {wire}");
+                assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), u16::from(present));
+                if present && qtype == 28 {
+                    let tail: [u8; 16] = reply[reply.len() - 16..].try_into().unwrap();
+                    assert_eq!(
+                        resolver
+                            .reverse_lookup(std::net::Ipv6Addr::from(tail).into())
+                            .as_deref(),
+                        Some("wire.test")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ordered_nameserver_policy_snapshot_routes_real_dns_and_survives_live_changes() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

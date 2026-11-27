@@ -529,6 +529,8 @@
     <string name="advanced_fake_ip_filter_replace">Thay thế mẫu tên miền</string>
     <string name="advanced_fake_ip_filter_format">Mỗi dòng nhập một tên miền hoặc hậu tố như +.example.test. Danh sách trống không lọc ở cả hai chế độ.</string>
     <string name="advanced_fake_ip_filter_invalid">Nhập tên miền hoặc hậu tố +. không trùng nhau. Không hỗ trợ mục dạng quy tắc.</string>
+    <string name="advanced_dns_ipv6">Câu trả lời DNS cho IPv6 (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">Chỉ điều khiển câu trả lời DNS, không ảnh hưởng đến định tuyến IPv6 hay ZeroTier. Khi dùng DNS tích hợp, tùy chọn kế thừa sẽ dùng hành vi mặc định của chế độ này.</string>
     <string name="advanced_nameserver_policy">Chính sách máy chủ DNS</string>
     <string name="advanced_nameserver_policy_detail">Định tuyến truy vấn được gửi đến máy chủ thượng nguồn. Câu trả lời Fake-IP tạo cục bộ không dùng các quy tắc này.</string>
     <string name="advanced_nameserver_policy_rows">Quy tắc theo thứ tự</string>

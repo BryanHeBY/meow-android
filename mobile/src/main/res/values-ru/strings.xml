@@ -559,6 +559,8 @@
     <string name="advanced_fake_ip_filter_replace">Заменить шаблоны</string>
     <string name="advanced_fake_ip_filter_format">Один домен или суффикс вида +.example.test на строку. Пустой список отключает фильтрацию в обоих режимах.</string>
     <string name="advanced_fake_ip_filter_invalid">Укажите уникальные домены или суффиксы +. Правила не поддерживаются.</string>
+    <string name="advanced_dns_ipv6">Ответы DNS для IPv6 (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">Настройка влияет только на ответы DNS, а не на маршрутизацию IPv6 или ZeroTier. Во встроенном режиме DNS наследование сохраняет поведение этого режима по умолчанию.</string>
     <string name="advanced_nameserver_policy">Политика DNS-серверов</string>
     <string name="advanced_nameserver_policy_detail">Действует для запросов к вышестоящим серверам. Локальные ответы Fake-IP эти правила не используют.</string>
     <string name="advanced_nameserver_policy_rows">Правила по порядку</string>

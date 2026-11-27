@@ -4,8 +4,7 @@ import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.database.PrivateDatabase
 import io.github.madeye.meow.database.storeFetched
-import io.github.madeye.meow.preference.NameserverPolicyOverride
-import io.github.madeye.meow.preference.NameserverPolicyRow
+import io.github.madeye.meow.preference.DnsWireOverride
 import io.github.madeye.meow.preference.DnsSettings
 import io.github.madeye.meow.subscription.SubscriptionService
 import io.github.madeye.meow.vpn.ConfigReloader
@@ -132,11 +131,11 @@ class ConfigValidator {
     suspend fun validate(
         yaml: String,
         dns: DnsSettings = DnsSettings(),
-        nameserverPolicy: List<NameserverPolicyRow>? = null,
+        wireOverride: DnsWireOverride = DnsWireOverride(),
     ): String? = withContext(Dispatchers.IO) {
         // The native call reports a status code; the message lives in a
         // separate last-error slot.
-        if (MeowCore.nativeValidateConfig(yaml, dns.encode(), NameserverPolicyOverride.wire(nameserverPolicy)) == 0) null else MeowCore.nativeGetLastError()
+        if (MeowCore.nativeValidateConfig(yaml, dns.encode(), wireOverride.wire()) == 0) null else MeowCore.nativeGetLastError()
     }
 
     suspend fun validateStructure(yaml: String): String? = withContext(Dispatchers.IO) {

@@ -98,4 +98,23 @@ class NameserverPolicyOverrideTest {
             "x.test udp://192.0.2.53:53\nX.TEST. tcp://192.0.2.53:53",
         )) assertNull(row, NameserverPolicyOverride.parseRows(row))
     }
+
+    @Test
+    fun `DNS IPv6 tri-state is independent and saved with section isolation`() {
+        val store = ConfigurationOverrideStore(temporary.newFolder())
+        val base = store.load()
+        val allowed = base.copy(dnsIpv6 = true)
+        store.saveSection(null, OverrideSection.DNS_IPV6, base, allowed)
+        assertEquals(true, store.effective(3).dnsIpv6)
+        val profile = store.load(3)
+        store.saveSection(3, OverrideSection.DNS_IPV6, profile, profile.copy(dnsIpv6 = false))
+        assertEquals(false, store.effective(3).dnsIpv6)
+        val rows = NameserverPolicyOverride.parseRows("example.test udp://127.0.0.1:53")!!
+        store.saveSection(3, OverrideSection.NAMESERVER_POLICY, profile, profile.copy(nameserverPolicy = rows))
+        assertEquals(DnsWireOverride(rows, false), store.effective(3).dnsWireOverride)
+        assertEquals(base.ipv6, store.effective(3).ipv6)
+        val latest = store.load(3)
+        store.saveSection(3, OverrideSection.DNS_IPV6, latest, latest.copy(dnsIpv6 = null))
+        assertEquals(DnsWireOverride(rows, true), store.effective(3).dnsWireOverride)
+    }
 }

@@ -13,7 +13,7 @@ class DnsSettingsStore(private val file: File) {
     private data class Check(
         val profile: ActiveConfig,
         val settings: DnsSettings,
-        val nameserverPolicy: List<NameserverPolicyRow>?,
+        val wireOverride: DnsWireOverride,
         val issue: DnsIssue?,
     )
 
@@ -41,7 +41,7 @@ class DnsSettingsStore(private val file: File) {
     internal fun activationIssue(
         settings: DnsSettings,
         profile: ActiveConfig?,
-        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>? = { null },
+        policyFor: (ActiveConfig) -> DnsWireOverride? = { null },
         validate: (String, String, String) -> String?,
     ): DnsIssue? {
         if (settings.mode == DnsMode.SPLIT) return DnsIssue.SPLIT_UNAVAILABLE
@@ -56,14 +56,14 @@ class DnsSettingsStore(private val file: File) {
     private fun checkNamed(
         profile: ActiveConfig,
         settings: DnsSettings,
-        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>?,
+        policyFor: (ActiveConfig) -> DnsWireOverride?,
         validate: (String, String, String) -> String?,
     ): DnsIssue? {
-        val policy = try { policyFor(profile)?.toList() } catch (_: IOException) { return DnsIssue.INVALID_SETTINGS }
+        val policy = try { policyFor(profile)?.snapshot() ?: DnsWireOverride() } catch (_: IOException) { return DnsIssue.INVALID_SETTINGS }
         checked?.let {
-            if (it.profile == profile && it.settings == settings && it.nameserverPolicy == policy) return it.issue
+            if (it.profile == profile && it.settings == settings && it.wireOverride == policy) return it.issue
         }
-        val issue = validate(profile.yaml, settings.encode(), NameserverPolicyOverride.wire(policy))?.let(DnsIssue::fromWire)
+        val issue = validate(profile.yaml, settings.encode(), policy.wire())?.let(DnsIssue::fromWire)
         checked = Check(profile, settings, policy, issue)
         return issue
     }
@@ -75,7 +75,7 @@ class DnsSettingsStore(private val file: File) {
         expectedProfileId: Long?,
         selected: () -> ActiveConfig?,
         validate: (String, String, String) -> String?,
-        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>? = { null },
+        policyFor: (ActiveConfig) -> DnsWireOverride? = { null },
         publish: (ActiveConfig?, DnsSettings, File, File) -> DnsIssue?,
     ): DnsIssue? {
         if (wire.toByteArray().size > DnsSettings.MAX_WIRE_BYTES) return DnsIssue.INVALID_SETTINGS

@@ -534,6 +534,8 @@
     <string name="advanced_fake_ip_filter_replace">ပုံစံများ အစားထိုးရန်</string>
     <string name="advanced_fake_ip_filter_format">တစ်ကြောင်းလျှင် ဒိုမိန်းတစ်ခု သို့မဟုတ် +.example.test ကဲ့သို့ နောက်ဆက်တစ်ခု ထည့်ပါ။ စာရင်းအလွတ်ဆိုလျှင် နှစ်မျိုးစလုံးတွင် မစစ်ထုတ်ပါ။</string>
     <string name="advanced_fake_ip_filter_invalid">မထပ်သော ဒိုမိန်း သို့မဟုတ် +. နောက်ဆက်များ ထည့်ပါ။ စည်းမျဉ်းများကို မပံ့ပိုးပါ။</string>
+    <string name="advanced_dns_ipv6">IPv6 DNS အဖြေများ (AAAA)</string>
+    <string name="advanced_dns_ipv6_detail">DNS အဖြေများကိုသာ ထိန်းချုပ်ပြီး IPv6 လမ်းကြောင်းသတ်မှတ်မှု သို့မဟုတ် ZeroTier ကို မပြောင်းလဲပါ။ ထည့်သွင်းပါရှိသော DNS တွင် အမွေဆက်ခံပါက မူလသတ်မှတ်ချက်ကို သုံးပါမည်။</string>
     <string name="advanced_nameserver_policy">DNS အထက်ဆင့် ဆာဗာမူဝါဒ</string>
     <string name="advanced_nameserver_policy_detail">အထက်ဆင့်ဆာဗာသို့ ရောက်သည့် မေးမြန်းမှုများအတွက် ဖြစ်သည်။ စက်တွင်း Fake-IP အဖြေများတွင် ဤစည်းမျဉ်းများကို မသုံးပါ။</string>
     <string name="advanced_nameserver_policy_rows">အစဉ်လိုက် စည်းမျဉ်းများ</string>

@@ -8,7 +8,17 @@ use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct NameserverPolicyOverride(Option<Vec<(String, String)>>);
+pub(crate) struct NameserverPolicyOverride {
+    rows: Option<Vec<(String, String)>>,
+    dns_ipv6: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct Snapshot {
+    nameserver_policy: Option<Vec<Row>>,
+    ipv6: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,10 +38,23 @@ enum Transport {
 impl NameserverPolicyOverride {
     pub(crate) fn decode(wire: &str) -> Result<Self> {
         ensure!(wire.len() <= 16_384, "DNS policy exceeds size limit");
-        let Some(rows) =
-            serde_json::from_str::<Option<Vec<Row>>>(wire).context("invalid DNS policy")?
-        else {
-            return Ok(Self(None));
+        // Keep the formats disjoint. Struct deserializers can accept a
+        // positional sequence; only a JSON object may carry DNS IPv6.
+        // Deserialize directly so duplicate object fields are not collapsed.
+        let (rows, dns_ipv6) = if wire.trim_start().starts_with('{') {
+            let snapshot: Snapshot = serde_json::from_str(wire).context("invalid DNS snapshot")?;
+            (snapshot.nameserver_policy, Some(snapshot.ipv6))
+        } else {
+            (
+                serde_json::from_str::<Option<Vec<Row>>>(wire).context("invalid DNS policy")?,
+                None,
+            )
+        };
+        let Some(rows) = rows else {
+            return Ok(Self {
+                rows: None,
+                dns_ipv6,
+            });
         };
         ensure!(rows.len() <= 32, "DNS policy exceeds row limit");
         let mut patterns = HashSet::new();
@@ -75,11 +98,17 @@ impl NameserverPolicyOverride {
             };
             validated.push((row.pattern, format!("{scheme}://{address}")));
         }
-        Ok(Self(Some(validated)))
+        Ok(Self {
+            rows: Some(validated),
+            dns_ipv6,
+        })
     }
 
     pub(crate) fn apply(&self, dns: &mut Mapping) {
-        if let Some(rows) = &self.0 {
+        if let Some(ipv6) = self.dns_ipv6 {
+            dns.insert("ipv6".into(), Value::Bool(ipv6));
+        }
+        if let Some(rows) = &self.rows {
             // Mapping's insertion order is retained through serde_yaml and
             // the core's RawNameserverPolicy. An empty map clears explicitly.
             let mut policy = Mapping::new();
@@ -109,6 +138,71 @@ fn valid_domain(domain: &str) -> bool {
 mod tests {
     use super::*;
     use crate::dns_override::{engine_dns_block, DnsUpstreams};
+
+    #[test]
+    fn dns_ipv6_override_separates_builtin_defaults_and_authored_dns() {
+        let profile = Some(serde_yaml::from_str::<Value>("ipv6: true").unwrap());
+        let key = Value::String("ipv6".into());
+        let inherit = NameserverPolicyOverride::decode("null").unwrap();
+        let builtin = engine_dns_block(profile.clone(), &DnsUpstreams::Builtin, &inherit).unwrap();
+        assert!(!builtin.contains_key(&key));
+        let preserved = engine_dns_block(profile.clone(), &DnsUpstreams::Cn, &inherit).unwrap();
+        assert_eq!(preserved.get(&key), Some(&Value::Bool(true)));
+
+        let no_aaaa =
+            NameserverPolicyOverride::decode(r#"{"nameserverPolicy":[],"ipv6":false}"#).unwrap();
+        let allow_aaaa =
+            NameserverPolicyOverride::decode(r#"{"nameserverPolicy":null,"ipv6":true}"#).unwrap();
+        for mode in [DnsUpstreams::Builtin, DnsUpstreams::Cn] {
+            let suppressed = engine_dns_block(profile.clone(), &mode, &no_aaaa).unwrap();
+            let allowed = engine_dns_block(profile.clone(), &mode, &allow_aaaa).unwrap();
+            assert_eq!(suppressed.get(&key), Some(&Value::Bool(false)));
+            assert_eq!(allowed.get(&key), Some(&Value::Bool(true)));
+            assert!(suppressed["nameserver-policy"]
+                .as_mapping()
+                .unwrap()
+                .is_empty());
+        }
+        for wire in [
+            r#"{"ipv6":"true"}"#,
+            r#"{"ipv6":null}"#,
+            r#"{"ipv6":true,"extra":0}"#,
+        ] {
+            assert!(NameserverPolicyOverride::decode(wire).is_err());
+        }
+        assert_eq!(profile.unwrap().get("ipv6"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn dns_snapshot_never_reinterprets_legacy_arrays_and_rejects_duplicate_fields() {
+        for malformed in [
+            "[null,false]",
+            "[[],true]",
+            "  [null, true]",
+            r#"{"ipv6":true,"dynamic":false}"#,
+            r#"{"ipv6":false,"ipv6":true}"#,
+            r#"{"nameserverPolicy":[],"ipv6":true,"nameserverPolicy":null}"#,
+        ] {
+            assert!(
+                NameserverPolicyOverride::decode(malformed).is_err(),
+                "{malformed}"
+            );
+        }
+        let mut dns = Mapping::new();
+        for legacy in [
+            "null",
+            "[]",
+            r#"[{"pattern":"example.test","transport":"UDP","endpoint":"127.0.0.1:53"}]"#,
+        ] {
+            NameserverPolicyOverride::decode(legacy)
+                .unwrap()
+                .apply(&mut dns);
+            assert!(!dns.contains_key("ipv6"));
+        }
+        let snapshot = NameserverPolicyOverride::decode(r#"  {"ipv6":false}"#).unwrap();
+        snapshot.apply(&mut dns);
+        assert_eq!(dns.get("ipv6"), Some(&Value::Bool(false)));
+    }
 
     #[test]
     fn only_safe_typed_rules_enter_the_snapshot() {

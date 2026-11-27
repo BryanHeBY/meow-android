@@ -114,12 +114,17 @@ class DnsSettingsStoreTest {
             "example.test udp://127.0.0.1:53\n+.example.test tcp://127.0.0.1:54",
         )!!
         assertEquals(DnsIssue.RESOLVER_REJECTED, store.activationIssue(scoped, first, { null }, validate))
-        assertNull(store.activationIssue(scoped, first, { emptyList() }, validate))
-        assertNull(store.activationIssue(scoped, first, { emptyList() }, validate))
-        assertNull(store.activationIssue(scoped, first, { rows }, validate))
-        assertNull(store.activationIssue(scoped, first, { rows.reversed() }, validate))
+        assertNull(store.activationIssue(scoped, first, { DnsWireOverride(emptyList()) }, validate))
+        assertNull(store.activationIssue(scoped, first, { DnsWireOverride(emptyList()) }, validate))
+        assertNull(store.activationIssue(scoped, first, { DnsWireOverride(rows) }, validate))
+        assertNull(store.activationIssue(scoped, first, { DnsWireOverride(rows.reversed()) }, validate))
+        val suppress = DnsWireOverride(rows, false)
+        val allow = DnsWireOverride(rows, true)
+        assertNull(store.activationIssue(scoped, first, { suppress }, validate))
+        assertNull(store.activationIssue(scoped, first, { suppress }, validate))
+        assertNull(store.activationIssue(scoped, first, { allow }, validate))
         assertEquals(listOf("null", "[]", NameserverPolicyOverride.wire(rows),
-            NameserverPolicyOverride.wire(rows.reversed())), seen)
+            NameserverPolicyOverride.wire(rows.reversed()), suppress.wire(), allow.wire()), seen)
     }
 
     @Test
