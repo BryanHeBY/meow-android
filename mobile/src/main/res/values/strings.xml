@@ -558,7 +558,11 @@
     <string name="advanced_dns_fallback">Fallback DNS</string>
     <string name="advanced_dns_mode_default">Use DNS mode default</string>
     <string name="advanced_dns_fallback_next_connection">Saved fallback DNS changes apply the next time the VPN connects.</string>
-    <string name="advanced_dns_fallback_detail">Replaces both the fallback servers and filters. Domain matches query fallback first; CIDR matches reject ordinary address answers. Fallback can also be tried when primary DNS fails. Replace does not use GeoIP.</string>
+    <string name="advanced_dns_fallback_detail">Replaces both the fallback servers and filters. Domain matches query fallback first; CIDR matches reject ordinary address answers. Fallback can also be tried when primary DNS fails.</string>
+    <string name="advanced_dns_fallback_geoip">Country filter (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">Country code (two letters)</string>
+    <string name="advanced_dns_fallback_geoip_detail">Checks primary answers against the bundled country database.</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">The bundled country database is missing or invalid. Turn off the country filter to save.</string>
     <string name="advanced_dns_fallback_upstreams">Numeric UDP/TCP servers (udp://IP:port, one per line)</string>
     <string name="advanced_dns_fallback_domains">Domains (exact or +.suffix, one per line)</string>
     <string name="advanced_dns_fallback_cidrs">Address networks (CIDR, one per line)</string>

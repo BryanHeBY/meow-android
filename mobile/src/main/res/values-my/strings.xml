@@ -542,7 +542,11 @@
     <string name="advanced_dns_fallback">အရန် DNS</string>
     <string name="advanced_dns_mode_default">မူလသတ်မှတ်ထားသော DNS မုဒ်အပြုအမူကို သုံးရန်</string>
     <string name="advanced_dns_fallback_next_connection">သိမ်းထားသော အရန် DNS အပြောင်းအလဲများသည် VPN နောက်တစ်ကြိမ် ချိတ်ဆက်ချိန်တွင် သက်ရောက်မည်။</string>
-    <string name="advanced_dns_fallback_detail">အရန်ဆာဗာများနှင့် စစ်ထုတ်မှုများကို အတူအစားထိုးသည်။ ဒိုမိန်းကိုက်ညီလျှင် အရန်ဆာဗာကို ဦးစွာမေးမြန်းပြီး CIDR ကိုက်ညီလျှင် ပုံမှန်လိပ်စာအဖြေကို ပယ်ချသည်။ ပင်မ DNS မအောင်မြင်လျှင်လည်း အရန်ကို သုံးနိုင်သည်။ အစားထိုးမုဒ်တွင် GeoIP မသုံးပါ။</string>
+    <string name="advanced_dns_fallback_detail">အရန်ဆာဗာများနှင့် စစ်ထုတ်မှုများကို အတူအစားထိုးသည်။ ဒိုမိန်းကိုက်ညီလျှင် အရန်ဆာဗာကို ဦးစွာမေးမြန်းပြီး CIDR ကိုက်ညီလျှင် ပုံမှန်လိပ်စာအဖြေကို ပယ်ချသည်။ ပင်မ DNS မအောင်မြင်လျှင်လည်း အရန်ကို သုံးနိုင်သည်။</string>
+    <string name="advanced_dns_fallback_geoip">နိုင်ငံ စစ်ထုတ်မှု (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">နိုင်ငံကုဒ် (စာလုံးနှစ်လုံး)</string>
+    <string name="advanced_dns_fallback_geoip_detail">အက်ပ်တွဲဖက် နိုင်ငံဒေတာဘေ့စ်ဖြင့် ပင်မ DNS အဖြေများကို စစ်ဆေးသည်။</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">အက်ပ်တွဲဖက် နိုင်ငံဒေတာဘေ့စ် ပျောက်ဆုံးနေသည် သို့မဟုတ် မမှန်ကန်ပါ။ သိမ်းရန် နိုင်ငံစစ်ထုတ်မှုကို ပိတ်ပါ။</string>
     <string name="advanced_dns_fallback_upstreams">ကိန်းဂဏန်းလိပ်စာသုံး UDP/TCP ဆာဗာများ (udp://IP:port၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>
     <string name="advanced_dns_fallback_domains">ဒိုမိန်းများ (အတိအကျ သို့မဟုတ် +. နောက်ဆက်၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>
     <string name="advanced_dns_fallback_cidrs">ကွန်ရက်လိပ်စာများ (CIDR၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>

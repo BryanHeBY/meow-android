@@ -221,7 +221,12 @@ object BaseService {
             val request = ActiveConfig.of(Core.currentProfile)
             val issue = DnsSettingsStore.default.commit(
                 settings, expected, { ActiveConfig.of(Core.currentProfile) },
-                MeowCore::nativeCheckCachedDns,
+                { yaml, wire, policy ->
+                    val frozenId = request?.profileId?.takeIf {
+                        state == State.Connected && running?.activeConfig == request
+                    } ?: 0L
+                    MeowCore.nativeCheckCachedDnsForProfile(yaml, wire, policy, frozenId)
+                },
                 policyFor = { profile ->
                     if (state == State.Connected && running?.activeConfig == profile) {
                         running?.appliedOverride?.dnsWireOverride
@@ -272,7 +277,12 @@ object BaseService {
                 } else {
                     ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
                 }
-            }, validate = MeowCore::nativeCheckCachedDns)
+            }, validate = { yaml, wire, policy ->
+                val frozenId = selected?.profileId?.takeIf {
+                    data?.state == State.Connected && running?.activeConfig == selected
+                } ?: 0L
+                MeowCore.nativeCheckCachedDnsForProfile(yaml, wire, policy, frozenId)
+            })
             val lastSave = data?.dnsSaveRejection?.takeIf { it.selection == selected }?.issue
             val scope = saved.settings.applicability(selected?.profileId)
             val applicability = when {

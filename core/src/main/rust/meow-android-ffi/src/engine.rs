@@ -66,14 +66,28 @@ impl Drop for StartupTcpPolicy {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn build_startup_config(
     raw: RawConfig,
     cache_dir: Option<&Path>,
 ) -> Result<Config> {
+    build_startup_config_with_geodata(raw, cache_dir, None).await
+}
+
+pub(crate) async fn build_startup_config_with_geodata(
+    raw: RawConfig,
+    cache_dir: Option<&Path>,
+    prepared: Option<&meow_config::PreparedFallbackGeoIp>,
+) -> Result<Config> {
     meow_common::dial::set_tcp_concurrent(meow_config::effective_tcp_concurrent(
         raw.tcp_concurrent,
     ));
-    meow_config::build_config(raw, cache_dir).await
+    match prepared {
+        Some(prepared) => {
+            meow_config::build_config_with_fallback_geoip(raw, cache_dir, prepared).await
+        }
+        None => meow_config::build_config(raw, cache_dir).await,
+    }
 }
 
 pub(crate) use crate::dns_override::DnsUpstreams;
@@ -301,6 +315,7 @@ pub(crate) async fn load_stripped_config(
     upstreams: &DnsUpstreams,
     policy: &NameserverPolicyOverride,
     startup_logs: &mut crate::log_level::StartupLogLevel<'_>,
+    prepared: Option<&meow_config::PreparedFallbackGeoIp>,
 ) -> Result<Loaded<Config>> {
     let original = std::fs::read_to_string(config_path)
         .with_context(|| format!("reading config from {config_path}"))?;
@@ -319,7 +334,7 @@ pub(crate) async fn load_stripped_config(
             let raw = meow_config::load_raw_config(path).await?;
             startup_logs.apply(raw.log_level.as_deref());
             let cache_dir = meow_config::resource_cache_dir_for_config_path(path);
-            build_startup_config(raw, Some(&cache_dir)).await
+            build_startup_config_with_geodata(raw, Some(&cache_dir), prepared).await
         })
     };
     load_profile_with_policy(&original, upstreams, policy, load).await

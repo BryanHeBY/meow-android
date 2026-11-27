@@ -103,6 +103,22 @@ class DnsSettingsStoreTest {
     }
 
     @Test
+    fun `temporary missing country data cannot cache a stale negative preflight`() {
+        val scoped = named.copy(profileId = first.profileId)
+        val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))
+        val policy = DnsWireOverride(fallback = configured)
+        var checks = 0
+        val validate: (String, String, String) -> String? = { _, _, wire ->
+            assertEquals(policy.wire(), wire)
+            DnsIssue.GEOIP_UNAVAILABLE.name.takeIf { checks++ == 0 }
+        }
+        assertEquals(DnsIssue.GEOIP_UNAVAILABLE, store.activationIssue(scoped, first, { policy }, validate))
+        assertNull(store.activationIssue(scoped, first, { policy }, validate))
+        assertNull(store.activationIssue(scoped, first, { policy }, validate))
+        assertEquals(2, checks)
+    }
+
+    @Test
     fun `named DNS cache distinguishes inherit clear and ordered policy identity`() {
         val scoped = named.copy(profileId = first.profileId)
         val seen = mutableListOf<String>()

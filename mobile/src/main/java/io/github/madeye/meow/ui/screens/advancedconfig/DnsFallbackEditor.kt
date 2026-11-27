@@ -8,6 +8,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -16,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import io.github.madeye.meow.R
 import io.github.madeye.meow.preference.DnsFallbackOverride
 import io.github.madeye.meow.ui.components.GlassCard
@@ -45,14 +48,17 @@ internal fun DnsFallbackEditor(
     var upstreams by remember(saved) { mutableStateOf(replacement?.endpoints.orEmpty().joinToString("\n") { it.display() }) }
     var domains by remember(saved) { mutableStateOf(replacement?.domains.orEmpty().joinToString("\n")) }
     var cidrs by remember(saved) { mutableStateOf(replacement?.cidrs.orEmpty().joinToString("\n")) }
-    val parsed = DnsFallbackOverride.parse(upstreams, domains, cidrs)
+    var filterByCountry by remember(saved) { mutableStateOf(replacement?.geoIpCountry != null) }
+    var country by remember(saved) { mutableStateOf(replacement?.geoIpCountry.orEmpty()) }
+    fun parse() = DnsFallbackOverride.parse(upstreams, domains, cidrs, country.takeIf { filterByCountry })
+    val parsed = parse()
     val invalid = choice == FallbackChoice.REPLACE && parsed == null
     val enabled = !form.saving
     fun applyDraft() {
         when (choice) {
             FallbackChoice.INHERIT -> onEdit(null)
             FallbackChoice.DISABLED -> onEdit(DnsFallbackOverride.Disabled)
-            FallbackChoice.REPLACE -> DnsFallbackOverride.parse(upstreams, domains, cidrs)?.let(onEdit)
+            FallbackChoice.REPLACE -> parse()?.let(onEdit)
         }
     }
     Text(stringResource(R.string.advanced_dns_fallback_next_connection), style = MaterialTheme.typography.bodySmall)
@@ -72,6 +78,26 @@ internal fun DnsFallbackEditor(
             FallbackInput(R.string.advanced_dns_fallback_upstreams, upstreams, 512, enabled) { upstreams = it; applyDraft() }
             FallbackInput(R.string.advanced_dns_fallback_domains, domains, 2048, enabled) { domains = it; applyDraft() }
             FallbackInput(R.string.advanced_dns_fallback_cidrs, cidrs, 896, enabled) { cidrs = it; applyDraft() }
+            val countryFilterLabel = stringResource(R.string.advanced_dns_fallback_geoip)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(countryFilterLabel)
+                Switch(modifier = Modifier.semantics { contentDescription = countryFilterLabel },
+                    checked = filterByCountry, enabled = enabled, onCheckedChange = {
+                    filterByCountry = it
+                    applyDraft()
+                })
+            }
+            if (filterByCountry) OutlinedTextField(
+                value = country, onValueChange = {
+                    if (it.length <= 2 && it.all { char -> char in 'A'..'Z' || char in 'a'..'z' }) {
+                        country = it.uppercase()
+                        applyDraft()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(), enabled = enabled, singleLine = true,
+                label = { Text(stringResource(R.string.advanced_dns_fallback_geoip_code)) },
+                supportingText = { Text(stringResource(R.string.advanced_dns_fallback_geoip_detail)) },
+            )
             if (invalid) Text(
                 stringResource(R.string.advanced_dns_fallback_invalid), color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,

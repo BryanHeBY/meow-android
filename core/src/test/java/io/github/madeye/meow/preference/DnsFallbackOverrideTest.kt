@@ -36,6 +36,29 @@ class DnsFallbackOverrideTest {
     }
 
     @Test
+    fun `country filter is explicit and can be cleared independently of geodata`() {
+        val upstream = "udp://127.0.0.1:53"
+        val clear = requireNotNull(DnsFallbackOverride.parse(upstream, "", ""))
+        val optIn = requireNotNull(DnsFallbackOverride.parse(upstream, "", "", "CN"))
+        assertEquals("CN", optIn.geoIpCountry)
+        assertEquals(optIn, DnsFallbackOverride.fromJson(optIn.toJson()))
+        assertEquals(false, clear.toJson().toString().contains("geoIpCountry"))
+        val explicitNull = optIn.toJson().toString().replace("\"geoIpCountry\":\"CN\"", "\"geoIpCountry\":null")
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsFallbackOverride.fromJson(kotlinx.serialization.json.Json.parseToJsonElement(explicitNull))
+        }
+        for (bad in listOf("", "C", "cn", "C1", "CHN", "ＣＮ", "C\n")) {
+            assertNull(DnsFallbackOverride.parse(upstream, "", "", bad))
+        }
+        val store = ConfigurationOverrideStore(temp.newFolder())
+        val base = store.load()
+        val saved = store.saveSection(null, OverrideSection.DNS_FALLBACK, base, base.copy(dnsFallback = optIn))
+        assertEquals(optIn, store.effective(31).dnsFallback)
+        assertEquals(clear, store.saveSection(null, OverrideSection.DNS_FALLBACK, saved,
+            saved.copy(dnsFallback = clear)).dnsFallback)
+    }
+
+    @Test
     fun `whole policy precedence and stale saves cannot erase other sections`() {
         val store = ConfigurationOverrideStore(temp.newFolder())
         val before = store.load()

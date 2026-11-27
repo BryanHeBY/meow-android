@@ -537,7 +537,11 @@
     <string name="advanced_dns_fallback">备用 DNS</string>
     <string name="advanced_dns_mode_default">使用当前 DNS 模式的默认行为</string>
     <string name="advanced_dns_fallback_next_connection">保存的备用 DNS 设置将在下次连接 VPN 时生效。</string>
-    <string name="advanced_dns_fallback_detail">同时替换备用服务器和过滤条件。域名命中时优先查询备用服务器；地址命中 CIDR 时拒绝普通应答。主 DNS 失败时也可能查询备用服务器。替换模式不使用 GeoIP。</string>
+    <string name="advanced_dns_fallback_detail">同时替换备用服务器和过滤条件。域名命中时优先查询备用服务器；地址命中 CIDR 时拒绝普通应答。主 DNS 失败时也可能查询备用服务器。</string>
+    <string name="advanced_dns_fallback_geoip">国家或地区过滤（GeoIP）</string>
+    <string name="advanced_dns_fallback_geoip_code">国家或地区代码（两个字母）</string>
+    <string name="advanced_dns_fallback_geoip_detail">使用应用内置的国家或地区数据库检查主 DNS 应答。</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">内置的国家或地区数据库缺失或无效。关闭国家或地区过滤后即可保存。</string>
     <string name="advanced_dns_fallback_upstreams">UDP/TCP 数字地址（udp://IP:端口，每行一个）</string>
     <string name="advanced_dns_fallback_domains">域名（精确匹配或 +.后缀，每行一个）</string>
     <string name="advanced_dns_fallback_cidrs">地址网段（CIDR，每行一个）</string>

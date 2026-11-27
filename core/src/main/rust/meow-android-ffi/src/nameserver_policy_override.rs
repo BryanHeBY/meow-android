@@ -7,7 +7,7 @@ use serde_yaml::{Mapping, Value};
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct NameserverPolicyOverride {
     rows: Option<Vec<(String, String)>>,
     dns_ipv6: Option<bool>,
@@ -37,6 +37,10 @@ fn present_fallback<'de, D: serde::Deserializer<'de>>(
     map_only::<RawFallback, _>(d).map(Some)
 }
 
+fn present_country<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+
 fn present_bootstrap<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<Vec<Endpoint>>, D::Error> {
@@ -59,13 +63,14 @@ fn map_only<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(d: D) -> Resu
     d.deserialize_map(OnlyMap(std::marker::PhantomData))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Fallback {
     Disabled,
     Replace {
         upstreams: Vec<String>,
         domains: Vec<String>,
         cidrs: Vec<String>,
+        geoip_country: Option<String>,
     },
 }
 
@@ -77,6 +82,8 @@ enum RawFallback {
         endpoints: Vec<Endpoint>,
         domains: Vec<String>,
         cidrs: Vec<String>,
+        #[serde(default, rename = "geoIpCountry", deserialize_with = "present_country")]
+        geoip_country: Option<String>,
     },
 }
 
@@ -107,6 +114,7 @@ impl RawFallback {
             endpoints,
             domains,
             cidrs,
+            geoip_country,
         } = self
         else {
             return Ok(Fallback::Disabled);
@@ -114,6 +122,12 @@ impl RawFallback {
         ensure!(
             domains.len() <= 8 && cidrs.len() <= 16,
             "too many DNS fallback filters"
+        );
+        ensure!(
+            geoip_country.as_ref().is_none_or(|code| {
+                code.len() == 2 && code.bytes().all(|c| c.is_ascii_uppercase())
+            }),
+            "invalid fallback GeoIP country"
         );
         let upstreams = validate_numeric_pool(endpoints)?;
         let mut seen = HashSet::new();
@@ -135,6 +149,7 @@ impl RawFallback {
             upstreams,
             domains,
             cidrs,
+            geoip_country,
         })
     }
 }
@@ -243,6 +258,16 @@ impl NameserverPolicyOverride {
         })
     }
 
+    pub(crate) fn uses_prepared_geoip(&self) -> bool {
+        matches!(
+            &self.fallback,
+            Some(Fallback::Replace {
+                geoip_country: Some(_),
+                ..
+            })
+        )
+    }
+
     pub(crate) fn apply_fallback(&self, dns: &mut Mapping) {
         let Some(fallback) = &self.fallback else {
             return;
@@ -253,17 +278,21 @@ impl NameserverPolicyOverride {
             upstreams,
             domains,
             cidrs,
+            geoip_country,
         } = fallback
         {
             let sequence = |items: &[String]| {
                 Value::Sequence(items.iter().cloned().map(Value::String).collect())
             };
             dns.insert("fallback".into(), sequence(upstreams));
-            let filter = Mapping::from_iter([
-                ("geoip".into(), Value::Bool(false)),
+            let mut filter = Mapping::from_iter([
+                ("geoip".into(), Value::Bool(geoip_country.is_some())),
                 ("domain".into(), sequence(domains)),
                 ("ipcidr".into(), sequence(cidrs)),
             ]);
+            if let Some(country) = geoip_country {
+                filter.insert("geoip-code".into(), Value::String(country.clone()));
+            }
             dns.insert("fallback-filter".into(), Value::Mapping(filter));
         }
     }
@@ -460,6 +489,47 @@ mod tests {
         ] {
             assert!(NameserverPolicyOverride::decode(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn fallback_country_is_only_explicit_replace_authority() {
+        let legacy = r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","endpoint":"127.0.0.1:53"}],"domains":[],"cidrs":[]}}"#;
+        let country = legacy.replacen(r#""cidrs":[]"#, r#""cidrs":[],"geoIpCountry":"CN""#, 1);
+        let parsed = NameserverPolicyOverride::decode(&country).unwrap();
+        assert!(parsed.uses_prepared_geoip());
+        for wire in [legacy, "null", r#"{"fallback":{"mode":"disabled"}}"#] {
+            assert!(!NameserverPolicyOverride::decode(wire)
+                .unwrap()
+                .uses_prepared_geoip());
+        }
+        for bad in ["null", "false", r#""cn""#, r#""C1""#, r#""CHN""#, r#""""#] {
+            assert!(
+                NameserverPolicyOverride::decode(&country.replace(r#""CN""#, bad)).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(NameserverPolicyOverride::decode(
+            r#"{"fallback":{"mode":"disabled","geoIpCountry":"CN"}}"#
+        )
+        .is_err());
+        let mut dns = Mapping::new();
+        parsed.apply_fallback(&mut dns);
+        let filter = dns["fallback-filter"].as_mapping().unwrap();
+        assert_eq!(filter.get("geoip"), Some(&Value::Bool(true)));
+        assert_eq!(filter.get("geoip-code").and_then(Value::as_str), Some("CN"));
+        assert_eq!(
+            filter
+                .get("domain")
+                .and_then(Value::as_sequence)
+                .map(Vec::len),
+            Some(0)
+        );
+        NameserverPolicyOverride::decode(legacy)
+            .unwrap()
+            .apply_fallback(&mut dns);
+        let filter = dns["fallback-filter"].as_mapping().unwrap();
+        assert_eq!(filter.get("geoip"), Some(&Value::Bool(false)));
+        assert!(!filter.contains_key("geoip-code"));
     }
 
     #[test]

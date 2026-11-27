@@ -81,6 +81,7 @@ internal fun ConfigurationOverrideRoute(
 
     val saved = stringResource(R.string.override_saved)
     val dnsSaved = stringResource(R.string.override_dns_saved)
+    val geoIpUnavailable = stringResource(R.string.advanced_dns_fallback_geoip_unavailable)
     val failed = stringResource(R.string.override_failed)
     val dnsFailed = stringResource(R.string.settings_builtin_dns_failed)
     LaunchedEffect(viewModel) {
@@ -89,6 +90,7 @@ internal fun ConfigurationOverrideRoute(
                 OverrideEvent.Saved -> saved
                 OverrideEvent.DnsSaved -> dnsSaved
                 OverrideEvent.SaveFailed -> failed
+                OverrideEvent.GeoIpUnavailable -> geoIpUnavailable
                 is OverrideEvent.DnsFailed -> String.format(dnsFailed, it.issue.message)
             }
             snackbarHost.showSnackbar(message)

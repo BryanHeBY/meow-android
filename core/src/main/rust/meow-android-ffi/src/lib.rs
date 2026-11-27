@@ -20,6 +20,7 @@ mod diagnostics;
 mod direct_exit;
 mod dns_override;
 mod engine;
+mod fallback_geoip;
 mod ip_info;
 mod live_dns;
 mod log_level;
@@ -297,6 +298,11 @@ async fn start_engine_async(
     if source_dns_requires_builtin && !matches!(dns, engine::DnsUpstreams::Builtin) {
         return Err(dns_override::DnsIssue::ResolverRejected.into());
     }
+    let geoip = if nameserver_policy.uses_prepared_geoip() {
+        Some(fallback_geoip::prepare().await?)
+    } else {
+        None
+    };
     install_tracing_subscriber();
     let tcp_policy = engine::StartupTcpPolicy::capture();
     let mut startup_logs = log_level::StartupLogLevel::new();
@@ -348,9 +354,15 @@ async fn start_engine_async(
             meow_common::traffic_ledger::apply(ledger, ledger_options);
             let stripped_path = engine::sibling_stripped_path(path);
             (
-                engine::load_stripped_config(path, &dns, &nameserver_policy, &mut startup_logs)
-                    .await
-                    .map_err(load_error)?,
+                engine::load_stripped_config(
+                    path,
+                    &dns,
+                    &nameserver_policy,
+                    &mut startup_logs,
+                    geoip.as_ref(),
+                )
+                .await
+                .map_err(load_error)?,
                 stripped_path.to_str().map(str::to_string),
             )
         }
@@ -359,6 +371,7 @@ async fn start_engine_async(
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
             let logs = &mut startup_logs;
+            let prepared = geoip.as_ref();
             let loaded = engine::load_profile_with_policy(
                 MINIMAL_CONFIG,
                 &dns,
@@ -367,7 +380,7 @@ async fn start_engine_async(
                     Box::pin(async move {
                         let raw = meow_config::parse_raw_yaml(&stripped)?;
                         logs.apply(raw.log_level.as_deref());
-                        engine::build_startup_config(raw, None).await
+                        engine::build_startup_config_with_geodata(raw, None, prepared).await
                     })
                 },
             )
@@ -493,11 +506,13 @@ async fn start_engine_async(
     let rule_providers = Arc::new(RwLock::new(config.rule_providers));
     // No DNS listener: tun2socks answers in-TUN queries in-process.
     let dns_server = Arc::new(RwLock::new(None));
+    let controller_geoip = geoip.clone();
     let live_dns = Arc::new(live_dns::LiveDns::new(
         profile_id,
         profile_dns,
         source_dns_requires_builtin,
         nameserver_policy,
+        geoip,
         loaded_from,
         dns,
         &config.dns.resolver,
@@ -525,7 +540,7 @@ async fn start_engine_async(
     let log_tx = log_broadcast_tx().clone();
 
     let api_server = |addr, secret| {
-        ApiServer::new(
+        let server = ApiServer::new(
             tunnel.clone(),
             Some(addr),
             Some(secret),
@@ -546,7 +561,12 @@ async fn start_engine_async(
             config.provider_dialer_registry.clone(),
             // No embedded NTP supervisor in the Android service.
             None,
-        )
+        );
+        if let Some(prepared) = &controller_geoip {
+            server.with_managed_fallback_geoip(prepared.clone())
+        } else {
+            server
+        }
     };
     let (controllers, app_port) = match controllers {
         Some((
@@ -1025,8 +1045,21 @@ fn validate_effective_config_with_policy(
     }
     meow_config::set_offline_validate(true);
     let _offline = Offline;
+    let prepared = if policy.uses_prepared_geoip() {
+        Some(get_runtime().block_on(fallback_geoip::prepare())?)
+    } else {
+        None
+    };
+    let prepared = prepared.as_ref();
     let load = engine::load_profile_with_policy(yaml, mode, policy, |stripped| {
-        Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+        Box::pin(async move {
+            if let Some(reader) = prepared {
+                let raw = meow_config::parse_raw_yaml(&stripped)?;
+                meow_config::build_config_with_fallback_geoip(raw, None, reader).await
+            } else {
+                meow_config::load_config_from_str(&stripped).await
+            }
+        })
     });
     let loaded = get_runtime().block_on(load)?;
     mode.check_targets(|name| loaded.config.proxies.get(name).map(Arc::as_ref))?;

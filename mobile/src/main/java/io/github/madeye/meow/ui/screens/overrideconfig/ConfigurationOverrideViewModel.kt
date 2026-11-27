@@ -2,6 +2,8 @@ package io.github.madeye.meow.ui.screens.overrideconfig
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.preference.DnsFallbackOverride
 import io.github.madeye.meow.preference.DnsPreference
 import io.github.madeye.meow.preference.DnsMode
 import io.github.madeye.meow.preference.DnsSettings
@@ -77,6 +79,7 @@ internal sealed interface OverrideEvent {
     data object Saved : OverrideEvent
     data object DnsSaved : OverrideEvent
     data object SaveFailed : OverrideEvent
+    data object GeoIpUnavailable : OverrideEvent
     data class DnsFailed(val issue: DnsIssue) : OverrideEvent
 }
 
@@ -85,6 +88,7 @@ internal class ConfigurationOverrideViewModel(
     private val store: ConfigurationOverrideStore,
     private val dns: DnsPreference,
     profiles: ProfileRepository,
+    private val checkFallbackGeoIp: () -> Boolean = MeowCore::nativeCheckFallbackGeoIp,
 ) : ViewModel() {
     private val form = MutableStateFlow<OverrideForm?>(null)
     private val _events = Channel<OverrideEvent>(Channel.BUFFERED)
@@ -166,7 +170,15 @@ internal class ConfigurationOverrideViewModel(
         viewModelScope.launch {
             try {
                 val persisted = withContext(Dispatchers.IO) {
-                    store.saveSection(profileId, section, current.expected, candidate)
+                    if (section == OverrideSection.DNS_FALLBACK &&
+                        (candidate.dnsFallback as? DnsFallbackOverride.Replace)?.geoIpCountry != null &&
+                        !checkFallbackGeoIp()
+                    ) null else store.saveSection(profileId, section, current.expected, candidate)
+                }
+                if (persisted == null) {
+                    form.update { it?.copy(saving = false) }
+                    _events.send(OverrideEvent.GeoIpUnavailable)
+                    return@launch
                 }
                 form.update { it?.afterSectionSave(section, persisted) }
                 _events.send(OverrideEvent.Saved)

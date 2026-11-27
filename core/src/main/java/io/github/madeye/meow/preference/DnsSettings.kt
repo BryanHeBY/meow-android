@@ -103,6 +103,7 @@ enum class DnsIssue(val message: String) {
     PROXY_UNAVAILABLE("Choose a compatible proxy node from the selected profile. Check the name, transport and dialer settings."),
     SPLIT_UNAVAILABLE("Split DNS is unavailable on Android. Choose another DNS mode to connect."),
     RESOLVER_REJECTED("The resolver rejected these DNS settings. Check the profile DNS policies and bootstrap upstreams."),
+    GEOIP_UNAVAILABLE("The bundled country database is missing or invalid. Turn off the fallback country filter or restore app data."),
     SAVE_FAILED("Could not save the DNS settings."),
     SERVICE_UNAVAILABLE("The VPN service is unavailable. Try again."),
     ;

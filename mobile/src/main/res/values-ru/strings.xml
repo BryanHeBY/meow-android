@@ -567,7 +567,11 @@
     <string name="advanced_dns_fallback">Резервный DNS</string>
     <string name="advanced_dns_mode_default">По умолчанию для режима DNS</string>
     <string name="advanced_dns_fallback_next_connection">Сохранённые изменения резервного DNS вступят в силу при следующем подключении VPN.</string>
-    <string name="advanced_dns_fallback_detail">Заменяет резервные серверы и их фильтры. При совпадении домена сначала опрашивается резервный сервер; совпадение CIDR отклоняет обычный ответ с адресом. Резервный сервер также может использоваться при сбое основного DNS. Режим замены не использует GeoIP.</string>
+    <string name="advanced_dns_fallback_detail">Заменяет резервные серверы и их фильтры. При совпадении домена сначала опрашивается резервный сервер; совпадение CIDR отклоняет обычный ответ с адресом. Резервный сервер также может использоваться при сбое основного DNS.</string>
+    <string name="advanced_dns_fallback_geoip">Фильтр по стране (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">Код страны (две буквы)</string>
+    <string name="advanced_dns_fallback_geoip_detail">Проверяет ответы основного DNS по встроенной базе стран.</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">Встроенная база стран отсутствует или повреждена. Для сохранения отключите фильтр.</string>
     <string name="advanced_dns_fallback_upstreams">Числовые адреса UDP/TCP (udp://IP:порт, один на строку)</string>
     <string name="advanced_dns_fallback_domains">Домены (точное совпадение или +.суффикс, один на строку)</string>
     <string name="advanced_dns_fallback_cidrs">Сети адресов (CIDR, одна на строку)</string>

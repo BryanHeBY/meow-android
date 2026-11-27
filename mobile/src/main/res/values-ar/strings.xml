@@ -599,7 +599,11 @@
     <string name="advanced_dns_fallback">خوادم DNS الاحتياطية</string>
     <string name="advanced_dns_mode_default">استخدام الإعداد الافتراضي لوضع DNS</string>
     <string name="advanced_dns_fallback_next_connection">تُطبّق تغييرات خوادم DNS الاحتياطية المحفوظة عند اتصال VPN التالي.</string>
-    <string name="advanced_dns_fallback_detail">استبدال الخوادم الاحتياطية ومرشحاتها معًا. تُستعلم الخوادم الاحتياطية أولًا عند تطابق النطاق، وتُرفض الإجابات العادية عند تطابق CIDR. قد يُستخدم الاحتياطي عند فشل DNS الأساسي. لا يستخدم وضع الاستبدال GeoIP.</string>
+    <string name="advanced_dns_fallback_detail">استبدال الخوادم الاحتياطية ومرشحاتها معًا. تُستعلم الخوادم الاحتياطية أولًا عند تطابق النطاق، وتُرفض الإجابات العادية عند تطابق CIDR. قد يُستخدم الاحتياطي عند فشل DNS الأساسي.</string>
+    <string name="advanced_dns_fallback_geoip">مرشح البلد (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">رمز البلد (حرفان)</string>
+    <string name="advanced_dns_fallback_geoip_detail">يفحص إجابات الخادم الأساسي باستخدام قاعدة بيانات البلدان المضمّنة.</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">قاعدة بيانات البلدان المضمّنة مفقودة أو غير صالحة. أوقف مرشح البلد للحفظ.</string>
     <string name="advanced_dns_fallback_upstreams">خوادم UDP/TCP بعناوين رقمية (udp://IP:port، واحد لكل سطر)</string>
     <string name="advanced_dns_fallback_domains">النطاقات (مطابقة تامة أو لاحقة +.، واحد لكل سطر)</string>
     <string name="advanced_dns_fallback_cidrs">شبكات العناوين (CIDR، واحدة لكل سطر)</string>

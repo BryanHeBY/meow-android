@@ -33,7 +33,12 @@ object MeowCore {
     /** Commits a staged preference and, when requested, installs its live resolver. Returns a DNS issue code on failure. */
     external fun nativeCommitDns(dns: String, staged: String, target: String, selectedId: Long, applyLive: Boolean): String?
 
-    external fun nativeCheckCachedDns(yaml: String, settings: String, nameserverPolicy: String = "null"): String?
+    fun nativeCheckCachedDns(yaml: String, settings: String, nameserverPolicy: String = "null"): String? =
+        nativeCheckCachedDnsForProfile(yaml, settings, nameserverPolicy, 0L)
+    external fun nativeCheckCachedDnsForProfile(
+        yaml: String, settings: String, nameserverPolicy: String, frozenProfileId: Long,
+    ): String?
+    external fun nativeCheckFallbackGeoIp(): Boolean
 
     /** Applied DNS status with redacted endpoint details. */
     external fun nativeDnsStatus(): String?

@@ -537,7 +537,11 @@
     <string name="advanced_dns_fallback">DNS dự phòng</string>
     <string name="advanced_dns_mode_default">Dùng mặc định của chế độ DNS</string>
     <string name="advanced_dns_fallback_next_connection">Các thay đổi DNS dự phòng đã lưu sẽ áp dụng khi VPN kết nối lần sau.</string>
-    <string name="advanced_dns_fallback_detail">Thay thế cả máy chủ dự phòng lẫn bộ lọc. Nếu khớp tên miền, truy vấn máy chủ dự phòng trước; nếu khớp CIDR, từ chối câu trả lời địa chỉ thông thường. Có thể dùng máy chủ dự phòng khi DNS chính lỗi. Chế độ thay thế không dùng GeoIP.</string>
+    <string name="advanced_dns_fallback_detail">Thay thế cả máy chủ dự phòng lẫn bộ lọc. Nếu khớp tên miền, truy vấn máy chủ dự phòng trước; nếu khớp CIDR, từ chối câu trả lời địa chỉ thông thường. Có thể dùng máy chủ dự phòng khi DNS chính lỗi.</string>
+    <string name="advanced_dns_fallback_geoip">Bộ lọc quốc gia (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">Mã quốc gia (hai chữ cái)</string>
+    <string name="advanced_dns_fallback_geoip_detail">Kiểm tra câu trả lời DNS chính bằng cơ sở dữ liệu quốc gia tích hợp.</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">Cơ sở dữ liệu quốc gia tích hợp bị thiếu hoặc không hợp lệ. Hãy tắt bộ lọc quốc gia để lưu.</string>
     <string name="advanced_dns_fallback_upstreams">Máy chủ UDP/TCP dạng số (udp://IP:cổng, mỗi dòng một mục)</string>
     <string name="advanced_dns_fallback_domains">Tên miền (khớp chính xác hoặc hậu tố +., mỗi dòng một mục)</string>
     <string name="advanced_dns_fallback_cidrs">Mạng địa chỉ (CIDR, mỗi dòng một mục)</string>

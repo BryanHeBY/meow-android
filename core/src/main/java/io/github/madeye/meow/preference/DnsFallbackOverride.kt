@@ -6,6 +6,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 sealed class DnsFallbackOverride {
@@ -17,6 +19,7 @@ sealed class DnsFallbackOverride {
         val endpoints: List<NumericDnsEndpoint>,
         val domains: List<String>,
         val cidrs: List<String>,
+        val geoIpCountry: String? = null,
     ) : DnsFallbackOverride()
 
     internal fun snapshot(): DnsFallbackOverride = when (this) {
@@ -30,14 +33,17 @@ sealed class DnsFallbackOverride {
     }
 
     private fun valid() = this == Disabled || (this is Replace &&
-        parse(endpoints.joinToString("\n") { it.display() }, domains.joinToString("\n"), cidrs.joinToString("\n")) == this)
+        parse(endpoints.joinToString("\n") { it.display() }, domains.joinToString("\n"), cidrs.joinToString("\n"), geoIpCountry) == this)
 
     companion object {
         private val codec = Json { classDiscriminator = "mode" }
-        internal fun fromJson(element: JsonElement) =
-            codec.decodeFromJsonElement(serializer(), element).also { require(it.valid()) }
+        internal fun fromJson(element: JsonElement): DnsFallbackOverride {
+            require((element as? JsonObject)?.get("geoIpCountry") != JsonNull)
+            return codec.decodeFromJsonElement(serializer(), element).also { require(it.valid()) }
+        }
 
-        fun parse(upstreams: String, domains: String, cidrs: String): Replace? {
+        fun parse(upstreams: String, domains: String, cidrs: String, geoIpCountry: String? = null): Replace? {
+            if (geoIpCountry != null && (geoIpCountry.length != 2 || geoIpCountry.any { it !in 'A'..'Z' })) return null
             if (upstreams.length > 512 || domains.length > 2048 || cidrs.length > 896) return null
             val endpoints = NumericDnsEndpoints.parse(upstreams) ?: return null
             val domainRows = FakeIpFilterRuntime.parsePatterns(domains) ?: return null
@@ -45,7 +51,7 @@ sealed class DnsFallbackOverride {
             if (domainRows.size > 8 || cidrRows.size > 16) return null
             val cidrIdentities = cidrRows.map { cidrIdentity(it) ?: return null }
             if (cidrIdentities.toSet().size != cidrIdentities.size) return null
-            return Replace(endpoints, domainRows, cidrRows)
+            return Replace(endpoints, domainRows, cidrRows, geoIpCountry)
         }
 
         private fun lines(text: String) = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()

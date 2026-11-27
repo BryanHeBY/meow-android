@@ -15,6 +15,7 @@ pub(crate) enum DnsIssue {
     ProxyUnavailable,
     SplitUnavailable,
     ResolverRejected,
+    GeoIpUnavailable,
     SaveFailed,
 }
 
@@ -28,6 +29,7 @@ impl std::fmt::Display for DnsIssue {
             Self::ProxyUnavailable => "PROXY_UNAVAILABLE",
             Self::SplitUnavailable => "SPLIT_UNAVAILABLE",
             Self::ResolverRejected => "RESOLVER_REJECTED",
+            Self::GeoIpUnavailable => "GEOIP_UNAVAILABLE",
             Self::SaveFailed => "SAVE_FAILED",
         };
         f.write_str(name)

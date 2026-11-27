@@ -32,6 +32,7 @@ pub(crate) struct LiveDns {
     // original DNS block remains invalid in every profile-preserving mode.
     source_dns_requires_builtin: bool,
     nameserver_policy: NameserverPolicyOverride,
+    geoip: Option<meow_config::PreparedFallbackGeoIp>,
     config_path: Option<String>,
     applied: Mutex<Applied>,
     raw_config: Arc<RwLock<RawConfig>>,
@@ -49,6 +50,7 @@ impl LiveDns {
         profile_dns: Option<serde_yaml::Value>,
         source_dns_requires_builtin: bool,
         nameserver_policy: NameserverPolicyOverride,
+        geoip: Option<meow_config::PreparedFallbackGeoIp>,
         config_path: Option<String>,
         mode: DnsUpstreams,
         resolver: &Arc<Resolver>,
@@ -61,6 +63,7 @@ impl LiveDns {
             profile_dns,
             source_dns_requires_builtin,
             nameserver_policy,
+            geoip,
             config_path,
             applied: Mutex::new(Applied {
                 mode,
@@ -101,7 +104,7 @@ impl LiveDns {
     async fn rebuild(&self, tunnel: &Tunnel, candidate: &RawConfig) -> Result<Option<DnsConfig>> {
         let route = tunnel.route_snapshot();
         let rule_providers = self.rule_providers.read().clone();
-        meow_api::routes::reconcile_dns_config(
+        meow_api::routes::reconcile_dns_config_with_fallback_geoip(
             &self.raw_config,
             candidate,
             self.config_path.as_deref(),
@@ -110,6 +113,7 @@ impl LiveDns {
             None,
             Some(tunnel.resolver()),
             Some(&route.dialer_registry),
+            self.geoip.as_ref(),
         )
         .await
         .map_err(|_| anyhow!(DnsIssue::ResolverRejected))
@@ -284,12 +288,13 @@ fn dns_result(env: &JNIEnv, result: Result<()>) -> jstring {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCachedDns(
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCachedDnsForProfile(
     mut env: JNIEnv,
     _class: JClass,
     yaml: JString,
     settings: JString,
     nameserver_policy: JString,
+    frozen_profile: jlong,
 ) -> jstring {
     let result = (|| {
         let yaml: String = env
@@ -309,9 +314,40 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
         let policy = NameserverPolicyOverride::decode(&policy_wire)
             .map_err(|_| DnsIssue::InvalidSettings)?;
         mode.check_android_support()?;
-        mode.check_cached_profile(&yaml, &policy)
+        mode.check_cached_profile(&yaml, &policy)?;
+        if policy.uses_prepared_geoip() {
+            if frozen_profile > 0 {
+                let running = crate::ENGINE.lock();
+                if !running.as_ref().is_some_and(|engine| {
+                    let live = &engine.live_dns;
+                    live.profile_id == frozen_profile
+                        && live.nameserver_policy == policy
+                        && live.geoip.is_some()
+                }) {
+                    bail!(DnsIssue::ProfileChanged);
+                }
+            } else {
+                crate::get_runtime().block_on(crate::fallback_geoip::prepare())?;
+            }
+        }
+        Ok(())
     })();
     dns_result(&env, result)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckFallbackGeoIp(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    if crate::get_runtime()
+        .block_on(crate::fallback_geoip::prepare())
+        .is_ok()
+    {
+        jni::sys::JNI_TRUE
+    } else {
+        jni::sys::JNI_FALSE
+    }
 }
 
 #[cfg(test)]
@@ -383,6 +419,24 @@ mod tests {
         source_requires_builtin: bool,
         policy: NameserverPolicyOverride,
     ) -> impl Drop {
+        start_with_policy_and_home(
+            profile,
+            upstreams,
+            name,
+            source_requires_builtin,
+            policy,
+            |_| {},
+        )
+    }
+
+    fn start_with_policy_and_home(
+        profile: Option<&str>,
+        upstreams: DnsUpstreams,
+        name: &str,
+        source_requires_builtin: bool,
+        policy: NameserverPolicyOverride,
+        prepare_home: impl FnOnce(&std::path::Path),
+    ) -> impl Drop {
         struct Running(std::path::PathBuf);
         impl Drop for Running {
             fn drop(&mut self) {
@@ -399,6 +453,7 @@ mod tests {
         if let Some(profile) = profile {
             std::fs::write(home.join("config.yaml"), profile).unwrap();
         }
+        prepare_home(&home);
         *crate::HOME_DIR.lock() = Some(home.to_str().unwrap().to_string());
         let running = Running(dir);
         assert_eq!(
@@ -744,6 +799,85 @@ mod tests {
         authored_task.abort();
         chosen_task.abort();
         upstream_task.abort();
+    }
+
+    #[test]
+    fn geoip_reader_from_app_home_is_frozen_across_live_dns_changes() {
+        async fn serve(socket: tokio::net::UdpSocket, is_backup: bool) {
+            let mut buf = [0; 1536];
+            loop {
+                let (n, peer) = socket.recv_from(&mut buf).await.unwrap();
+                let mut end = 12;
+                while buf[end] != 0 {
+                    end += 1 + usize::from(buf[end]);
+                }
+                end += 5;
+                let mut reply = buf[..end.min(n)].to_vec();
+                reply[2..4].copy_from_slice(&[0x81, 0x80]);
+                reply[6..12].copy_from_slice(&[0, 1, 0, 0, 0, 0]);
+                reply.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+                let address = if is_backup {
+                    [203, 0, 113, 177]
+                } else if buf[13..end].starts_with(b"foreign") {
+                    [198, 51, 100, 23]
+                } else {
+                    [192, 0, 2, 19]
+                };
+                reply.extend_from_slice(&address);
+                socket.send_to(&reply, peer).await.unwrap();
+            }
+        }
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let (primary, backup) = rt.block_on(async {
+            (
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+            )
+        });
+        let main_addr = primary.local_addr().unwrap();
+        let backup_addr = backup.local_addr().unwrap();
+        let prim_task = rt.spawn(serve(primary, false));
+        let backup_task = rt.spawn(serve(backup, true));
+        let profile = format!("dns:\n  nameserver: ['udp://{main_addr}']\n  default-nameserver: ['udp://{main_addr}']\n  fake-ip-filter: ['+.test']\nrules: ['MATCH,DIRECT']\n");
+        let policy = NameserverPolicyOverride::decode(&serde_json::json!({
+            "fallback": {"mode":"replace", "endpoints":[{"transport":"UDP","endpoint":backup_addr.to_string()}],
+                         "domains":[],"cidrs":[],"geoIpCountry":"DE"}
+        }).to_string()).unwrap();
+        let engine = start_with_policy_and_home(
+            Some(&profile),
+            DnsUpstreams::Profile,
+            "geoip-frozen",
+            false,
+            policy,
+            |home| {
+                std::fs::write(
+                    home.join("Country.mmdb"),
+                    crate::fallback_geoip::test_fixture(true),
+                )
+                .unwrap();
+            },
+        );
+        let ask = |host, expected: [u8; 4]| {
+            let query = dns_query(host, 1);
+            let reply = rt
+                .block_on(meow_dns::DnsServer::handle_query(&query, &resolver()))
+                .unwrap();
+            assert_eq!(&reply[6..8], &[0, 1], "{host}");
+            assert_eq!(&reply[reply.len() - 4..], expected.as_slice(), "{host}");
+        };
+        ask("domestic.test", [192, 0, 2, 19]);
+        ask("foreign.test", [203, 0, 113, 177]);
+        let live_home = crate::HOME_DIR.lock().clone().unwrap();
+        std::fs::remove_file(std::path::Path::new(&live_home).join("Country.mmdb")).unwrap();
+        let custom = DnsUpstreams::decode(&serde_json::json!({
+            "version":1,"mode":"custom","upstreams":[{"transport":"udp","endpoint":main_addr.to_string(),"egress":"direct"}]
+        }).to_string()).unwrap();
+        apply(custom).unwrap();
+        ask("foreign-again.test", [203, 0, 113, 177]);
+        drop(engine);
+        prim_task.abort();
+        backup_task.abort();
     }
 
     #[test]

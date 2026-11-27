@@ -64,7 +64,11 @@ class DnsSettingsStore(private val file: File) {
             if (it.profile == profile && it.settings == settings && it.wireOverride == policy) return it.issue
         }
         val issue = validate(profile.yaml, settings.encode(), policy.wire())?.let(DnsIssue::fromWire)
-        checked = Check(profile, settings, policy, issue)
+        // Availability of the packaged reader or the current VPN generation
+        // may change independently of YAML and snapshot values.
+        if (issue != DnsIssue.GEOIP_UNAVAILABLE && issue != DnsIssue.PROFILE_CHANGED) {
+            checked = Check(profile, settings, policy, issue)
+        }
         return issue
     }
 

@@ -547,7 +547,11 @@
     <string name="advanced_dns_fallback">Yedek DNS</string>
     <string name="advanced_dns_mode_default">DNS modunun varsayılanını kullan</string>
     <string name="advanced_dns_fallback_next_connection">Kaydedilen yedek DNS değişiklikleri VPN bir sonraki kez bağlandığında uygulanır.</string>
-    <string name="advanced_dns_fallback_detail">Yedek sunucuları ve filtreleri birlikte değiştirir. Alan adı eşleşirse önce yedek sunucu sorgulanır; CIDR eşleşmesi normal adres yanıtlarını reddeder. Birincil DNS başarısız olduğunda da yedek denenebilir. Değiştirme modu GeoIP kullanmaz.</string>
+    <string name="advanced_dns_fallback_detail">Yedek sunucuları ve filtreleri birlikte değiştirir. Alan adı eşleşirse önce yedek sunucu sorgulanır; CIDR eşleşmesi normal adres yanıtlarını reddeder. Birincil DNS başarısız olduğunda da yedek denenebilir.</string>
+    <string name="advanced_dns_fallback_geoip">Ülke filtresi (GeoIP)</string>
+    <string name="advanced_dns_fallback_geoip_code">Ülke kodu (iki harf)</string>
+    <string name="advanced_dns_fallback_geoip_detail">Birincil DNS yanıtlarını yerleşik ülke veritabanıyla denetler.</string>
+    <string name="advanced_dns_fallback_geoip_unavailable">Yerleşik ülke veritabanı eksik veya geçersiz. Kaydetmek için ülke filtresini kapatın.</string>
     <string name="advanced_dns_fallback_upstreams">Sayısal UDP/TCP sunucuları (udp://IP:port, her satıra bir tane)</string>
     <string name="advanced_dns_fallback_domains">Alan adları (tam eşleşme veya +.son ek, her satıra bir tane)</string>
     <string name="advanced_dns_fallback_cidrs">Adres ağları (CIDR, her satıra bir tane)</string>
