@@ -17,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import io.github.madeye.meow.R
 import io.github.madeye.meow.preference.CoreBehaviorOverride
 import io.github.madeye.meow.preference.FindProcessOverride
+import io.github.madeye.meow.preference.LogLevelOverride
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.SectionHeader
 import io.github.madeye.meow.ui.screens.overrideconfig.Choice
@@ -120,6 +121,17 @@ private fun CoreBehaviorEditor(
         }
     }
 
+    SectionHeader(stringResource(R.string.advanced_log_level))
+    GlassCard {
+        Text(stringResource(R.string.advanced_log_level_detail), style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.selectableGroup()) {
+            Choice(inherit, draft.logLevel == null, enabled) { onEdit(draft.copy(logLevel = null)) }
+            for (level in LogLevelOverride.entries) {
+                Choice(logLevelLabel(level), draft.logLevel == level, enabled) { onEdit(draft.copy(logLevel = level)) }
+            }
+        }
+    }
+
     SectionHeader(stringResource(R.string.override_preview))
     GlassCard {
         if (global) profile?.let { Text(it.name, style = MaterialTheme.typography.titleSmall) }
@@ -132,6 +144,7 @@ private fun CoreBehaviorEditor(
             else -> R.string.advanced_preview_unavailable
         }
         PreviewValue(R.string.advanced_find_process, process)
+        PreviewValue(R.string.advanced_log_level, logLevelLabel(effective?.logLevel))
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         TextButton(onClick = { onEdit(CoreBehaviorOverride()) }, enabled = enabled && draft != CoreBehaviorOverride()) {
@@ -153,6 +166,15 @@ private fun BooleanSetting(title: Int, value: Boolean?, inherit: Int, enabled: B
             Choice(R.string.advanced_off, value == false, enabled) { onEdit(false) }
         }
     }
+}
+
+private fun logLevelLabel(value: LogLevelOverride?): Int = when (value) {
+    LogLevelOverride.DEBUG -> R.string.advanced_log_debug
+    LogLevelOverride.INFO -> R.string.advanced_log_info
+    LogLevelOverride.WARNING -> R.string.advanced_log_warning
+    LogLevelOverride.ERROR -> R.string.advanced_log_error
+    LogLevelOverride.SILENT -> R.string.advanced_log_silent
+    null -> R.string.advanced_preview_unavailable
 }
 
 private fun booleanLabel(value: Boolean?): Int = when (value) {

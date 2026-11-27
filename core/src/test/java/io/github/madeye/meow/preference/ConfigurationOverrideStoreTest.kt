@@ -110,4 +110,24 @@ class ConfigurationOverrideStoreTest {
             assertEquals(text, file.readText())
         }
     }
+    @Test
+    fun logLevelInheritsIndependentlyAndResetsWithoutLosingOtherFields() {
+        val root = java.nio.file.Files.createTempDirectory("log-level-override-").toFile()
+        try {
+            val store = ConfigurationOverrideStore(root)
+            val global = CoreBehaviorOverride(logLevel = LogLevelOverride.WARNING)
+            val profile = CoreBehaviorOverride(tcpConcurrent = false, logLevel = LogLevelOverride.SILENT)
+            store.save(null, ConfigurationOverride(coreBehavior = global))
+            store.save(42L, ConfigurationOverride(coreBehavior = profile))
+            assertEquals(LogLevelOverride.SILENT, store.effective(42L).coreBehavior.logLevel)
+            store.save(42L, ConfigurationOverride(coreBehavior = profile.copy(logLevel = null)))
+            assertEquals(LogLevelOverride.WARNING, store.effective(42L).coreBehavior.logLevel)
+            assertEquals(false, store.effective(42L).coreBehavior.tcpConcurrent)
+            java.io.File(root, "profile-42").writeText("""{"version":1,"coreBehavior":{"logLevel":"TRACE"}}""")
+            assertTrue(runCatching { store.load(42L) }.exceptionOrNull() is java.io.IOException)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
 }

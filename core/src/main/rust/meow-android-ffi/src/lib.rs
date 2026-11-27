@@ -22,6 +22,7 @@ mod dns_override;
 mod engine;
 mod ip_info;
 mod live_dns;
+mod log_level;
 mod logbook;
 mod logging;
 mod outbound;
@@ -49,7 +50,7 @@ use dashmap::DashMap;
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
-use meow_api::log_stream::{LogBroadcastLayer, LogMessage};
+use meow_api::log_stream::LogMessage;
 use meow_api::ApiServer;
 use meow_common::TunnelMode;
 use meow_config::proxy_provider::ProxyProvider;
@@ -57,8 +58,6 @@ use meow_tunnel::Tunnel;
 use parking_lot::{Mutex, RwLock};
 use std::sync::{Arc, Once, OnceLock};
 use tokio::sync::broadcast;
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Global allocator
@@ -175,14 +174,7 @@ fn log_broadcast_tx() -> &'static broadcast::Sender<LogMessage> {
 }
 
 fn install_tracing_subscriber() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let log_layer = LogBroadcastLayer {
-            tx: log_broadcast_tx().clone(),
-        }
-        .with_filter(LevelFilter::INFO);
-        let _ = tracing_subscriber::registry().with(log_layer).try_init();
-    });
+    log_level::install(log_broadcast_tx());
     spawn_log_buffer_drainer();
 }
 
@@ -274,6 +266,7 @@ async fn start_engine_async(
 ) -> Result<(EngineState, u16), anyhow::Error> {
     install_tracing_subscriber();
     let tcp_policy = engine::StartupTcpPolicy::capture();
+    let mut startup_logs = log_level::StartupLogLevel::new();
 
     // Resolve config path + set XDG_CONFIG_HOME (meow-config looks for
     // $XDG_CONFIG_HOME/meow/Country.mmdb). Our dir is .../no_backup/meow,
@@ -322,7 +315,7 @@ async fn start_engine_async(
             meow_common::traffic_ledger::apply(ledger, ledger_options);
             let stripped_path = engine::sibling_stripped_path(path);
             (
-                engine::load_stripped_config(path, &dns)
+                engine::load_stripped_config(path, &dns, &mut startup_logs)
                     .await
                     .map_err(load_error)?,
                 stripped_path.to_str().map(str::to_string),
@@ -332,9 +325,11 @@ async fn start_engine_async(
             logging::bridge_log("start_engine_async: using minimal config");
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
+            let logs = &mut startup_logs;
             let loaded = engine::load_profile(MINIMAL_CONFIG, &dns, |stripped| {
                 Box::pin(async move {
                     let raw = meow_config::parse_raw_yaml(&stripped)?;
+                    logs.apply(raw.log_level.as_deref());
                     engine::build_startup_config(raw, None).await
                 })
             })
@@ -556,6 +551,7 @@ async fn start_engine_async(
 
     logging::bridge_log("start_engine_async: all tasks spawned");
     tcp_policy.commit();
+    startup_logs.commit();
     meow_common::logbook::engine_started(&config_source);
     Ok((
         EngineState {
@@ -727,6 +723,7 @@ fn stop_engine() {
         }
         meow_common::logbook::engine_stopped(meow_common::logbook::Stop::Requested("app"));
     }
+    log_level::reset();
 }
 
 #[cfg(all(target_os = "android", feature = "zerotier"))]

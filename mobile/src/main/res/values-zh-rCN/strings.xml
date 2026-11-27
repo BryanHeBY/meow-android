@@ -285,6 +285,13 @@
     <string name="override_dns_doh">DNS over HTTPS</string>
     <string name="advanced_title">高级</string>
     <string name="advanced_core_title">核心行为</string>
+    <string name="advanced_log_level">日志级别</string>
+    <string name="advanced_log_level_detail">控制实时日志（包括仪表盘）的新消息，不影响已保留的日志簿。</string>
+    <string name="advanced_log_debug">调试</string>
+    <string name="advanced_log_info">信息</string>
+    <string name="advanced_log_warning">警告</string>
+    <string name="advanced_log_error">错误</string>
+    <string name="advanced_log_silent">静默</string>
     <string name="advanced_unified_delay">统一延迟</string>
     <string name="advanced_tcp_concurrent">并发 TCP 拨号</string>
     <string name="advanced_find_process">进程查找模式</string>

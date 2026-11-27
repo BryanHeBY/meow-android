@@ -271,6 +271,7 @@ impl Drop for TempFileGuard {
 pub(crate) async fn load_stripped_config(
     config_path: &str,
     upstreams: &DnsUpstreams,
+    startup_logs: &mut crate::log_level::StartupLogLevel<'_>,
 ) -> Result<Loaded<Config>> {
     let original = std::fs::read_to_string(config_path)
         .with_context(|| format!("reading config from {config_path}"))?;
@@ -287,6 +288,7 @@ pub(crate) async fn load_stripped_config(
             let _guard = TempFileGuard(stripped_path.clone());
             let path = stripped_path.to_str().expect("utf-8 path");
             let raw = meow_config::load_raw_config(path).await?;
+            startup_logs.apply(raw.log_level.as_deref());
             let cache_dir = meow_config::resource_cache_dir_for_config_path(path);
             build_startup_config(raw, Some(&cache_dir)).await
         })

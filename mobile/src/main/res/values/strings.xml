@@ -304,6 +304,13 @@
     <string name="override_dns_doh">DNS over HTTPS</string>
     <string name="advanced_title">Advanced</string>
     <string name="advanced_core_title">Core behavior</string>
+    <string name="advanced_log_level">Log level</string>
+    <string name="advanced_log_level_detail">Controls new live logs, including the dashboard. It does not change the retained logbook.</string>
+    <string name="advanced_log_debug">Debug</string>
+    <string name="advanced_log_info">Info</string>
+    <string name="advanced_log_warning">Warning</string>
+    <string name="advanced_log_error">Error</string>
+    <string name="advanced_log_silent">Silent</string>
     <string name="advanced_unified_delay">Unified delay</string>
     <string name="advanced_tcp_concurrent">Concurrent TCP dialing</string>
     <string name="advanced_find_process">Find process mode</string>

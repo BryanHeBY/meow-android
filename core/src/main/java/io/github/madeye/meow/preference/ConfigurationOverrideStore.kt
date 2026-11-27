@@ -14,17 +14,22 @@ import kotlinx.serialization.json.jsonPrimitive
 enum class Ipv6Override { INHERIT, FORCE_ON, FORCE_OFF }
 enum class AppQuicOverride { INHERIT, BLOCK_UDP_443, DO_NOT_BLOCK }
 enum class FindProcessOverride(val wire: String) { OFF("off"), ALWAYS("always") }
+enum class LogLevelOverride(val wire: String) {
+    DEBUG("debug"), INFO("info"), WARNING("warning"), ERROR("error"), SILENT("silent"),
+}
 
 /** Null means inherit; explicit false is distinct from an inherited value. */
 data class CoreBehaviorOverride(
     val unifiedDelay: Boolean? = null,
     val tcpConcurrent: Boolean? = null,
     val findProcessMode: FindProcessOverride? = null,
+    val logLevel: LogLevelOverride? = null,
 ) {
     fun withInherited(global: CoreBehaviorOverride) = CoreBehaviorOverride(
         unifiedDelay ?: global.unifiedDelay,
         tcpConcurrent ?: global.tcpConcurrent,
         findProcessMode ?: global.findProcessMode,
+        logLevel ?: global.logLevel,
     )
 }
 
@@ -80,7 +85,7 @@ class ConfigurationOverrideStore(private val directory: File) {
             val quic = enumName("appQuic")?.let { AppQuicOverride.valueOf(it) } ?: AppQuicOverride.INHERIT
             val core = (root["coreBehavior"] ?: JsonObject(emptyMap())) as? JsonObject
                 ?: error("invalid coreBehavior")
-            require(core.keys.all { it in setOf("unifiedDelay", "tcpConcurrent", "findProcessMode") }) { "unknown core field" }
+            require(core.keys.all { it in setOf("unifiedDelay", "tcpConcurrent", "findProcessMode", "logLevel") }) { "unknown core field" }
             fun boolean(key: String): Boolean? = core[key]?.jsonPrimitive?.let {
                 require(!it.isString) { "invalid $key" }
                 it.booleanOrNull ?: error("invalid $key")
@@ -101,8 +106,12 @@ class ConfigurationOverrideStore(private val directory: File) {
                 require(!it.isString)
                 it.booleanOrNull ?: error("invalid useHosts")
             }
+            val logLevel = core["logLevel"]?.jsonPrimitive?.let {
+                require(it.isString) { "invalid logLevel" }
+                LogLevelOverride.valueOf(it.content)
+            }
             return ConfigurationOverride(
-                ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process),
+                ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process, logLevel),
                 DnsHostsOverride(hosts, useHosts),
             )
         } catch (e: IllegalArgumentException) {
@@ -131,6 +140,7 @@ class ConfigurationOverrideStore(private val directory: File) {
             override.coreBehavior.unifiedDelay?.let { put("unifiedDelay", JsonPrimitive(it)) }
             override.coreBehavior.tcpConcurrent?.let { put("tcpConcurrent", JsonPrimitive(it)) }
             override.coreBehavior.findProcessMode?.let { put("findProcessMode", JsonPrimitive(it.name)) }
+            override.coreBehavior.logLevel?.let { put("logLevel", JsonPrimitive(it.name)) }
         }
         val root = JsonObject(buildMap {
             put("version", JsonPrimitive(1))

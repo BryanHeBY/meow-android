@@ -99,6 +99,7 @@ struct CoreBehaviorOverride {
     unified_delay: Option<bool>,
     tcp_concurrent: Option<bool>,
     find_process_mode: Option<ProcessLookupMode>,
+    log_level: Option<crate::log_level::LogLevelOverride>,
 }
 
 fn core_behavior_yaml(yaml: &str, options: CoreBehaviorOverride) -> Result<String> {
@@ -115,6 +116,9 @@ fn core_behavior_yaml(yaml: &str, options: CoreBehaviorOverride) -> Result<Strin
         }
         if let Some(value) = options.find_process_mode {
             map.insert("find-process-mode".into(), value.as_str().into());
+        }
+        if let Some(value) = options.log_level {
+            map.insert("log-level".into(), value.as_str().into());
         }
         serde_yaml::to_string(&doc).context("serializing runtime profile")
     })
@@ -163,6 +167,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativePreviewPro
         "ipv6": raw.ipv6,
         "unifiedDelay": raw.unified_delay.unwrap_or(false),
         "tcpConcurrent": meow_config::effective_tcp_concurrent(raw.tcp_concurrent),
+        "logLevel": crate::log_level::effective(raw.log_level.as_deref()).as_str(),
         "findProcessMode": crate::engine::android_process_lookup(raw.find_process_mode.unwrap_or_default()),
     });
     env.new_string(preview.to_string())
@@ -226,6 +231,24 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeProfileIpv
 mod tests {
     use super::*;
     use crate::engine::{self, DnsUpstreams};
+
+    #[test]
+    fn log_level_override_changes_only_the_runtime_value() -> Result<()> {
+        let yaml = "log-level: warning\nmode: rule\n";
+        let override_options = serde_json::from_str(r#"{"logLevel":"silent"}"#)?;
+        let runtime = core_behavior_yaml(yaml, override_options)?;
+        let raw = profile_raw(&runtime)?;
+        assert_eq!(raw.log_level.as_deref(), Some("silent"));
+        assert_eq!(profile_raw(yaml)?.log_level.as_deref(), Some("warning"));
+        assert!(serde_json::from_str::<CoreBehaviorOverride>(r#"{"logLevel":"trace"}"#).is_err());
+        assert!(serde_json::from_str::<CoreBehaviorOverride>(r#"{"logLevel":false}"#).is_err());
+        assert_eq!(crate::log_level::effective(None).as_str(), "info");
+        assert_eq!(
+            crate::log_level::effective(Some("warn")).as_str(),
+            "warning"
+        );
+        Ok(())
+    }
 
     #[test]
     fn core_behavior_overlay_preserves_source_and_distinguishes_false_from_inherit() {

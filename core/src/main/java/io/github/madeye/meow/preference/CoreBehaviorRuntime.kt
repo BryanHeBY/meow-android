@@ -19,6 +19,7 @@ object CoreBehaviorRuntime {
             override.unifiedDelay?.let { put("unifiedDelay", JsonPrimitive(it)) }
             override.tcpConcurrent?.let { put("tcpConcurrent", JsonPrimitive(it)) }
             override.findProcessMode?.let { put("findProcessMode", JsonPrimitive(it.wire)) }
+            override.logLevel?.let { put("logLevel", JsonPrimitive(it.wire)) }
         })
         return MeowCore.nativeOverrideCoreBehavior(yaml, options.toString())
     }
@@ -34,6 +35,7 @@ object CoreBehaviorRuntime {
                 fields.getValue("unifiedDelay").jsonPrimitive.boolean,
                 fields.getValue("tcpConcurrent").jsonPrimitive.boolean,
                 FindProcessOverride.entries.first { it.wire == processMode },
+                LogLevelOverride.entries.first { it.wire == fields.getValue("logLevel").jsonPrimitive.content },
             ),
         )
     }
