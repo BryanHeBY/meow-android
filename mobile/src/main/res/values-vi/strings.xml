@@ -88,7 +88,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">Máy chủ proxy</string>
     <string name="proxy_servers_inline_title">Proxy trong hồ sơ</string>
-    <string name="proxy_servers_empty">Không tìm thấy máy chủ proxy. Hãy kết nối hồ sơ có proxy nội tuyến hoặc nhà cung cấp proxy.</string>
+    <string name="proxy_servers_empty">Không tìm thấy máy chủ proxy.</string>
     <string name="proxy_servers_no_nodes">Nhà cung cấp này không có nút nào.</string>
     <string name="proxy_servers_load_error">Không thể tải máy chủ proxy</string>
     <string name="proxy_servers_health_check">Kiểm tra mọi nút</string>
@@ -319,7 +319,7 @@
 
     <!-- Rules -->
     <string name="rules_title">Quy tắc</string>
-    <string name="rules_empty">Không tìm thấy quy tắc nào.\nKết nối VPN để tải quy tắc.</string>
+    <string name="rules_empty">Không tìm thấy quy tắc.</string>
     <string name="rules_filter">Lọc theo loại, giá trị hoặc proxy…</string>
     <string name="rules_load_error">Không thể tải quy tắc</string>
     <plurals name="rules_count">
@@ -433,4 +433,12 @@
     <string name="fault_diagnostics_tun">Chuyển tiếp TUN dừng bất ngờ</string>
     <string name="fault_diagnostics_network">Mạng nền đã thay đổi</string>
     <string name="fault_diagnostics_groups">Không thể làm mới nhóm proxy</string>
+    <string name="connections_close_failed">Không thể đóng kết nối.</string>
+    <string name="controller_loading">Đang chờ lõi…</string>
+    <string name="controller_offline">Kết nối VPN để tải dữ liệu trực tiếp.</string>
+    <string name="controller_failed">Không thể tải dữ liệu trực tiếp từ lõi.</string>
+    <string name="controller_stale">Không thể làm mới. Đang hiển thị dữ liệu đã tải gần nhất.</string>
+    <string name="controller_waiting_providers">Đang chờ nhà cung cấp proxy…</string>
+    <string name="proxy_groups_select_failed">Không thể chuyển proxy.</string>
+    <string name="home_route_mode_failed">Không thể đổi chế độ định tuyến.</string>
 </resources>

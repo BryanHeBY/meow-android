@@ -63,7 +63,7 @@ sealed interface Dest {
     @Serializable data class ConnectionDetail(val id: String) : Dest
 
     /** [focus]: a rule to scroll to and mark, by its place in the engine's list; -1 for none. */
-    @Serializable data class Rules(val focus: Int = -1) : Dest
+    @Serializable data class Rules(val focus: Int = -1, val runId: String? = null) : Dest
 
     @Serializable data object Logs : Dest
 

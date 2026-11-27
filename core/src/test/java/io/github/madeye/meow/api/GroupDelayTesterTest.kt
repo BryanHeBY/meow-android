@@ -215,14 +215,16 @@ class GroupDelayTesterTest {
     }
 
     @Test
-    fun `a dead engine fails every member instead of throwing`() = runTest {
+    fun `a dead controller does not report member timeouts`() = runTest {
         val deadPort = server.port
         server.shutdown()
         val offline = MeowApi(baseUrl = "http://127.0.0.1:$deadPort".toHttpUrl())
 
-        val results = GroupDelayTester(offline).test("Proxy", "Selector", listOf("a", "b")).toList()
+        val error = runCatching {
+            GroupDelayTester(offline).test("Proxy", "Selector", listOf("a", "b")).toList()
+        }.exceptionOrNull()
 
-        assertEquals(setOf(MemberDelay("a", 0), MemberDelay("b", 0)), results.toSet())
+        assertTrue(error is MeowApiException.Unreachable)
     }
 
     @Test

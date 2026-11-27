@@ -99,7 +99,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">Proxy Servers</string>
     <string name="proxy_servers_inline_title">Profile proxies</string>
-    <string name="proxy_servers_empty">No proxy servers found. Connect the VPN with a profile that defines inline proxies or proxy providers.</string>
+    <string name="proxy_servers_empty">No proxy servers found.</string>
     <string name="proxy_servers_no_nodes">No nodes in this provider.</string>
     <string name="proxy_servers_load_error">Failed to load proxy servers</string>
     <string name="proxy_servers_health_check">Check all nodes</string>
@@ -338,7 +338,7 @@
 
     <!-- Rules -->
     <string name="rules_title">Rules</string>
-    <string name="rules_empty">No rules found.\nConnect the VPN to load rules.</string>
+    <string name="rules_empty">No rules found.</string>
     <string name="rules_filter">Filter by type, payload or proxy…</string>
     <string name="rules_load_error">Failed to load rules</string>
     <plurals name="rules_count">
@@ -454,4 +454,12 @@
     <string name="fault_diagnostics_tun">TUN forwarding stopped unexpectedly</string>
     <string name="fault_diagnostics_network">Underlying network changed</string>
     <string name="fault_diagnostics_groups">Proxy groups could not refresh</string>
+    <string name="connections_close_failed">Could not close connections.</string>
+    <string name="controller_loading">Waiting for the core…</string>
+    <string name="controller_offline">Connect the VPN to load live data.</string>
+    <string name="controller_failed">Could not load live data from the core.</string>
+    <string name="controller_stale">Could not refresh. Showing the last known data.</string>
+    <string name="controller_waiting_providers">Waiting for proxy providers…</string>
+    <string name="proxy_groups_select_failed">Could not switch proxies.</string>
+    <string name="home_route_mode_failed">Could not switch route mode.</string>
 </resources>

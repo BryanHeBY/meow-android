@@ -4,6 +4,9 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.api.Connection
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.api.ConnectionNote
 import io.github.madeye.meow.api.ConnectionNotes
 import io.github.madeye.meow.api.DnsResult
@@ -11,6 +14,8 @@ import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.ProxiesResult
 import io.github.madeye.meow.api.Rule
 import io.github.madeye.meow.net.IpGeo
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,9 +25,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** The engine's names for a route no listed rule chose. */
@@ -63,12 +72,14 @@ data class ConnectionDetailUiState(
     val lastSeenAtMillis: Long? = null,
     /** The matched rule's place in the engine's rule list (0-based), once found. */
     val ruleIndex: Int? = null,
+    val ruleRunId: String? = null,
     /** Null until worked out, and when there is nothing to say (no host, rejected…). */
     val remote: RemoteIp? = null,
     /** The display name of the app that opened it, once resolved; null when the engine did not say. */
     val appLabel: String? = null,
     /** How the engine handled it, oldest first; empty until read, and when the engine kept none. */
     val notes: List<ConnectionNote> = emptyList(),
+    val status: ControllerStatus = ControllerStatus.Loading,
 ) {
     val active: Boolean get() = connection != null && lastSeenAtMillis == null
 }
@@ -81,10 +92,12 @@ data class ConnectionDetailUiState(
  * notes are re-read while shown too, until the engine reports it closed or
  * turns out not to record it.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionDetailViewModel(
     private val id: String,
     private val store: RecentConnectionsStore,
-    polling: Flow<Unit>,
+    private val controller: ControllerAccess,
+    polling: Flow<ControllerStatus>,
     private val rules: suspend () -> List<Rule>,
     private val closeConnection: suspend (String) -> Unit,
     private val proxies: suspend () -> ProxiesResult,
@@ -98,69 +111,110 @@ class ConnectionDetailViewModel(
     private val notesPollIntervalMillis: Long = NOTES_POLL_INTERVAL_MS,
 ) : ViewModel() {
 
-    private val ruleIndex = MutableStateFlow<Int?>(null)
+    private val ruleIndex = MutableStateFlow<Pair<ControllerSession, Int>?>(null)
     private val remote = MutableStateFlow<RemoteIp?>(null)
     private val app = MutableStateFlow<String?>(null)
     private val notes = MutableStateFlow<List<ConnectionNote>>(emptyList())
+    private val _closeFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val closeFailed = _closeFailed.asSharedFlow()
 
-    /** Re-reads the notes while collected, until they can no longer change. */
-    private val notesPolling: Flow<Unit> = flow<Unit> {
-        while (refreshNotes()) delay(notesPollIntervalMillis)
-    }.onStart { emit(Unit) }
+    private var notesComplete = false
+    private val reload = MutableStateFlow(0L)
+
+    private val controllerDetails = controller.lifecycle.flatMapLatest { vpn ->
+        val session = vpn.session ?: return@flatMapLatest flowOf(Unit)
+        flow {
+            emit(Unit)
+            val connection = firstSeen()
+            if (store.runIdOf(id) != session.runId) return@flow
+            coroutineScope {
+                launch { loadRule(connection, session) }
+                launch {
+                    if (connection.metadata.destinationIP.isEmpty() && remote.value == null) {
+                        val found = remoteIpOf(
+                            connection,
+                            { controller.read(session, proxies) },
+                            { host -> controller.read(session) { dnsCache(host) } },
+                        )
+                        controller.requireCurrent(session)
+                        showRemote(found)
+                    }
+                }
+                launch {
+                    while (!notesComplete && refreshNotes(session)) delay(notesPollIntervalMillis)
+                }
+            }
+        }
+    }
+
+    private val localDetails = flow {
+        emit(Unit)
+        val connection = firstSeen()
+        coroutineScope {
+            launch { connection.appPackage?.let { app.value = appLabel(it) } }
+            launch {
+                if (connection.metadata.destinationIP.isNotEmpty() && remote.value == null) {
+                    showRemote(RemoteIp.Known(connection.metadata.destinationIP))
+                }
+            }
+        }
+    }
 
     val uiState: StateFlow<ConnectionDetailUiState> =
         combine(
             store.lists,
-            ruleIndex,
+            combine(ruleIndex, controller.lifecycle) { rule, vpn ->
+                rule?.takeIf { it.first == vpn.session }
+            },
             remote,
             combine(app, notes, ::Pair),
-            merge(polling, notesPolling),
-        ) { lists, index, remoteIp, (label, steps), _ ->
-            lists.detail(index).copy(remote = remoteIp, appLabel = label, notes = steps)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), store.lists.value.detail(null))
+            combine(reload.flatMapLatest { polling }, merge(localDetails, controllerDetails)) { status, _ -> status },
+        ) { lists, rule, remoteIp, (label, steps), status ->
+            lists.detail(rule?.second).copy(
+                remote = remoteIp, appLabel = label, notes = steps, status = status, ruleRunId = rule?.first?.runId,
+            )
+        }.stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), store.lists.value.detail(null),
+        )
 
-    /** Reads the notes once; false when there is no point asking again. */
-    private suspend fun refreshNotes(): Boolean {
-        val read = try {
-            connectionNotes(id)
-        } catch (e: MeowApiException) {
-            // Unreachable while the VPN restarts; ask again on the next round.
-            return true
-        } ?: return false
-        notes.value = read.notes
-        // A recording engine notes the flow before listing it, so a live
-        // connection without notes will never get any.
-        return !read.closed && read.notes.isNotEmpty()
+    private suspend fun loadRule(connection: Connection, session: ControllerSession) {
+        if (UnlistedRoute.of(connection) != null || connection.rule.isEmpty()) return
+        try {
+            val index = controller.read(session, rules).indexOfMatch(connection)
+            if (index != null) ruleIndex.value = session to index
+        } catch (_: MeowApiException) { }
     }
 
-    init {
-        // Both once: the rule and the address were fixed when the flow
-        // opened, and later lookups can only be staler, not more right.
-        viewModelScope.launch {
-            val connection = firstSeen()
-            if (UnlistedRoute.of(connection) != null || connection.rule.isEmpty()) return@launch
-            ruleIndex.value = try {
-                rules().indexOfMatch(connection)
-            } catch (e: MeowApiException) {
-                null
-            }
+    private suspend fun showRemote(found: RemoteIp?) {
+        remote.value = found
+        if (found is RemoteIp.Known) remote.value = found.copy(geo = ipGeo(found.ip))
+    }
+
+    private suspend fun refreshNotes(session: ControllerSession): Boolean {
+        val read = try {
+            controller.read(session) { connectionNotes(id) }
+        } catch (_: MeowApiException) {
+            return false
         }
-        viewModelScope.launch {
-            val known = remoteIpOf(firstSeen(), proxies, dnsCache)
-            remote.value = known
-            if (known is RemoteIp.Known) remote.value = known.copy(geo = ipGeo(known.ip))
-        }
-        viewModelScope.launch {
-            firstSeen().appPackage?.let { app.value = appLabel(it) }
-        }
+        notesComplete = read == null || read.closed || read.notes.isEmpty()
+        if (read != null) notes.value = read.notes
+        return !notesComplete
     }
 
     private suspend fun firstSeen(): Connection = store.lists.mapNotNull { it.detail(null).connection }.first()
 
+    fun retry() { reload.update { it + 1 } }
+
     fun close() {
+        val session = controller.session ?: return
+        if (store.runIdOf(id) != session.runId) return
         viewModelScope.launch {
-            store.closeLocal(id)
-            runCatching { closeConnection(id) }
+            try {
+                controller.write(session) { closeConnection(id) }
+                store.closeLocal(id)
+            } catch (_: MeowApiException) {
+                if (controller.isCurrent(session)) _closeFailed.tryEmit(Unit)
+            }
         }
     }
 

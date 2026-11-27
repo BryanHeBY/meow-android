@@ -63,6 +63,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.madeye.meow.AppGraph
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.traffic.TrafficGroup
 import io.github.madeye.meow.traffic.TrafficRow
@@ -135,6 +136,7 @@ import io.github.madeye.meow.ui.util.readText
 import io.github.madeye.meow.ui.util.rememberClipboardText
 import io.github.madeye.meow.ui.util.rememberNotificationPermissionRequest
 import io.github.madeye.meow.ui.util.writeText
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -237,6 +239,7 @@ private fun MeowNavHost(
         }
         composable<Dest.ProxyGroups> {
             ProxyGroupsRoute(
+                snackbarHost = snackbarHost,
                 onOpenNode = { node, testUrl -> navController.navigate(Dest.ProxyDetail(node, testUrl)) },
                 bottomBar = { BottomBar(navController, onTab) },
             )
@@ -280,6 +283,7 @@ private fun MeowNavHost(
         }
         composable<Dest.ProxyServers> {
             ProxyServersRoute(
+                snackbarHost = snackbarHost,
                 onBack = navController::popBackStack,
                 onEditProfile = { profileId, name -> navController.navigate(Dest.ProxyEdit(profileId, name)) },
             )
@@ -323,13 +327,15 @@ private fun MeowNavHost(
         }
         composable<Dest.Connections> {
             ConnectionsRoute(
+                snackbarHost = snackbarHost,
                 onOpen = { id -> navController.navigate(Dest.ConnectionDetail(id)) },
                 onBack = navController::popBackStack,
             )
         }
         composable<Dest.ConnectionDetail> {
             ConnectionDetailRoute(
-                onOpenRule = { index -> navController.navigate(Dest.Rules(focus = index)) },
+                snackbarHost = snackbarHost,
+                onOpenRule = { index, runId -> navController.navigate(Dest.Rules(focus = index, runId = runId)) },
                 onBack = navController::popBackStack,
             )
         }
@@ -440,6 +446,7 @@ private fun HomeRoute(
     val askForNotifications = rememberNotificationPermissionRequest()
     val scope = rememberCoroutineScope()
     val startRefused = stringResource(R.string.home_start_refused)
+    ControllerActionNotice(viewModel.routeModeFailed, R.string.home_route_mode_failed, snackbarHost)
     val forwardingFailed = ZeroTierUi.forwardingError?.let { stringResource(it) }
 
     fun startVpn() {
@@ -505,6 +512,7 @@ private fun HomeRoute(
                 }
             },
             onSelectRouteMode = viewModel::onSelectRouteMode,
+            onRetryRouteMode = viewModel::refreshRouteMode,
             exitIp = exitIpState,
             exitNat = exitNatState,
             onRefreshExitIp = exitIp::refresh,
@@ -725,15 +733,32 @@ private fun SubscriptionsRoute(
 }
 
 @Composable
+private fun ControllerActionNotice(
+    failures: Flow<Unit>,
+    message: Int,
+    host: SnackbarHostState,
+) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val text = stringResource(message)
+    LaunchedEffect(failures, lifecycle, text) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            failures.collect { host.showSnackbar(text) }
+        }
+    }
+}
+
+@Composable
 private fun ProxyGroupsRoute(
+    snackbarHost: SnackbarHostState,
     onOpenNode: (node: String, testUrl: String?) -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     val viewModel: ProxyGroupsViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // On every visit too, not only app resume: see ProxyGroupsViewModel.onResume.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onResume() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stopTests() }
+    ControllerActionNotice(viewModel.selectionFailed, R.string.proxy_groups_select_failed, snackbarHost)
+    ControllerActionNotice(viewModel.testFailed, R.string.proxy_detail_failed, snackbarHost)
     var showTips by rememberSaveable { mutableStateOf(false) }
 
     MeowScaffold(
@@ -755,6 +780,7 @@ private fun ProxyGroupsRoute(
             onOpenNode = onOpenNode,
         )
     }
+    SnackbarHost(snackbarHost)
     if (showTips) ProxyGroupsTipsDialog(onDismiss = { showTips = false })
 }
 
@@ -763,8 +789,12 @@ private fun ProxyDetailRoute(onBack: () -> Unit) {
     val viewModel: ProxyDetailViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stopAll() }
     MeowScaffold(title = state.name, navigationIcon = { BackButton(onBack) }) { padding ->
-        ProxyDetailScreen(state = state, contentPadding = padding, onTest = viewModel::test)
+        ProxyDetailScreen(
+            state = state, contentPadding = padding, onTest = viewModel::test,
+            onRetryDescription = viewModel::retryDescription,
+        )
     }
 }
 
@@ -1074,16 +1104,17 @@ private fun YamlEditorRoute(
 }
 
 @Composable
-private fun ConnectionsRoute(onOpen: (id: String) -> Unit, onBack: () -> Unit) {
+private fun ConnectionsRoute(snackbarHost: SnackbarHostState, onOpen: (id: String) -> Unit, onBack: () -> Unit) {
     val viewModel: ConnectionsViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    ControllerActionNotice(viewModel.closeFailed, R.string.connections_close_failed, snackbarHost)
 
     MeowScaffold(
         title = stringResource(R.string.connections_title),
         navigationIcon = { BackButton(onBack) },
         actions = {
             ConnectionsActions(
-                hasActive = state.hasActive,
+                hasActive = state.hasActive && state.status == ControllerStatus.Ready,
                 hasClosed = state.hasClosed,
                 onCloseAll = viewModel::closeAll,
                 onClearClosed = viewModel::clearClosed,
@@ -1095,21 +1126,28 @@ private fun ConnectionsRoute(onOpen: (id: String) -> Unit, onBack: () -> Unit) {
             contentPadding = padding,
             onQueryChange = viewModel::onQueryChange,
             onOpen = onOpen,
+            onRetry = viewModel::retry,
         )
     }
+    SnackbarHost(snackbarHost)
 }
 
 @Composable
-private fun ConnectionDetailRoute(onOpenRule: (index: Int) -> Unit, onBack: () -> Unit) {
+private fun ConnectionDetailRoute(
+    snackbarHost: SnackbarHostState,
+    onOpenRule: (index: Int, runId: String) -> Unit,
+    onBack: () -> Unit,
+) {
     val viewModel: ConnectionDetailViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    ControllerActionNotice(viewModel.closeFailed, R.string.connections_close_failed, snackbarHost)
 
     MeowScaffold(
         title = stringResource(R.string.connection_detail_title),
         navigationIcon = { BackButton(onBack) },
         actions = {
             // Closing a connection lives here, not on its row in the list.
-            if (state.active) {
+            if (state.active && state.status == ControllerStatus.Ready) {
                 var menuOpen by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("connection_detail_menu")) {
@@ -1134,8 +1172,14 @@ private fun ConnectionDetailRoute(onOpenRule: (index: Int) -> Unit, onBack: () -
             }
         },
     ) { padding ->
-        ConnectionDetailScreen(state = state, contentPadding = padding, onOpenRule = onOpenRule)
+        ConnectionDetailScreen(
+            state = state,
+            contentPadding = padding,
+            onOpenRule = { index -> state.ruleRunId?.let { onOpenRule(index, it) } },
+            onRetry = viewModel::retry,
+        )
     }
+    SnackbarHost(snackbarHost)
 }
 
 @Composable
@@ -1161,9 +1205,15 @@ private fun RulesRoute(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ProxyServersRoute(onBack: () -> Unit, onEditProfile: (Long, String) -> Unit) {
+private fun ProxyServersRoute(
+    snackbarHost: SnackbarHostState,
+    onBack: () -> Unit,
+    onEditProfile: (Long, String) -> Unit,
+) {
     val viewModel: ProxyServersViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stopProbes() }
+    ControllerActionNotice(viewModel.probeFailed, R.string.proxy_detail_failed, snackbarHost)
 
     MeowScaffold(
         title = stringResource(R.string.proxy_servers_title),
@@ -1179,6 +1229,7 @@ private fun ProxyServersRoute(onBack: () -> Unit, onEditProfile: (Long, String) 
             onEditProfile = onEditProfile,
         )
     }
+    SnackbarHost(snackbarHost)
 }
 
 @Composable
@@ -1234,7 +1285,7 @@ private fun ProxyEditRoute(onBack: () -> Unit) {
 @Composable
 private fun LogsRoute(onBack: () -> Unit) {
     val viewModel: LogsViewModel = viewModel(factory = AppGraph.viewModelFactory)
-    val logs by viewModel.logs.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var autoScroll by rememberSaveable { mutableStateOf(true) }
 
     MeowScaffold(
@@ -1242,7 +1293,7 @@ private fun LogsRoute(onBack: () -> Unit) {
         navigationIcon = { BackButton(onBack) },
         actions = { LogsActions(autoScroll) { autoScroll = !autoScroll } },
     ) { padding ->
-        LogsScreen(logs = logs, autoScroll = autoScroll, contentPadding = padding)
+        LogsScreen(state = state, onRetry = viewModel::retry, autoScroll = autoScroll, contentPadding = padding)
     }
 }
 

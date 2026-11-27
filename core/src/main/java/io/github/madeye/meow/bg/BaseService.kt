@@ -15,6 +15,7 @@ import io.github.madeye.meow.aidl.IMeowService
 import io.github.madeye.meow.aidl.IMeowServiceCallback
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
+import io.github.madeye.meow.aidl.VpnServiceSnapshot
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.preference.BuiltinDnsStore
 import io.github.madeye.meow.database.ClashProfile
@@ -48,11 +49,9 @@ object BaseService {
     interface ExpectedException
 
     class Data internal constructor(private val service: Interface) {
-        @Volatile var state = State.Stopped
-            set(value) {
-                field = value
-                _localState.value = value
-            }
+        @Volatile var lifecycle = VpnServiceSnapshot(State.Stopped.ordinal)
+            private set
+        val state: State get() = State.entries[lifecycle.state]
         @Volatile var meowInstance: MeowInstance? = null
         var notification: ServiceNotification? = null
         var closeReceiverRegistered = false
@@ -66,6 +65,7 @@ object BaseService {
             binder.forwardingChanged(flags)
         }
         var connectingJob: Job? = null
+        var restartAfterStop = false
 
         /**
          * A reload arrived mid-start; [Interface.reloadIfChanged] runs again
@@ -86,8 +86,22 @@ object BaseService {
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
-            binder.stateChanged(s, msg)
-            state = s
+            val profile = meowInstance?.profile
+            val next = VpnServiceSnapshot(
+                state = s.ordinal,
+                revision = lifecycle.revision + 1,
+                runId = when (s) {
+                    State.Connecting -> java.util.UUID.randomUUID().toString()
+                    State.Stopped, State.Idle -> null
+                    else -> lifecycle.runId
+                },
+                profileId = profile?.id?.takeIf { it > 0 },
+                profileName = profile?.name.orEmpty(),
+                connectedAtMillis = if (s == State.Connected) android.os.SystemClock.elapsedRealtime() else 0,
+            )
+            lifecycle = next
+            _localState.value = s
+            binder.stateChanged(next, msg)
             notification?.onStateChanged(s)
         }
     }
@@ -118,8 +132,7 @@ object BaseService {
         override val coroutineContext = Dispatchers.Main.immediate + Job()
         private var looper: Job? = null
 
-        override fun getState(): Int = (data?.state ?: State.Idle).ordinal
-        override fun getProfileName(): String = data?.meowInstance?.profileName ?: "Idle"
+        override fun getLifecycle(): VpnServiceSnapshot = data?.lifecycle ?: VpnServiceSnapshot(State.Idle.ordinal)
 
         override fun registerCallback(cb: IMeowServiceCallback) { callbacks.register(cb) }
 
@@ -222,9 +235,8 @@ object BaseService {
             broadcast { it.forwardingChanged(flags) }
         }
 
-        fun stateChanged(s: State, msg: String?) = launch {
-            val profileName = profileName
-            broadcast { it.stateChanged(s.ordinal, profileName, msg) }
+        fun stateChanged(snapshot: VpnServiceSnapshot, msg: String?) = launch {
+            broadcast { it.stateChanged(snapshot, msg) }
         }
 
         override fun close() {
@@ -308,7 +320,11 @@ object BaseService {
         }
 
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
-            if (data.state == State.Stopping) return
+            if (data.state == State.Stopping) {
+                if (!restart) data.restartAfterStop = false
+                return
+            }
+            data.restartAfterStop = restart
             data.changeState(State.Stopping)
             if (restart) data.notification?.showConnecting()
             GlobalScope.launch(Dispatchers.Main.immediate) {
@@ -330,12 +346,14 @@ object BaseService {
                 // arriving meanwhile is answered with this notification (see
                 // onStartCommand) and then ignored, so it must still be
                 // removed. Nothing suspends from here to Stopped.
-                if (!restart) {
+                val restartNow = data.restartAfterStop
+                data.restartAfterStop = false
+                if (!restartNow) {
                     data.notification?.destroy()
                     data.notification = null
                 }
                 data.changeState(State.Stopped, msg)
-                if (restart) startRunner() else stopSelf()
+                if (restartNow) startRunner() else stopSelf()
             }
         }
 

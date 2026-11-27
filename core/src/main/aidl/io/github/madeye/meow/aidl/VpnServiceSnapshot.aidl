@@ -1,0 +1,3 @@
+package io.github.madeye.meow.aidl;
+
+parcelable VpnServiceSnapshot;

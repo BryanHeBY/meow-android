@@ -36,6 +36,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.R
 import io.github.madeye.meow.api.Connection
 import io.github.madeye.meow.api.ConnectionNote
@@ -61,16 +63,21 @@ fun ConnectionDetailScreen(
     state: ConnectionDetailUiState,
     contentPadding: PaddingValues,
     onOpenRule: (index: Int) -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val connection = state.connection
     if (connection == null) {
         Box(modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.connection_detail_gone),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.meow.mutedText,
-            )
+            if (state.status == ControllerStatus.Ready || state.status == ControllerStatus.Offline) {
+                Text(
+                    text = stringResource(R.string.connection_detail_gone),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.meow.mutedText,
+                )
+            } else {
+                ControllerMessage(state.status, onRetry)
+            }
         }
         return
     }
@@ -98,6 +105,7 @@ fun ConnectionDetailScreen(
             .testTag("connection_detail_root"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (state.active && state.status != ControllerStatus.Ready) ControllerMessage(state.status, onRetry)
         Section(
             Line(R.string.connection_detail_host, connection.address),
             appLine(connection, state.appLabel),

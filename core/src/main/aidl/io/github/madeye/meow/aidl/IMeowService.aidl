@@ -2,10 +2,10 @@ package io.github.madeye.meow.aidl;
 import io.github.madeye.meow.aidl.IMeowServiceCallback;
 import io.github.madeye.meow.aidl.SessionStats;
 import io.github.madeye.meow.aidl.TrafficStats;
+import io.github.madeye.meow.aidl.VpnServiceSnapshot;
 
 interface IMeowService {
-    int getState();
-    String getProfileName();
+    VpnServiceSnapshot getLifecycle();
     void registerCallback(in IMeowServiceCallback cb);
     void startListeningForBandwidth(in IMeowServiceCallback cb, long timeout);
     void stopListeningForBandwidth(in IMeowServiceCallback cb);

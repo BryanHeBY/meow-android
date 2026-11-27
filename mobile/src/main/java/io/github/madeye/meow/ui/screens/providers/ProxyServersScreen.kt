@@ -18,13 +18,14 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.R
 import io.github.madeye.meow.ui.components.DelayBadge
 import io.github.madeye.meow.ui.components.GlassCard
@@ -52,27 +55,11 @@ fun ProxyServersScreen(
 ) {
     val visibleProviders = filterProxyServerProviders(state.providers, state.query)
     when {
-        state.loading && state.providers.isEmpty() -> Box(
-            modifier = modifier.fillMaxSize().testTag("proxy_servers_root"),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator()
-        }
-
-        state.failed && state.providers.isEmpty() -> Box(
+        state.providers.isEmpty() && state.status != ControllerStatus.Ready -> Box(
             modifier = modifier.fillMaxSize().padding(contentPadding).testTag("proxy_servers_root"),
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = stringResource(R.string.proxy_servers_load_error),
-                    color = MaterialTheme.meow.danger,
-                    textAlign = TextAlign.Center,
-                )
-                androidx.compose.material3.TextButton(onClick = onRetry) {
-                    Text(stringResource(R.string.common_retry))
-                }
-            }
+            ControllerMessage(state.status, onRetry)
         }
 
         state.providers.isEmpty() -> Box(
@@ -99,6 +86,13 @@ fun ProxyServersScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (state.status == ControllerStatus.Stale) item { ControllerMessage(state.status, onRetry) }
+            if (state.waitingForProviders) {
+                item {
+                    Text(stringResource(R.string.controller_waiting_providers), color = MaterialTheme.meow.mutedText)
+                    TextButton(onClick = onRetry) { Text(stringResource(R.string.common_refresh)) }
+                }
+            }
             item {
                 OutlinedTextField(
                     value = state.query,

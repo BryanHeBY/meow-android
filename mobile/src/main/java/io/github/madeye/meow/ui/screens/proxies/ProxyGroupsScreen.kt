@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.ui.components.DelayBadge
 import io.github.madeye.meow.ui.components.GlassCard
@@ -77,12 +78,13 @@ fun ProxyGroupsScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (state.refreshFailed) {
+        val failed = state.status == ControllerStatus.Failed || state.status == ControllerStatus.Stale
+        if (failed) {
             item {
                 GlassCard {
                     Text(
                         text = stringResource(
-                            if (state.groups.isEmpty()) R.string.proxy_groups_refresh_failed
+                            if (state.status == ControllerStatus.Failed) R.string.proxy_groups_refresh_failed
                             else R.string.proxy_groups_refresh_stale,
                         ),
                         color = MaterialTheme.meow.mutedText,
@@ -91,7 +93,15 @@ fun ProxyGroupsScreen(
                 }
             }
         }
-        if (state.groups.isEmpty() && !state.refreshFailed) {
+        if (state.waitingForProviders) {
+            item {
+                GlassCard {
+                    Text(stringResource(R.string.controller_waiting_providers), color = MaterialTheme.meow.mutedText)
+                    TextButton(onClick = onRetry) { Text(stringResource(R.string.common_refresh)) }
+                }
+            }
+        }
+        if (state.groups.isEmpty() && !failed && !state.waitingForProviders) {
             item { Placeholder(state) }
         } else {
             items(state.groups, key = { it.name }) { group ->
@@ -149,9 +159,10 @@ fun ProxyGroupsTipsDialog(onDismiss: () -> Unit) {
 @Composable
 private fun Placeholder(state: ProxyGroupsUiState) {
     val message = when {
-        !state.hasProfile -> R.string.proxy_no_subscription_hint
-        state.state == BaseService.State.Connected -> R.string.proxy_no_groups
         state.state == BaseService.State.Connecting -> R.string.proxy_groups_connecting
+        state.status == ControllerStatus.Loading -> R.string.controller_loading
+        state.status == ControllerStatus.Ready -> R.string.proxy_no_groups
+        !state.hasProfile -> R.string.proxy_no_subscription_hint
         else -> R.string.proxy_groups_disconnected
     }
     GlassCard {

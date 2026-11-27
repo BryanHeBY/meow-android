@@ -220,7 +220,7 @@
     <string name="settings_engine_offline">အသုံးပြုရန် VPN ချိတ်ဆက်ပါ</string>
     <string name="settings_network">ကွန်ရက်</string>
     <string name="settings_builtin_dns">ပါဝင်ပြီးသား DNS</string>
-    <string name="settings_builtin_dns_desc">ပရိုဖိုင်၏ DNS ဆာဗာများအစား TCP ဖြင့် 119.29.29.29 နှင့် 223.5.5.5 ကို သုံးသည်</string>
+    <string name="settings_builtin_dns_desc">ပရိုဖိုင်၏ DNS ဆာဗာများအစား TCP ဖြင့် 119.</string>
     <string name="settings_builtin_dns_failed">DNS ပြောင်း၍ မရပါ: %1$s</string>
     <string name="override_title">ဖွဲ့စည်းမှု ဆက်တင် အစားထိုးခြင်း</string>
     <string name="override_global">အထွေထွေ ဆက်တင်များ</string>
@@ -324,7 +324,7 @@
 
     <!-- Rules -->
     <string name="rules_title">စည်းမျဉ်းများ</string>
-    <string name="rules_empty">စည်းမျဉ်း မတွေ့ပါ။\nစည်းမျဉ်းများ ကြည့်ရန် VPN ချိတ်ဆက်ပါ။</string>
+    <string name="rules_empty">စည်းမျဉ်းများ မတွေ့ပါ။</string>
     <string name="rules_filter">အမျိုးအစား၊ payload သို့မဟုတ် ပရောက်စီဖြင့် စစ်ထုတ်ရန်…</string>
     <string name="rules_load_error">စည်းမျဉ်းများ ရယူ၍ မရပါ</string>
     <plurals name="rules_count">
@@ -438,4 +438,12 @@
     <string name="fault_diagnostics_tun">TUN ပို့ဆောင်မှု မမျှော်လင့်ဘဲ ရပ်သွားသည်</string>
     <string name="fault_diagnostics_network">အခြေခံကွန်ရက် ပြောင်းလဲသွားသည်</string>
     <string name="fault_diagnostics_groups">ပရောက်စီအုပ်စုများကို အသစ်ပြန်ယူမရပါ</string>
+    <string name="connections_close_failed">ချိတ်ဆက်မှုများကို ပိတ်၍မရပါ။</string>
+    <string name="controller_loading">အင်ဂျင်ကို စောင့်နေသည်…</string>
+    <string name="controller_offline">လက်ရှိဒေတာ ရယူရန် VPN ချိတ်ဆက်ပါ။</string>
+    <string name="controller_failed">အင်ဂျင်မှ လက်ရှိဒေတာ ရယူ၍မရပါ။</string>
+    <string name="controller_stale">အသစ်ပြန်ရယူ၍မရပါ။ နောက်ဆုံးရရှိထားသော ဒေတာကို ပြသနေသည်။</string>
+    <string name="controller_waiting_providers">ပရောက်စီ ဝန်ဆောင်မှုပေးသူများကို စောင့်နေသည်…</string>
+    <string name="proxy_groups_select_failed">ပရောက်စီ ပြောင်း၍မရပါ။</string>
+    <string name="home_route_mode_failed">လမ်းကြောင်းရွေးချယ်မှုမုဒ် ပြောင်း၍မရပါ။</string>
 </resources>

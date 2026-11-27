@@ -66,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.subscription.AutoUpdateSchedule
 import io.github.madeye.meow.subscription.SubscriptionUserInfo
 import io.github.madeye.meow.ui.components.GlassCard
@@ -91,7 +92,7 @@ fun SubscriptionsScreen(
     onConfigurationOverride: (Long) -> Unit,
     onDuplicate: (id: Long, name: String) -> Unit,
     onRefresh: (Long) -> Unit,
-    onUpdateRuleSets: () -> Unit,
+    onUpdateRuleSets: (Long) -> Unit,
     onExport: (ProfileUi) -> Unit,
     onShareQr: (ProfileUi) -> Unit,
     onDelete: (Long) -> Unit,
@@ -130,7 +131,7 @@ fun SubscriptionsScreen(
                 onConfigurationOverride = { onConfigurationOverride(selected.id) },
                 onDuplicate = { onDuplicate(selected.id, nameOfCopy) },
                 onRefresh = { onRefresh(selected.id) },
-                onUpdateRuleSets = onUpdateRuleSets,
+                onUpdateRuleSets = { onUpdateRuleSets(selected.id) },
                 onExport = { onExport(selected) },
                 onShareQr = { onShareQr(selected) },
                 onDelete = { onDelete(selected.id) },
@@ -325,9 +326,10 @@ private fun ProfileActions(
                 onClick = onRefresh,
             )
         }
-        if (profile.declaresRuleSets && !ruleSets.nothingToUpdate) {
+        val profileRuleSets = ruleSets.takeIf { it.profileId == profile.id } ?: RuleSetsUi()
+        if (profile.declaresRuleSets && !profileRuleSets.nothingToUpdate) {
             HorizontalDivider(color = border)
-            RuleSetsRow(state = ruleSets, onClick = onUpdateRuleSets)
+            RuleSetsRow(state = profileRuleSets, onClick = onUpdateRuleSets)
         }
         if (profile.hasYaml) {
             HorizontalDivider(color = border)
@@ -385,7 +387,9 @@ private fun RuleSetsRow(state: RuleSetsUi, onClick: () -> Unit) {
     val summary = state.summary
     val subtitle = when {
         !state.connected -> stringResource(R.string.settings_engine_offline)
-        summary == null -> null
+        state.status == ControllerStatus.Loading -> stringResource(R.string.controller_loading)
+        state.status == ControllerStatus.Stale -> stringResource(R.string.controller_stale)
+        summary == null -> stringResource(R.string.controller_failed)
         summary.oldestUpdateMillis == null ->
             pluralStringResource(R.plurals.subs_rule_sets_count, summary.count, summary.count)
         else -> pluralStringResource(
@@ -399,7 +403,7 @@ private fun RuleSetsRow(state: RuleSetsUi, onClick: () -> Unit) {
         title = stringResource(R.string.subs_update_rule_sets),
         icon = Icons.Filled.CloudDownload,
         onClick = onClick,
-        enabled = state.connected && !state.updating,
+        enabled = state.connected && state.status != ControllerStatus.Loading && !state.updating,
         subtitle = subtitle,
         trailing = if (state.updating) {
             { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) }

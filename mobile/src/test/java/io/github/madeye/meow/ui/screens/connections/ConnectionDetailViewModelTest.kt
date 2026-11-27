@@ -3,6 +3,10 @@ package io.github.madeye.meow.ui.screens.connections
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.api.Connection
 import io.github.madeye.meow.api.ConnectionMeta
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.vpn.VpnLifecycle
 import io.github.madeye.meow.api.ConnectionNote
 import io.github.madeye.meow.api.ConnectionNotes
 import io.github.madeye.meow.api.DnsResult
@@ -19,10 +23,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -39,7 +45,10 @@ import org.junit.Test
 class ConnectionDetailViewModelTest {
 
     private var now = 1_000L
-    private val store = RecentConnectionsStore(clock = { now })
+    private val store = RecentConnectionsStore(clock = { now }).apply { onEngineRun("test") }
+    private val controller = ControllerAccess(
+        MutableStateFlow(VpnLifecycle(state = BaseService.State.Connected, runId = "test")),
+    ) { now }
     private val ruleLookups = AtomicInteger()
     private var rules: suspend () -> List<Rule> = { RULES }
     private val closed = CopyOnWriteArrayList<String>()
@@ -68,7 +77,8 @@ class ConnectionDetailViewModelTest {
     private fun viewModel(id: String) = ConnectionDetailViewModel(
         id = id,
         store = store,
-        polling = flowOf(Unit).onStart { polled.incrementAndGet() },
+        controller = controller,
+        polling = flowOf(ControllerStatus.Ready).onStart { polled.incrementAndGet() },
         rules = {
             ruleLookups.incrementAndGet()
             rules()
@@ -89,7 +99,10 @@ class ConnectionDetailViewModelTest {
             noteAnswers[read.coerceAtMost(noteAnswers.lastIndex)]
         },
         notesPollIntervalMillis = 1,
-    ).also { viewModels += it }
+    ).also { vm ->
+        viewModels += vm
+        vm.viewModelScope.launch { vm.uiState.collect {} }
+    }
 
     private suspend fun ConnectionDetailViewModel.await(until: (ConnectionDetailUiState) -> Boolean) =
         withTimeout(5_000) { uiState.first(until) }
@@ -171,13 +184,13 @@ class ConnectionDetailViewModelTest {
             ),
         )
         val reloaded = viewModel("reloaded")
-        withTimeout(5_000) { while (ruleLookups.get() < 1) delay(10) }
         assertNull(reloaded.await { it.connection != null }.ruleIndex)
+        withTimeout(5_000) { while (ruleLookups.get() < 1) delay(10) }
 
         rules = { throw MeowApiException.Unreachable(IOException("VPN stopped")) }
         val failed = viewModel("failed")
-        withTimeout(5_000) { while (ruleLookups.get() < 2) delay(10) }
         assertNull(failed.await { it.connection != null }.ruleIndex)
+        withTimeout(5_000) { while (ruleLookups.get() < 2) delay(10) }
     }
 
     @Test

@@ -96,7 +96,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">سرورهای پروکسی</string>
     <string name="proxy_servers_inline_title">پروکسی‌های نمایه</string>
-    <string name="proxy_servers_empty">‏هیچ سرور پروکسی یافت نشد. VPN را با نمایه‌ای دارای پروکسی‌های درون‌خطی یا ارائه‌دهنده‌های پروکسی وصل کنید.</string>
+    <string name="proxy_servers_empty">‏هیچ سرور پروکسی یافت نشد.</string>
     <string name="proxy_servers_no_nodes">‏هیچ گرهی در این ارائه‌دهنده وجود ندارد.</string>
     <string name="proxy_servers_load_error">‏بارگیری سرورهای پروکسی انجام نشد</string>
     <string name="proxy_servers_health_check">‏بررسی همه گره‌ها</string>
@@ -335,7 +335,7 @@
 
     <!-- Rules -->
     <string name="rules_title">قوانین</string>
-    <string name="rules_empty">هیچ قانونی پیدا نشد.\nبرای بارگیری قوانین، VPN را وصل کنید.</string>
+    <string name="rules_empty">قانونی یافت نشد.</string>
     <string name="rules_filter">فیلتر بر اساس نوع، مقدار یا پروکسی…</string>
     <string name="rules_load_error">بارگیری قوانین ناموفق بود</string>
     <plurals name="rules_count">
@@ -451,4 +451,12 @@
     <string name="fault_diagnostics_tun">انتقال TUN غیرمنتظره متوقف شد</string>
     <string name="fault_diagnostics_network">شبکهٔ زیربنایی تغییر کرد</string>
     <string name="fault_diagnostics_groups">به‌روزرسانی گروه‌های پراکسی ناموفق بود</string>
+    <string name="connections_close_failed">بستن اتصال‌ها ممکن نبود.</string>
+    <string name="controller_loading">در انتظار هسته…</string>
+    <string name="controller_offline">برای بارگیری داده‌های زنده، به وی‌پی‌ان متصل شوید.</string>
+    <string name="controller_failed">بارگیری داده‌های زنده از هسته ممکن نبود.</string>
+    <string name="controller_stale">تازه‌سازی ممکن نبود. آخرین داده‌های شناخته‌شده نمایش داده می‌شوند.</string>
+    <string name="controller_waiting_providers">در انتظار ارائه‌دهندگان پراکسی…</string>
+    <string name="proxy_groups_select_failed">تغییر پراکسی ممکن نبود.</string>
+    <string name="home_route_mode_failed">تغییر حالت مسیریابی ممکن نبود.</string>
 </resources>

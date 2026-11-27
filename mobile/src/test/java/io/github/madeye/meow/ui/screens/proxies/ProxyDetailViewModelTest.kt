@@ -1,6 +1,8 @@
 package io.github.madeye.meow.ui.screens.proxies
 
 import androidx.lifecycle.viewModelScope
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.vpn.VpnLifecycle
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.ProxyInfo
@@ -22,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -66,7 +69,8 @@ class ProxyDetailViewModelTest {
     }
 
     private val transport = FakeTransport()
-    private val vpnState = MutableStateFlow(BaseService.State.Connected)
+    private val vpnState = MutableStateFlow(VpnLifecycle(state = BaseService.State.Connected, runId = "test"))
+    private val controller = ControllerAccess(vpnState) { 0L }
     private val described = CopyOnWriteArrayList<String>()
     private val tcpTests = CopyOnWriteArrayList<Pair<String, String>>()
     private var tcpDelay: suspend () -> Int = { 120 }
@@ -87,12 +91,15 @@ class ProxyDetailViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun track(vm: ProxyDetailViewModel) = vm.also { viewModels += it }
+    private fun track(vm: ProxyDetailViewModel) = vm.also {
+        viewModels += it
+        it.viewModelScope.launch { it.uiState.collect {} }
+    }
 
     private fun viewModel(testUrl: String? = "https://cp.cloudflare.com/") = track(ProxyDetailViewModel(
         name = "Tokyo 01",
         testUrl = testUrl,
-        vpnState = vpnState,
+        controller = controller,
         describe = { name ->
             described += name
             ProxyInfo(name = name, type = "Snell", udp = true, history = emptyList())
@@ -112,12 +119,12 @@ class ProxyDetailViewModelTest {
 
     @Test
     fun `describes the proxy once connected`() = runBlocking {
-        vpnState.value = BaseService.State.Stopped
+        vpnState.value = VpnLifecycle(state = BaseService.State.Stopped)
         val vm = viewModel()
         assertNull(vm.uiState.value.type)
         assertTrue(described.isEmpty())
 
-        vpnState.value = BaseService.State.Connected
+        vpnState.value = VpnLifecycle(state = BaseService.State.Connected, runId = "new")
         val state = withTimeout(5_000) { vm.uiState.first { it.type != null } }
 
         assertEquals("Snell", state.type)
@@ -207,8 +214,8 @@ class ProxyDetailViewModelTest {
         val vm = track(ProxyDetailViewModel(
             name = "Tokyo 01",
             testUrl = null,
-            vpnState = vpnState,
-            describe = { throw IOException("engine unreachable") },
+            controller = controller,
+            describe = { throw MeowApiException.Http("proxy", 404) },
             tcpDelay = { _, _ -> 1 },
             prober = ProxyProber(object : ProxyProbeTransport {
                 override fun probe(id: Long, proxy: String, kind: String, arg: String): String =
@@ -227,7 +234,7 @@ class ProxyDetailViewModelTest {
 
     @Test
     fun `tests wait for the VPN`() = runBlocking {
-        vpnState.value = BaseService.State.Stopped
+        vpnState.value = VpnLifecycle(state = BaseService.State.Stopped)
         val vm = viewModel()
         vm.test(ProxyProbe.UdpLatency)
         vm.test(ProxyProbe.TcpLatency)
@@ -245,7 +252,7 @@ class ProxyDetailViewModelTest {
         vm.test(ProxyProbe.UdpLatency)
         withTimeout(5_000) { while (transport.calls.isEmpty()) delay(10) }
 
-        vpnState.value = BaseService.State.Stopping
+        vpnState.value = VpnLifecycle(state = BaseService.State.Stopping)
 
         assertEquals(ProbeState.Idle, vm.await(ProxyProbe.UdpLatency) { it == ProbeState.Idle })
         withTimeout(5_000) { while (transport.cancelled.isEmpty()) delay(10) }

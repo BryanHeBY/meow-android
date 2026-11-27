@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
-import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
@@ -14,11 +13,10 @@ import io.github.madeye.meow.diagnostics.FaultProcess
 import java.io.IOException
 import timber.log.Timber
 
-class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceConnection,
-    IMeowServiceCallback.Stub() {
+class MeowConnection(private val listenForBandwidth: Boolean = false) : ServiceConnection {
 
     interface Callback {
-        fun stateChanged(state: BaseService.State, profileName: String, msg: String?)
+        fun lifecycleChanged(binding: Long, snapshot: VpnServiceSnapshot?, msg: String?)
         fun trafficUpdated(profileId: Long, stats: TrafficStats)
         fun trafficPersisted(profileId: Long)
         fun forwardingChanged(flags: Int)
@@ -27,18 +25,42 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
     private var callback: Callback? = null
     // Volatile: proxy probes read it from IO threads.
     @Volatile private var service: IMeowService? = null
-    private var callbackRegistered = false
-    // Remembered so onServiceDisconnected can rebind and resume the callback
-    // registration (state + traffic) when the :vpn process restarts.
+    private var attachment: Attachment? = null
+    private var generation = 0L
     private var bound = false
     private var bindContext: Context? = null
 
-    val serviceState: BaseService.State
-        get() = try {
-            BaseService.State.entries[service?.state ?: 0]
-        } catch (_: Exception) {
-            BaseService.State.Idle
+    private inner class Attachment(val generation: Long) : IMeowServiceCallback.Stub() {
+        private var revision = -1L
+        private var messageRevision = -1L
+
+        override fun stateChanged(snapshot: VpnServiceSnapshot?, msg: String?) =
+            withAttachment { if (snapshot != null) publish(snapshot, msg) }
+
+        override fun trafficUpdated(profileId: Long, stats: TrafficStats?) =
+            withAttachment { if (stats != null) callback?.trafficUpdated(profileId, stats) }
+
+        override fun trafficPersisted(profileId: Long) =
+            withAttachment { callback?.trafficPersisted(profileId) }
+
+        override fun forwardingChanged(flags: Int) =
+            withAttachment { callback?.forwardingChanged(flags) }
+
+        fun publish(snapshot: VpnServiceSnapshot, msg: String? = null) {
+            if (snapshot.revision < revision) return
+            val newMessage = !msg.isNullOrEmpty() && messageRevision != snapshot.revision
+            if (snapshot.revision == revision && !newMessage) return
+            revision = snapshot.revision
+            if (newMessage) messageRevision = revision
+            callback?.lifecycleChanged(generation, snapshot, msg.takeIf { newMessage })
         }
+
+        private inline fun withAttachment(block: () -> Unit) {
+            synchronized(this@MeowConnection) {
+                if (attachment === this) block()
+            }
+        }
+    }
 
     @Synchronized
     fun connect(context: Context, callback: Callback) {
@@ -59,56 +81,69 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
 
     @Synchronized
     fun disconnect(context: Context) {
-        // Drop the rebind context first so a racing onServiceDisconnected
-        // cannot rebind after a clean disconnect.
         bindContext = null
-        if (bound) {
-            unregisterCallback()
-            context.unbindService(this)
-            bound = false
-        }
+        val previous = attachment
+        val remote = service
+        detach()
+        if (previous != null) try {
+            remote?.unregisterCallback(previous)
+        } catch (_: RemoteException) { }
+        if (bound) context.unbindService(this)
+        bound = false
         callback = null
-        service = null
     }
 
+    @Synchronized
     override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-        val service = IMeowService.Stub.asInterface(binder) ?: return
-        this.service = service
+        if (!bound) return
+        val remote = IMeowService.Stub.asInterface(binder) ?: return
+        val current = Attachment(++generation)
+        service = remote
+        attachment = current
         try {
-            service.registerCallback(this)
-            callbackRegistered = true
-            if (listenForBandwidth) service.startListeningForBandwidth(this, 1000)
-            callback?.forwardingChanged(service.forwardingFlags)
+            remote.registerCallback(current)
+            if (listenForBandwidth) remote.startListeningForBandwidth(current, 1000)
+            callback?.forwardingChanged(remote.forwardingFlags)
+            current.publish(remote.lifecycle)
         } catch (e: RemoteException) {
             Timber.w(e)
+            detach()
         }
-        callback?.stateChanged(serviceState, service.profileName ?: "", null)
     }
 
     @Synchronized
     override fun onServiceDisconnected(name: ComponentName?) {
-        if (bindContext != null) FaultDiagnostics.record(FaultProcess.UI, FaultKind.VPN_BINDER_LOST)
-        callbackRegistered = false
-        service = null
-        bound = false
-        // VPN runs in a separate :vpn process; if it dies (system kill, crash),
-        // the UI would otherwise keep showing the last-known state.
-        callback?.forwardingChanged(0)
-        callback?.stateChanged(BaseService.State.Stopped, "", null)
-        // Rebind immediately so registerCallback()/startListeningForBandwidth()
-        // run against the new process instance as soon as it is up. Without
-        // this, the Activity never re-registered, and state + traffic
-        // callbacks stayed dead until the Activity was recreated.
-        bindContext?.let { ctx ->
-            val intent = Intent(ctx, io.github.madeye.meow.bg.VpnService::class.java)
-                .setAction(io.github.madeye.meow.utils.Action.SERVICE)
-            bound = try {
-                ctx.bindService(intent, this, Context.BIND_AUTO_CREATE)
-            } catch (e: SecurityException) {
-                Timber.w(e, "bindService refused")
-                false
-            }
+        if (!bound) return
+        FaultDiagnostics.record(FaultProcess.UI, FaultKind.VPN_BINDER_LOST)
+        detach()
+        // The binding stays registered. Android calls onServiceConnected
+        // again when the service process is available.
+    }
+
+    @Synchronized
+    override fun onBindingDied(name: ComponentName?) {
+        val context = bindContext ?: return
+        val listener = callback ?: return
+        disconnect(context)
+        connect(context, listener)
+    }
+
+    @Synchronized
+    fun refresh() {
+        val remote = service ?: return
+        try {
+            attachment?.publish(remote.lifecycle)
+        } catch (e: RemoteException) {
+            Timber.w(e)
+            detach()
         }
+    }
+
+    private fun detach() {
+        attachment = null
+        service = null
+        callback?.forwardingChanged(0)
+        callback?.lifecycleChanged(++generation, null, null)
     }
 
     /**
@@ -154,35 +189,11 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
         ForwardingControl.FAILED
     }
 
-    override fun forwardingChanged(flags: Int) {
-        callback?.forwardingChanged(flags)
-    }
-
     /** The running session's stats; null when no VPN runs or `:vpn` is not bound. */
     fun sessionStats(): SessionStats? = try {
         service?.sessionStats
     } catch (_: RemoteException) {
         // Gone with its process, and the session with it.
         null
-    }
-
-    private fun unregisterCallback() {
-        val service = service ?: return
-        if (callbackRegistered) try {
-            service.unregisterCallback(this)
-        } catch (_: RemoteException) { }
-        callbackRegistered = false
-    }
-
-    override fun stateChanged(state: Int, profileName: String?, msg: String?) {
-        callback?.stateChanged(BaseService.State.entries[state], profileName ?: "", msg)
-    }
-
-    override fun trafficUpdated(profileId: Long, stats: TrafficStats?) {
-        if (stats != null) callback?.trafficUpdated(profileId, stats)
-    }
-
-    override fun trafficPersisted(profileId: Long) {
-        callback?.trafficPersisted(profileId)
     }
 }

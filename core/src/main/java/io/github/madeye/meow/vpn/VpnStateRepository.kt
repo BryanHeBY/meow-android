@@ -5,6 +5,7 @@ import android.content.Intent
 import io.github.madeye.meow.aidl.MeowConnection
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
+import io.github.madeye.meow.aidl.VpnServiceSnapshot
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.net.ProxyProbeTransport
@@ -42,6 +43,9 @@ class VpnStateRepository(
      */
     private val recordDispatcher = Dispatchers.IO.limitedParallelism(1)
 
+    private val _lifecycle = MutableStateFlow(VpnLifecycle())
+    val lifecycle: StateFlow<VpnLifecycle> = _lifecycle.asStateFlow()
+
     private val _state = MutableStateFlow(BaseService.State.Idle)
     val state: StateFlow<BaseService.State> = _state.asStateFlow()
 
@@ -78,18 +82,29 @@ class VpnStateRepository(
      * Re-reads the binder after a resume. The `:vpn` process can be killed while
      * the app is backgrounded, in which case the last state we saw is stale.
      */
-    fun refresh() {
-        _state.value = connection.serviceState
-    }
+    fun refresh() = connection.refresh()
 
     fun requestStop(context: Context) {
         context.sendBroadcast(Intent(Action.CLOSE).setPackage(context.packageName))
     }
 
-    override fun stateChanged(state: BaseService.State, profileName: String, msg: String?) {
-        _state.value = state
-        if (profileName.isNotEmpty()) _profileName.value = profileName
-        if (state == BaseService.State.Connected) recorder.reset()
+    override fun lifecycleChanged(binding: Long, snapshot: VpnServiceSnapshot?, msg: String?) {
+        val next = if (snapshot == null) {
+            VpnLifecycle()
+        } else {
+            VpnLifecycle(
+                state = BaseService.State.entries[snapshot.state],
+                binding = binding,
+                runId = snapshot.runId,
+                profileId = snapshot.profileId,
+                profileName = snapshot.profileName,
+                connectedAtMillis = snapshot.connectedAtMillis,
+            )
+        }
+        if (next.session != null && next.session != _lifecycle.value.session) recorder.reset()
+        _lifecycle.value = next
+        _state.value = next.state
+        if (next.profileName.isNotEmpty()) _profileName.value = next.profileName
         if (!msg.isNullOrEmpty()) _messages.tryEmit(msg)
     }
 

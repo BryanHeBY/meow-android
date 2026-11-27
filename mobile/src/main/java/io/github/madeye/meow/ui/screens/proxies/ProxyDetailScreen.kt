@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.net.NatBehavior
 import io.github.madeye.meow.net.NatType
 import io.github.madeye.meow.ui.components.GlassCard
@@ -46,6 +48,7 @@ fun ProxyDetailScreen(
     state: ProxyDetailUiState,
     contentPadding: PaddingValues,
     onTest: (ProxyProbe) -> Unit,
+    onRetryDescription: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.meow
@@ -63,6 +66,9 @@ fun ProxyDetailScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         GlassCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            if (state.descriptionStatus == ControllerStatus.Loading || state.connected && state.descriptionStatus != ControllerStatus.Ready) {
+                ControllerMessage(state.descriptionStatus, onRetryDescription)
+            }
             InfoRow(R.string.proxy_detail_type, state.type?.ifEmpty { null } ?: PLACEHOLDER)
             HorizontalDivider(color = colors.border)
             InfoRow(

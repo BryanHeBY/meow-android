@@ -88,7 +88,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">代理服务器</string>
     <string name="proxy_servers_inline_title">配置中的代理</string>
-    <string name="proxy_servers_empty">未找到代理服务器。请连接包含内联代理或代理提供商的配置。</string>
+    <string name="proxy_servers_empty">未找到代理服务器。</string>
     <string name="proxy_servers_no_nodes">此提供商没有节点。</string>
     <string name="proxy_servers_load_error">代理服务器加载失败</string>
     <string name="proxy_servers_health_check">检查所有节点</string>
@@ -319,7 +319,7 @@
 
     <!-- Rules -->
     <string name="rules_title">规则</string>
-    <string name="rules_empty">未找到规则。\n连接 VPN 以加载规则。</string>
+    <string name="rules_empty">未找到规则。</string>
     <string name="rules_filter">按类型、载荷或代理过滤…</string>
     <string name="rules_load_error">加载规则失败</string>
     <plurals name="rules_count">
@@ -433,4 +433,12 @@
     <string name="fault_diagnostics_tun">TUN 转发异常退出</string>
     <string name="fault_diagnostics_network">底层网络变化</string>
     <string name="fault_diagnostics_groups">代理分组刷新失败</string>
+    <string name="connections_close_failed">无法关闭连接。</string>
+    <string name="controller_loading">正在等待核心…</string>
+    <string name="controller_offline">连接 VPN 以加载实时数据。</string>
+    <string name="controller_failed">无法从核心加载实时数据。</string>
+    <string name="controller_stale">无法刷新，正在显示上次获取的数据。</string>
+    <string name="controller_waiting_providers">正在等待代理提供者…</string>
+    <string name="proxy_groups_select_failed">无法切换代理。</string>
+    <string name="home_route_mode_failed">无法切换路由模式。</string>
 </resources>

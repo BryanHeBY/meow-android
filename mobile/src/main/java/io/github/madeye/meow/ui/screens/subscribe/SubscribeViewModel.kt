@@ -178,10 +178,10 @@ class SubscribeViewModel(
      * Updates the running profile's rule sets. Not [withBusy]: the row shows
      * its own progress, and the other actions stay usable meanwhile.
      */
-    fun updateRuleSets() {
+    fun updateRuleSets(profileId: Long) {
         viewModelScope.launch {
             val event = try {
-                ruleSets.updateAll() ?: return@launch
+                ruleSets.updateAll(profileId) ?: return@launch
             } catch (e: IOException) {
                 SubscribeEvent.Failure(e.reason())
             }

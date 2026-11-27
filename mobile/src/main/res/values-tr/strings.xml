@@ -88,7 +88,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">Proxy Sunucuları</string>
     <string name="proxy_servers_inline_title">Profil proxy\'leri</string>
-    <string name="proxy_servers_empty">Proxy sunucusu bulunamadı. Satır içi proxy\'ler veya proxy sağlayıcıları içeren bir profile bağlanın.</string>
+    <string name="proxy_servers_empty">Proxy sunucusu bulunamadı.</string>
     <string name="proxy_servers_no_nodes">Bu sağlayıcıda düğüm yok.</string>
     <string name="proxy_servers_load_error">Proxy sunucuları yüklenemedi</string>
     <string name="proxy_servers_health_check">Tüm düğümleri denetle</string>
@@ -327,7 +327,7 @@
 
     <!-- Rules -->
     <string name="rules_title">Kurallar</string>
-    <string name="rules_empty">Kural bulunamadı.\nKuralları yüklemek için VPN bağlantısını kurun.</string>
+    <string name="rules_empty">Kural bulunamadı.</string>
     <string name="rules_filter">Tür, değer veya proxy adına göre filtrele…</string>
     <string name="rules_load_error">Kurallar yüklenemedi</string>
     <plurals name="rules_count">
@@ -443,4 +443,12 @@
     <string name="fault_diagnostics_tun">TUN iletimi beklenmedik şekilde durdu</string>
     <string name="fault_diagnostics_network">Alt ağ değişti</string>
     <string name="fault_diagnostics_groups">Proxy grupları yenilenemedi</string>
+    <string name="connections_close_failed">Bağlantılar kapatılamadı.</string>
+    <string name="controller_loading">Çekirdek bekleniyor…</string>
+    <string name="controller_offline">Canlı verileri yüklemek için VPN’e bağlanın.</string>
+    <string name="controller_failed">Çekirdekten canlı veriler yüklenemedi.</string>
+    <string name="controller_stale">Yenilenemedi. Bilinen son veriler gösteriliyor.</string>
+    <string name="controller_waiting_providers">Proxy sağlayıcıları bekleniyor…</string>
+    <string name="proxy_groups_select_failed">Proxy değiştirilemedi.</string>
+    <string name="home_route_mode_failed">Yönlendirme modu değiştirilemedi.</string>
 </resources>

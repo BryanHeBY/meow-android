@@ -39,6 +39,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.R
 import io.github.madeye.meow.api.Connection
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.api.controllerStatus
+import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.ui.components.GlassCard
@@ -46,6 +51,7 @@ import io.github.madeye.meow.ui.theme.MeowTextStyles
 import io.github.madeye.meow.ui.theme.meow
 import io.github.madeye.meow.ui.util.Formatters
 import java.time.Instant
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +59,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -69,6 +80,7 @@ data class ConnectionsUiState(
     val query: String = "",
     /** Display names of the apps behind [rows], by package, as they resolve. */
     val appLabels: Map<String, String> = emptyMap(),
+    val status: ControllerStatus = ControllerStatus.Loading,
 ) {
     val visibleRows: List<ConnectionRow>
         get() = rows.filter { it.connection.matches(query, appLabelOf(it.connection)) }
@@ -97,38 +109,47 @@ internal fun ConnectionLists.rows(): List<ConnectionRow> =
     (active.map { ConnectionRow(it) } + recent.map { ConnectionRow(it.connection, it.lastSeenAtMillis) })
         .sortedByDescending { runCatching { Instant.parse(it.connection.start) }.getOrDefault(Instant.MIN) }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionsViewModel(
+    private val controller: ControllerAccess,
     private val api: MeowApi,
     private val recentConnections: RecentConnectionsStore,
     private val appLabels: AppLabels,
 ) : ViewModel() {
-
     private val query = MutableStateFlow("")
+    private val reload = MutableStateFlow(0L)
+    private val _closeFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val closeFailed = _closeFailed.asSharedFlow()
 
-    /** Runs only while [uiState] is collected, not for the ViewModel's lifetime. */
-    private val polling = connectionsPolling(api, recentConnections)
+    private val polling = reload.flatMapLatest {
+        connectionsPolling(controller, recentConnections) { api.connections().connections }
+    }
 
     val uiState: StateFlow<ConnectionsUiState> =
-        combine(recentConnections.lists, query, polling, appLabels.labels) { lists, search, _, labels ->
+        combine(recentConnections.lists, query, polling, appLabels.labels) { lists, search, status, labels ->
             val rows = lists.rows()
-            // Only packages not seen before start a lookup; their labels come back through `labels`.
             appLabels.request(rows.mapNotNull { it.connection.appPackage })
-            ConnectionsUiState(rows = rows, query = search, appLabels = labels)
+            ConnectionsUiState(rows = rows, query = search, appLabels = labels, status = status)
         }.stateIn(
             viewModelScope,
-            // Polling stops when the screen leaves the composition, rather
-            // than running forever as the Flutter version's timer did.
-            SharingStarted.WhileSubscribed(5_000),
-            // So the first frame already shows history kept by the process-scoped store.
+            SharingStarted.WhileSubscribed(replayExpirationMillis = 0),
             ConnectionsUiState(rows = recentConnections.lists.value.rows(), appLabels = appLabels.labels.value),
         )
 
     fun onQueryChange(value: String) { query.value = value }
 
+    fun retry() { reload.update { it + 1 } }
+
     fun closeAll() {
+        val session = controller.session ?: return
+        if (!recentConnections.hasActiveIn(session.runId)) return
         viewModelScope.launch {
-            recentConnections.closeAllLocal()
-            runCatching { api.closeAllConnections() }
+            try {
+                controller.write(session) { api.closeAllConnections() }
+                recentConnections.closeAllLocal()
+            } catch (_: MeowApiException) {
+                if (controller.isCurrent(session)) _closeFailed.tryEmit(Unit)
+            }
         }
     }
 
@@ -136,28 +157,44 @@ class ConnectionsViewModel(
 }
 
 private const val POLL_INTERVAL_MS = 1_000L
+private const val FAILED_POLL_INTERVAL_MS = 5_000L
 
-/**
- * Feeds [store] a `/connections` snapshot every second, only while collected,
- * so polling starts and stops with the screen collecting it: the list, or one
- * connection's detail page. Diffing lives in [store], which outlives both.
- */
-internal fun connectionsPolling(api: MeowApi, store: RecentConnectionsStore): Flow<Unit> = flow<Unit> {
-    while (true) {
-        val ticket = store.snapshotTicket()
-        try {
-            store.onSnapshot(api.connections().connections, ticket)
-        } catch (e: MeowApiException) {
-            if (e is MeowApiException.Unreachable) {
-                // The controller is gone (VPN stopped). The flows from the
-                // last snapshot are done; file them as closed. A later
-                // successful poll puts back anything still open.
-                store.onSnapshot(emptyList(), ticket)
+/** Starts and stops with the screen collecting it. Only a successful poll updates live history. */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun connectionsPolling(
+    controller: ControllerAccess,
+    store: RecentConnectionsStore,
+    getConnections: suspend () -> List<Connection>,
+): Flow<ControllerStatus> = controller.lifecycle.flatMapLatest { vpn ->
+    val session = vpn.session
+    if (session == null) {
+        if (vpn.state == BaseService.State.Stopping || vpn.state == BaseService.State.Stopped) {
+            store.onEngineRun(null)
+        }
+        flowOf(vpn.controllerStatus)
+    } else {
+        store.onEngineRun(session.runId)
+        flow {
+            emit(ControllerStatus.Loading)
+            var loaded = store.lists.value.active.isNotEmpty()
+            while (true) {
+                val ticket = store.snapshotTicket()
+                try {
+                    val connections = controller.read(session, getConnections)
+                    store.onSnapshot(connections, ticket)
+                    loaded = true
+                    emit(ControllerStatus.Ready)
+                    delay(POLL_INTERVAL_MS)
+                } catch (e: MeowApiException) {
+                    controller.requireCurrent(session)
+                    emit(if (loaded) ControllerStatus.Stale else ControllerStatus.Failed)
+                    if (e !is MeowApiException.Unreachable) break
+                    delay(FAILED_POLL_INTERVAL_MS)
+                }
             }
         }
-        delay(POLL_INTERVAL_MS)
     }
-}.onStart { emit(Unit) }
+}.buffer(0)
 
 @Composable
 fun ConnectionsScreen(
@@ -165,6 +202,7 @@ fun ConnectionsScreen(
     contentPadding: PaddingValues,
     onQueryChange: (String) -> Unit,
     onOpen: (String) -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -182,7 +220,12 @@ fun ConnectionsScreen(
         Spacer(Modifier.height(8.dp))
 
         val rows = state.visibleRows
-        if (rows.isEmpty()) {
+        if (state.status != ControllerStatus.Ready) {
+            Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                ControllerMessage(state.status, onRetry)
+            }
+        }
+        if (rows.isEmpty() && state.status == ControllerStatus.Ready) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = stringResource(R.string.connections_empty),

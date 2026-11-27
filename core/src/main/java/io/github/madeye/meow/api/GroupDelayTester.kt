@@ -10,8 +10,8 @@ import kotlinx.coroutines.sync.withPermit
 import timber.log.Timber
 
 /**
- * One member's probe outcome. [delayMs] is 0 when the probe timed out or
- * failed — the same sentinel the engine appends to the member's history.
+ * One member's probe outcome. [delayMs] is 0 when the engine reports a
+ * timeout or failed dial, the sentinel it appends to the member's history.
  */
 data class MemberDelay(val name: String, val delayMs: Int)
 
@@ -77,9 +77,9 @@ class GroupDelayTester(
         try {
             api.testProxyDelay(name, url, timeoutMs)
         } catch (e: MeowApiException) {
-            // 504 is a timeout and 503 a failed dial; either way the node is
-            // unusable right now, and the engine has recorded a 0 for it.
-            0
+            // 504 is a timeout and 503 a failed dial. Transport, auth, and
+            // protocol errors do not tell us anything about the member.
+            if (e is MeowApiException.Http && (e.code == 503 || e.code == 504)) 0 else throw e
         }
 
     companion object {

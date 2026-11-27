@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 data class RecentConnection(
     val connection: Connection,
     val lastSeenAtMillis: Long,
+    val runId: String? = null,
 )
 
 data class ConnectionLists(
@@ -54,6 +55,26 @@ class RecentConnectionsStore(
     private val _lists = MutableStateFlow(ConnectionLists())
     val lists: StateFlow<ConnectionLists> = _lists.asStateFlow()
 
+    private var activeRunId: String? = null
+
+    /** Only an authoritative stop or a different engine retires the active set. */
+    fun onEngineRun(runId: String?) {
+        synchronized(lock) {
+            if (activeRunId == runId) return
+            localEdits++
+            publish(emptyList())
+            activeRunId = runId
+        }
+    }
+
+    fun hasActiveIn(runId: String): Boolean = synchronized(lock) {
+        activeRunId == runId && activeById.isNotEmpty()
+    }
+
+    fun runIdOf(id: String): String? = synchronized(lock) {
+        if (id in activeById) activeRunId else _lists.value.recent.firstOrNull { it.connection.id == id }?.runId
+    }
+
     /** Last active set, in snapshot order. */
     private var activeById: Map<String, Connection> = emptyMap()
 
@@ -76,7 +97,7 @@ class RecentConnectionsStore(
         }
     }
 
-    /** Optimistic close of one flow; beats any snapshot already in flight. */
+    /** Acknowledged close of one flow; beats any snapshot already in flight. */
     fun closeLocal(id: String) {
         synchronized(lock) {
             if (id !in activeById) return
@@ -85,7 +106,7 @@ class RecentConnectionsStore(
         }
     }
 
-    /** Optimistic close of every flow; beats any snapshot already in flight. */
+    /** Acknowledged close of every flow; beats any snapshot already in flight. */
     fun closeAllLocal() {
         synchronized(lock) {
             localEdits++
@@ -112,7 +133,7 @@ class RecentConnectionsStore(
         if (closed.isNotEmpty()) {
             val stamped = closed
                 .sortedByDescending { it.start }
-                .map { RecentConnection(connection = it, lastSeenAtMillis = activeSeenAt) }
+                .map { RecentConnection(connection = it, lastSeenAtMillis = activeSeenAt, runId = activeRunId) }
             nextRecent = (stamped + nextRecent).take(capacity)
         }
         activeById = activeNow.associateBy { it.id }

@@ -6,6 +6,9 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.analytics.Analytics
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.api.controllerStatus
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.RouteMode
@@ -15,7 +18,10 @@ import io.github.madeye.meow.repo.ProfileRepository
 import io.github.madeye.meow.vpn.VpnStateRepository
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
+import io.github.madeye.meow.vpn.ControllerSession
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +43,7 @@ data class HomeUiState(
     /** False until Room's first answer, so launch doesn't flash the no-profile prompt. */
     val profileLoaded: Boolean = false,
     val routeMode: RouteMode = RouteMode.Rule,
+    val routeModeStatus: ControllerStatus = ControllerStatus.Offline,
     val meowForwarding: Boolean = true,
     val overlayForwarding: Boolean = false,
     val forwardingChangePending: Boolean = false,
@@ -54,6 +61,7 @@ data class HomeUiState(
 
 class HomeViewModel(
     private val vpn: VpnStateRepository,
+    private val controller: ControllerAccess,
     private val profiles: ProfileRepository,
     private val api: MeowApi,
     private val analytics: Analytics,
@@ -64,67 +72,51 @@ class HomeViewModel(
     /** The user's persisted pick; `null` until they make one. */
     private val savedMode = MutableStateFlow<RouteMode?>(null)
 
-    /** What the running engine reports; `null` while disconnected. */
-    private val engineMode = MutableStateFlow<RouteMode?>(null)
+    private val reloadMode = MutableStateFlow(0L)
+    private val _routeModeFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val routeModeFailed = _routeModeFailed.asSharedFlow()
     private val modeSwitch = Mutex()
     private val forwardingChangePending = MutableStateFlow(false)
     private val channels = combine(
         vpn.meowForwarding, vpn.overlayForwarding, forwardingChangePending,
     ) { meow, overlay, pending -> Triple(meow, overlay, pending) }
 
-    /** The engine is the truth while it runs; otherwise, what the next start will use. */
-    private val routeMode: Flow<RouteMode> = combine(
-        engineMode,
+    private val configuredMode = combine(
         savedMode,
-        // Mapped apart from uiState so the YAML scan doesn't rerun on every traffic tick.
-        profiles.observeSelected()
-            .map { it?.yamlContent }
-            .distinctUntilChanged()
-            .map { yaml -> yaml?.let(RouteMode::configured) ?: RouteMode.Rule },
-    ) { engine, saved, configured -> engine ?: saved ?: configured }
+        profiles.observeSelected().map { it?.yamlContent }.distinctUntilChanged(),
+    ) { saved, yaml -> saved ?: yaml?.let(RouteMode::configured) ?: RouteMode.Rule }
+
+    private val runtimeMode = controller.observe(reloadMode) {
+        modeSwitch.withLock { api.configs() }
+    }
 
     val uiState: StateFlow<HomeUiState> = combine(
-        vpn.state,
-        profiles.observeSelected(),
-        routeMode,
-        channels,
-    ) { state, profile, mode, channel ->
+        controller.lifecycle, profiles.observeSelected(), runtimeMode, configuredMode, channels,
+    ) { lifecycle, profile, data, configured, channel ->
+        val runtime = data.takeIf { it.session != null && it.session == lifecycle.session }
         HomeUiState(
-            state = state,
-            profileName = profile?.name.orEmpty(),
+            state = lifecycle.state,
+            profileName = lifecycle.profileName.ifEmpty { profile?.name.orEmpty() },
             hasProfile = profile != null,
             profileLoaded = true,
-            routeMode = mode,
+            routeMode = runtime?.value?.routeMode ?: configured,
+            routeModeStatus = runtime?.status ?: lifecycle.controllerStatus,
             meowForwarding = channel.first,
             overlayForwarding = channel.second,
             forwardingChangePending = channel.third,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), HomeUiState())
 
     init {
         viewModelScope.launch {
             savedMode.value = withContext(Dispatchers.IO) { routeModes.load() }
         }
-        // The engine's mode is only there to read while it runs, and a
-        // profile switch restarts it — so re-read on every state transition.
-        viewModelScope.launch {
-            vpn.state.collect { state ->
-                if (state == BaseService.State.Connected) {
-                    loadRouteMode()
-                } else {
-                    engineMode.value = null
-                }
-            }
-        }
     }
 
     /** The `:vpn` process may have been killed while backgrounded. */
-    fun onResume() {
-        vpn.refresh()
-        if (vpn.state.value == BaseService.State.Connected) {
-            viewModelScope.launch { loadRouteMode() }
-        }
-    }
+    fun onResume() = vpn.refresh()
+
+    fun refreshRouteMode() { reloadMode.update { it + 1 } }
 
     fun onConnectRequested() = analytics.vpnConnect()
 
@@ -152,49 +144,47 @@ class HomeViewModel(
      * stream, a chat socket) would otherwise keep its old route.
      */
     fun onSelectRouteMode(mode: RouteMode) {
+        val lifecycle = controller.lifecycle.value
+        if (lifecycle.session == null && lifecycle.state != BaseService.State.Stopped) return
+        if (lifecycle.session != null && uiState.value.routeModeStatus != ControllerStatus.Ready) return
         viewModelScope.launch {
-            // Serialized so rapid taps reach the engine in tap order; the
-            // last one has to win.
-            modeSwitch.withLock { switchRouteMode(mode) }
+            modeSwitch.withLock {
+                if (controller.lifecycle.value == lifecycle) switchRouteMode(mode, lifecycle.session)
+            }
         }
     }
 
-    private suspend fun switchRouteMode(mode: RouteMode) {
-        val connected = vpn.state.value == BaseService.State.Connected
-        if (connected) {
-            val previous = engineMode.value
-            engineMode.value = mode
+    private suspend fun switchRouteMode(mode: RouteMode, session: ControllerSession?) {
+        if (session != null) {
             try {
-                api.setMode(mode)
+                controller.write(session) { api.setMode(mode) }
             } catch (e: MeowApiException) {
+                if (!controller.isCurrent(session)) return
                 Timber.w(e, "switching route mode failed")
-                engineMode.value = previous
+                _routeModeFailed.tryEmit(Unit)
+                refreshRouteMode()
                 return
             }
         }
         try {
-            withContext(Dispatchers.IO) { routeModes.save(mode) }
-            savedMode.value = mode
+            val saved = withContext(Dispatchers.IO) {
+                if (session != null && !controller.isCurrent(session)) return@withContext false
+                routeModes.save(mode)
+                true
+            }
+            if (saved) savedMode.value = mode
         } catch (e: IOException) {
-            // The running engine already switched; only the replay is lost.
             Timber.w(e, "saving route mode failed")
         }
         analytics.routeModeSelect(mode.wire)
-        if (connected) {
+        if (session != null && controller.isCurrent(session)) {
+            refreshRouteMode()
             try {
-                api.closeAllConnections()
+                controller.write(session) { api.closeAllConnections() }
             } catch (e: MeowApiException) {
                 Timber.w(e, "closing connections after a route mode switch failed")
             }
-            routeChanges.notifyChanged()
-        }
-    }
-
-    private suspend fun loadRouteMode() {
-        try {
-            api.configs().routeMode?.let { engineMode.value = it }
-        } catch (e: MeowApiException) {
-            Timber.w(e, "loading route mode failed")
+            if (controller.isCurrent(session)) routeChanges.notifyChanged()
         }
     }
 }

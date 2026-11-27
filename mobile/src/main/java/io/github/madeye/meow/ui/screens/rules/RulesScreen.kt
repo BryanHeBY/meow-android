@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,7 +37,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.R
 import io.github.madeye.meow.api.MeowApi
-import io.github.madeye.meow.api.MeowApiException
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.api.Rule
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.theme.MeowTextStyles
@@ -48,13 +49,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 
 data class RulesUiState(
     val rules: List<Rule> = emptyList(),
     val query: String = "",
-    val loading: Boolean = true,
-    val failed: Boolean = false,
+    val status: ControllerStatus = ControllerStatus.Loading,
     /** The rule a connection's detail page opened the list on; -1 for none. */
     val focus: Int = -1,
 ) {
@@ -71,37 +71,26 @@ data class RulesUiState(
         }
 }
 
-class RulesViewModel(private val api: MeowApi, private val focus: Int = -1) : ViewModel() {
-
-    private val rules = MutableStateFlow<List<Rule>>(emptyList())
+class RulesViewModel(
+    controller: ControllerAccess,
+    api: MeowApi,
+    focus: Int = -1,
+    focusRunId: String? = null,
+) : ViewModel() {
     private val query = MutableStateFlow("")
-    private val loading = MutableStateFlow(true)
-    private val failed = MutableStateFlow(false)
+    private val reload = MutableStateFlow(0L)
 
-    val uiState: StateFlow<RulesUiState> =
-        combine(rules, query, loading, failed) { list, search, isLoading, didFail ->
-            RulesUiState(list, search, isLoading, didFail, focus)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RulesUiState(focus = focus))
-
-    init {
-        load()
-    }
+    val uiState: StateFlow<RulesUiState> = combine(
+        controller.observe(reload) { api.rules() },
+        query,
+    ) { data, search ->
+        val currentFocus = focus.takeIf { focusRunId == null || data.session?.runId == focusRunId } ?: -1
+        RulesUiState(data.value.orEmpty(), search, data.status, currentFocus)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), RulesUiState())
 
     fun onQueryChange(value: String) { query.value = value }
 
-    fun load() {
-        viewModelScope.launch {
-            loading.value = true
-            failed.value = false
-            try {
-                rules.value = api.rules()
-            } catch (e: MeowApiException) {
-                failed.value = true
-            } finally {
-                loading.value = false
-            }
-        }
-    }
+    fun load() { reload.update { it + 1 } }
 }
 
 @Composable
@@ -134,20 +123,15 @@ fun RulesScreen(
             if (focusShown || state.focus < 0 || state.rules.isEmpty()) return@LaunchedEffect
             focusShown = true
             val position = state.visible.indexOfFirst { it.index == state.focus }
-            if (position >= 0) listState.scrollToItem((position - 2).coerceAtLeast(0))
+            val noticeRows = if (state.status == ControllerStatus.Stale) 1 else 0
+            if (position >= 0) listState.scrollToItem((position + noticeRows - 2).coerceAtLeast(0))
         }
 
         when {
-            state.failed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = stringResource(R.string.rules_load_error),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.meow.danger,
-                    )
-                    TextButton(onClick = onRetry) { Text(stringResource(R.string.common_retry)) }
+            state.visible.isEmpty() && state.status != ControllerStatus.Ready ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    ControllerMessage(state.status, onRetry)
                 }
-            }
 
             state.visible.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -167,6 +151,7 @@ fun RulesScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (state.status == ControllerStatus.Stale) item { ControllerMessage(state.status, onRetry) }
                 items(state.visible, key = { it.index }) { (index, rule) ->
                     RuleRow(rule, focused = index == state.focus)
                 }

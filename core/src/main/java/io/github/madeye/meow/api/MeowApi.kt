@@ -11,6 +11,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -25,7 +26,6 @@ import okhttp3.Callback
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -56,20 +56,7 @@ class MeowApi(
     private val json: Json = MeowJson,
     private val secret: () -> String? = { null },
 ) {
-    /** [baseClient] plus the secret; every call goes through this one. */
-    private val client: OkHttpClient = baseClient.newBuilder().addInterceptor(BearerAuth(secret)).build()
-
-    private data class AuthSnapshot(val token: String?)
-
-    private class BearerAuth(private val secret: () -> String?) : Interceptor {
-        override fun intercept(chain: Interceptor.Chain): Response {
-            val snapshot = chain.request().tag(AuthSnapshot::class.java)
-            val token = (if (snapshot != null) snapshot.token else secret())
-                ?.takeIf { it.isNotEmpty() } ?: return chain.proceed(chain.request())
-            val request = chain.request().newBuilder().header("Authorization", "Bearer $token").build()
-            return chain.proceed(request)
-        }
-    }
+    private val client: OkHttpClient = baseClient
 
     companion object {
         const val DEFAULT_BASE_URL = "http://127.0.0.1:9090"
@@ -106,6 +93,7 @@ class MeowApi(
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
+            .followRedirects(false)
             // Keeps the /logs socket from being reaped while idle.
             .pingInterval(20, TimeUnit.SECONDS)
             .build()
@@ -136,6 +124,10 @@ class MeowApi(
     // Proxies
     // -------------------------------------------------------------------------
 
+    private val groupOrderClient by lazy {
+        client.newBuilder().callTimeout(1, TimeUnit.SECONDS).build()
+    }
+
     /** `/proxies`, plus the profile's group order from [proxyGroupOrder]. */
     suspend fun proxies(): ProxiesResult {
         val body = get("/proxies", operation = "proxies")
@@ -155,7 +147,7 @@ class MeowApi(
      */
     private suspend fun proxyGroupOrder(): List<String> =
         try {
-            val body = get("/api/proxy-groups", operation = "proxyGroups")
+            val body = get("/api/proxy-groups", operation = "proxyGroups", client = groupOrderClient)
             decode("proxyGroups") {
                 json.decodeFromString(ListSerializer(ConfiguredGroup.serializer()), body)
                     .map { it.name }
@@ -476,37 +468,48 @@ class MeowApi(
      * `static`, and the engine lives in `:vpn`. The WebSocket crosses the
      * process boundary over loopback, so it sees the real log stream.
      */
-    fun logs(level: String = "info"): Flow<LogEntry> {
+    fun logs(level: String = "info"): Flow<LogEntry> = logStream(level) { cause, backoff ->
+        if (cause !is IOException || cause is MeowApiException.Http) return@logStream false
+        delay(backoff)
+        true
+    }.mapNotNull { it.entry }
+
+    /** An empty event marks an authenticated upgrade, even when no log lines are emitted. */
+    fun logStream(
+        level: String = "info",
+        retry: suspend (Throwable, Long) -> Boolean,
+    ): Flow<LogStreamEvent> {
         val url = baseUrl.newBuilder()
             .scheme(if (baseUrl.isHttps) "https" else "http")
             .addPathSegment("logs")
             .addQueryParameter("level", level)
             .build()
-        return streamJsonLines(url) { json.decodeFromString(LogEntry.serializer(), it) }
-    }
-
-    private fun <T> streamJsonLines(url: HttpUrl, parse: (String) -> T): Flow<T> {
-        // Reset the backoff whenever a connection actually delivers something,
-        // so a long-lived stream that drops doesn't inherit the previous ramp.
         val attemptOffset = java.util.concurrent.atomic.AtomicInteger(0)
         return callbackFlow {
-            val request = Request.Builder().url(url).build()
+            val token = withContext(Dispatchers.IO) { secret() }
+            val request = Request.Builder().url(url)
+                .bearer(token)
+                .build()
             val socket = client.newWebSocket(
                 request,
                 object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        trySend(LogStreamEvent())
+                    }
+
                     override fun onMessage(webSocket: WebSocket, text: String) {
                         attemptOffset.set(0)
                         // A single malformed frame must not tear down the stream.
                         val parsed = try {
-                            parse(text)
+                            json.decodeFromString(LogEntry.serializer(), text)
                         } catch (e: Exception) {
                             return
                         }
-                        trySend(parsed)
+                        trySend(LogStreamEvent(parsed))
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        close(t)
+                        close(if (response == null) t else httpError("logs", response.code, token))
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -530,8 +533,7 @@ class MeowApi(
             if (cause is kotlinx.coroutines.CancellationException) return@retryWhen false
             val attempt = attemptOffset.getAndIncrement().coerceAtMost(6)
             // 500ms doubling to a 30s ceiling — same ramp as the Dart client.
-            delay((500L shl attempt).coerceAtMost(30_000L))
-            true
+            retry(cause, (500L shl attempt).coerceAtMost(30_000L))
         }
     }
 
@@ -539,11 +541,11 @@ class MeowApi(
     // Plumbing
     // -------------------------------------------------------------------------
 
-    private suspend fun get(path: String, operation: String): String {
+    private suspend fun get(path: String, operation: String, client: OkHttpClient = this.client): String {
         val url = baseUrl.newBuilder()
             .addPathSegments(path.trimStart('/'))
             .build()
-        return execute(Request.Builder().url(url).build(), operation)
+        return execute(Request.Builder().url(url).build(), operation, client = client)
     }
 
     private suspend fun execute(
@@ -554,12 +556,16 @@ class MeowApi(
     ): String = withContext(Dispatchers.IO) {
         // Loading the current engine's secret can read disk. Snapshot it here
         // before enqueue so OkHttp cannot pick up another engine's token.
+        val token = secret()
         val authenticated = request.newBuilder()
-            .tag(AuthSnapshot::class.java, AuthSnapshot(secret()))
+            // A previous engine can share the profile secret and still own
+            // an accepted socket after its listener stops.
+            .header("Connection", "close")
+            .bearer(token)
             .build()
         try {
-            client.newCall(authenticated).await().use {
-                if (it.code !in okCodes) throw MeowApiException.Http(operation, it.code)
+            client.newCall(authenticated).awaitBody {
+                if (it.code !in okCodes) throw httpError(operation, it.code, token)
                 it.body?.string().orEmpty()
             }
         } catch (e: MeowApiException) {
@@ -569,6 +575,12 @@ class MeowApi(
             throw MeowApiException.Unreachable(e)
         }
     }
+
+    private fun Request.Builder.bearer(token: String?): Request.Builder =
+        if (token.isNullOrEmpty()) this else header("Authorization", "Bearer $token")
+
+    private fun httpError(operation: String, code: Int, token: String?) =
+        MeowApiException.Http(operation, code, if (code == 401) ({ secret() != token }) else null)
 
     private inline fun <T> decode(operation: String, block: () -> T): T =
         try {
@@ -589,20 +601,29 @@ val MeowJson: Json = Json {
     coerceInputValues = true
 }
 
+data class LogStreamEvent(val entry: LogEntry? = null)
+
 /** Signals that the peer hung up, so the stream re-dials rather than ending. */
 private class StreamClosed(code: Int, reason: String) :
     IOException("websocket closed ($code${if (reason.isEmpty()) "" else ": $reason"})")
 
-internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+private suspend fun Call.awaitBody(read: (Response) -> String): String = suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {
-            // A response delivered after cancellation would otherwise leak
-            // its body and connection.
-            if (cont.isActive) cont.resume(response) else response.close()
+            response.use {
+                if (cont.isActive) {
+                    try {
+                        cont.resume(read(response))
+                    } catch (e: IOException) {
+                        cont.resumeWithException(e)
+                    }
+                }
+            }
         }
+
         override fun onFailure(call: Call, e: IOException) {
             if (!cont.isCancelled) cont.resumeWithException(e)
         }
     })
-    cont.invokeOnCancellation { runCatching { cancel() } }
 }

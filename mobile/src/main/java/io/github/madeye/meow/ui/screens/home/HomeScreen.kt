@@ -46,7 +46,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.api.RouteMode
+import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.traffic.TrafficGroup
 import io.github.madeye.meow.traffic.TrafficRow
@@ -74,6 +76,7 @@ fun HomeScreen(
     onToggle: (Boolean) -> Unit,
     onToggleMeowForwarding: (Boolean) -> Unit,
     onSelectRouteMode: (RouteMode) -> Unit,
+    onRetryRouteMode: () -> Unit,
     exitIp: ExitIpUiState,
     exitNat: NatUiState,
     onRefreshExitIp: () -> Unit,
@@ -109,6 +112,7 @@ fun HomeScreen(
                 onToggle = onToggle,
                 onToggleMeowForwarding = onToggleMeowForwarding,
                 onSelectRouteMode = onSelectRouteMode,
+                onRetryRouteMode = onRetryRouteMode,
             )
         }
         ZeroTierUi.addHomeSummary(this, onZeroTier)
@@ -172,6 +176,7 @@ private fun StatusCard(
     onToggle: (Boolean) -> Unit,
     onToggleMeowForwarding: (Boolean) -> Unit,
     onSelectRouteMode: (RouteMode) -> Unit,
+    onRetryRouteMode: () -> Unit,
 ) {
     val colors = MaterialTheme.meow
     val label = stringResource(
@@ -235,9 +240,14 @@ private fun StatusCard(
         RouteModePicker(
             mode = state.routeMode,
             // Usable while disconnected too: the pick applies on the next connect.
-            enabled = !state.isBusy && state.hasProfile && state.meowForwarding,
+            enabled = !state.isBusy && state.hasProfile && state.meowForwarding &&
+                (!state.isConnected && state.routeModeStatus == ControllerStatus.Offline ||
+                    state.routeModeStatus == ControllerStatus.Ready),
             onSelect = onSelectRouteMode,
         )
+        if (state.isConnected && state.routeModeStatus != ControllerStatus.Ready) {
+            ControllerMessage(state.routeModeStatus, onRetryRouteMode)
+        }
     }
 }
 

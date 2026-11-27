@@ -100,7 +100,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">خوادم البروكسي</string>
     <string name="proxy_servers_inline_title">وكلاء الملف الشخصي</string>
-    <string name="proxy_servers_empty">لم يتم العثور على خوادم بروكسي. صِل VPN بملف يعرّف وكلاء مضمّنين أو موفري بروكسي.</string>
+    <string name="proxy_servers_empty">لم يتم العثور على خوادم بروكسي.</string>
     <string name="proxy_servers_no_nodes">لا توجد عقد في موفر الخدمة هذا.</string>
     <string name="proxy_servers_load_error">تعذر تحميل خوادم البروكسي</string>
     <string name="proxy_servers_health_check">فحص كل العقد</string>
@@ -371,7 +371,7 @@
 
     <!-- Rules -->
     <string name="rules_title">القواعد</string>
-    <string name="rules_empty">لم يُعثر على أي قاعدة.\nاتصل بشبكة VPN لتحميل القواعد.</string>
+    <string name="rules_empty">لم يتم العثور على قواعد.</string>
     <string name="rules_filter">تصفية حسب النوع أو القيمة أو البروكسي…</string>
     <string name="rules_load_error">تعذّر تحميل القواعد</string>
     <plurals name="rules_count">
@@ -495,4 +495,12 @@
     <string name="fault_diagnostics_tun">توقف تمرير TUN بشكل غير متوقع</string>
     <string name="fault_diagnostics_network">تغيرت الشبكة الأساسية</string>
     <string name="fault_diagnostics_groups">تعذر تحديث مجموعات الوكيل</string>
+    <string name="connections_close_failed">تعذّر إغلاق الاتصالات.</string>
+    <string name="controller_loading">في انتظار المحرك…</string>
+    <string name="controller_offline">اتصل بالشبكة الخاصة الافتراضية لتحميل البيانات المباشرة.</string>
+    <string name="controller_failed">تعذّر تحميل البيانات المباشرة من المحرك.</string>
+    <string name="controller_stale">تعذّر التحديث. يتم عرض آخر البيانات المعروفة.</string>
+    <string name="controller_waiting_providers">في انتظار مزوّدي الوكيل…</string>
+    <string name="proxy_groups_select_failed">تعذّر تبديل الوكيل.</string>
+    <string name="home_route_mode_failed">تعذّر تبديل وضع التوجيه.</string>
 </resources>

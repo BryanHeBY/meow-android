@@ -3,10 +3,13 @@ package io.github.madeye.meow.ui.screens.proxies
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.api.ControllerStatus
+import io.github.madeye.meow.api.controllerStatus
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.ProxyInfo
-import io.github.madeye.meow.bg.BaseService
+import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.net.ExitIp
 import io.github.madeye.meow.net.ExitIpLookup
 import io.github.madeye.meow.net.NatType
@@ -14,13 +17,12 @@ import io.github.madeye.meow.net.ProxyProbeException
 import io.github.madeye.meow.net.ProxyProber
 import io.github.madeye.meow.net.Throughput
 import java.io.IOException
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -81,6 +83,7 @@ data class ProxyDetailUiState(
     val udp: Boolean? = null,
     /** Tests need the engine; they are offered only while connected. */
     val connected: Boolean = false,
+    val descriptionStatus: ControllerStatus = ControllerStatus.Loading,
     val probes: Map<ProxyProbe, ProbeState> = ProxyProbe.entries.associateWith { ProbeState.Idle },
 ) {
     fun probe(probe: ProxyProbe): ProbeState = probes[probe] ?: ProbeState.Idle
@@ -98,55 +101,58 @@ class ProxyDetailViewModel(
     private val name: String,
     /** The health-check URL of the group the page was opened from, if it has one. */
     private val testUrl: String?,
-    vpnState: StateFlow<BaseService.State>,
+    private val controller: ControllerAccess,
     private val describe: suspend (String) -> ProxyInfo,
     private val tcpDelay: suspend (name: String, url: String) -> Int,
     private val prober: ProxyProber,
 ) : ViewModel() {
 
+    private val reload = MutableStateFlow(0L)
+    private val descriptions = controller.observe(reload) { describe(name) }
     private val state = MutableStateFlow(ProxyDetailUiState(name))
-    val uiState: StateFlow<ProxyDetailUiState> = state.asStateFlow()
+    val uiState: StateFlow<ProxyDetailUiState> = combine(
+        controller.lifecycle, descriptions, state,
+    ) { vpn, data, probes ->
+        val current = data.takeIf { it.session != null && it.session == vpn.session }
+        probes.copy(
+            type = current?.value?.type,
+            udp = current?.value?.udp,
+            connected = vpn.session != null,
+            descriptionStatus = current?.status ?: vpn.controllerStatus,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), ProxyDetailUiState(name))
 
     private val running = mutableMapOf<ProxyProbe, Job>()
-
-    /** Download and upload take turns: run together, each would eat into the other's sample. */
     private val bandwidth = Mutex()
 
     init {
         viewModelScope.launch {
-            vpnState.map { it == BaseService.State.Connected }
-                .distinctUntilChanged()
-                .collect { connected ->
-                    state.update { it.copy(connected = connected) }
-                    if (connected) loadDescription() else stopAll()
-                }
+            var previous: ControllerSession? = null
+            controller.lifecycle.collect { vpn ->
+                if (vpn.session == previous) return@collect
+                previous = vpn.session
+                stopAll()
+                state.value = ProxyDetailUiState(name)
+            }
         }
     }
 
+    fun retryDescription() { reload.update { it + 1 } }
+
     /** A tap on a test. Ignored while that test runs or the VPN is down. */
     fun test(probe: ProxyProbe) {
-        if (!state.value.connected || running[probe]?.isActive == true) return
+        val session = controller.session ?: return
+        if (running[probe]?.isActive == true) return
         set(probe, ProbeState.Running)
         running[probe] = viewModelScope.launch {
             val outcome = try {
-                ProbeState.Done(measure(probe))
-            } catch (e: CancellationException) {
-                throw e
+                ProbeState.Done(controller.write(session) { measure(probe) })
             } catch (e: IOException) {
+                controller.requireCurrent(session)
                 Timber.d(e, "proxy detail: %s of %s failed", probe, name)
                 failure(e)
             }
             set(probe, outcome)
-        }
-    }
-
-    private suspend fun loadDescription() {
-        try {
-            val proxy = describe(name)
-            state.update { it.copy(type = proxy.type, udp = proxy.udp) }
-        } catch (e: IOException) {
-            // The tests still run; the header just stays blank.
-            Timber.w(e, "proxy detail: describing %s failed", name)
         }
     }
 
@@ -168,7 +174,7 @@ class ProxyDetailViewModel(
         else -> ProbeState.Failed(reason)
     }
 
-    private fun stopAll() {
+    fun stopAll() {
         running.values.forEach { it.cancel() }
         running.clear()
         state.update { current ->

@@ -110,9 +110,10 @@ class ProfileRepository(
         dao.getById(id)?.yamlContent.orEmpty()
     }
 
-    suspend fun saveSelectedProxy(id: Long, proxyName: String) = withContext(Dispatchers.IO) {
-        dao.updateSelectedProxy(id, proxyName)
-    }
+    suspend fun saveSelectedProxy(id: Long, proxyName: String, isCurrent: () -> Boolean) =
+        withContext(Dispatchers.IO) {
+            if (isCurrent()) dao.updateSelectedProxy(id, proxyName)
+        }
 }
 
 /**

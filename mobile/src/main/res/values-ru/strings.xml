@@ -88,7 +88,7 @@
     <!-- Proxy servers -->
     <string name="proxy_servers_title">Прокси-серверы</string>
     <string name="proxy_servers_inline_title">Прокси профиля</string>
-    <string name="proxy_servers_empty">Прокси-серверы не найдены. Подключите профиль с прокси или провайдерами прокси.</string>
+    <string name="proxy_servers_empty">Прокси-серверы не найдены.</string>
     <string name="proxy_servers_no_nodes">У этого провайдера нет узлов.</string>
     <string name="proxy_servers_load_error">Не удалось загрузить прокси-серверы</string>
     <string name="proxy_servers_health_check">Проверить все узлы</string>
@@ -343,7 +343,7 @@
 
     <!-- Rules -->
     <string name="rules_title">Правила</string>
-    <string name="rules_empty">Правила не найдены.\nПодключите VPN, чтобы загрузить правила.</string>
+    <string name="rules_empty">Нет правил.</string>
     <string name="rules_filter">Фильтр: тип, значение, прокси…</string>
     <string name="rules_load_error">Не удалось загрузить правила</string>
     <plurals name="rules_count">
@@ -463,4 +463,12 @@
     <string name="fault_diagnostics_tun">Пересылка TUN неожиданно остановилась</string>
     <string name="fault_diagnostics_network">Базовая сеть изменилась</string>
     <string name="fault_diagnostics_groups">Не удалось обновить группы прокси</string>
+    <string name="connections_close_failed">Не удалось закрыть соединения.</string>
+    <string name="controller_loading">Ожидание ядра…</string>
+    <string name="controller_offline">Подключите VPN для загрузки текущих данных.</string>
+    <string name="controller_failed">Не удалось загрузить текущие данные из ядра.</string>
+    <string name="controller_stale">Не удалось обновить данные. Показаны последние полученные данные.</string>
+    <string name="controller_waiting_providers">Ожидание поставщиков прокси…</string>
+    <string name="proxy_groups_select_failed">Не удалось переключить прокси.</string>
+    <string name="home_route_mode_failed">Не удалось изменить режим маршрутизации.</string>
 </resources>

@@ -1,6 +1,7 @@
 package io.github.madeye.meow.api
 
 import io.github.madeye.meow.aidl.ByteTotals
+import kotlinx.serialization.Required
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -120,14 +121,18 @@ data class ProxyProvider(
     val expectedStatus: String,
     val updatedAt: String?,
     val usage: ProxyProviderUsage?,
-)
+) {
+    /** The controller exposes deferred HTTP providers before their first update. */
+    val awaitingFirstUpdate: Boolean
+        get() = vehicleType.equals("http", ignoreCase = true) && updatedAt.isNullOrBlank() && nodes.isEmpty()
+}
 
 data class ProxyProvidersResult(val providers: List<ProxyProvider>) {
     companion object {
         fun parse(root: JsonObject): ProxyProvidersResult {
-            val raw = root["providers"]?.asObjectOrNull() ?: JsonObject(emptyMap())
-            val providers = raw.mapNotNull { (key, element) ->
-                val data = element.asObjectOrNull() ?: return@mapNotNull null
+            val raw = root.getValue("providers").jsonObject
+            val providers = raw.map { (key, element) ->
+                val data = element.jsonObject
                 val usage = data["subscriptionInfo"]?.asObjectOrNull()?.let { info ->
                     ProxyProviderUsage(
                         upload = info["Upload"]?.jsonPrimitive?.longOrNull ?: 0,
@@ -239,11 +244,11 @@ data class ProxiesResult(
 
     companion object {
         fun parse(root: JsonObject): ProxiesResult {
-            val raw = root["proxies"]?.asObjectOrNull() ?: JsonObject(emptyMap())
+            val raw = root.getValue("proxies").jsonObject
             val groups = mutableMapOf<String, ProxyGroup>()
             val proxies = mutableMapOf<String, Proxy>()
             for ((name, element) in raw) {
-                val data = element.asObjectOrNull() ?: continue
+                val data = element.jsonObject
                 val type = data.string("type")
                 if (type in GROUP_TYPES) {
                     groups[name] = ProxyGroup(
@@ -275,7 +280,7 @@ data class Rule(
 )
 
 @Serializable
-internal data class RulesResponse(val rules: List<Rule> = emptyList())
+internal data class RulesResponse(val rules: List<Rule>)
 
 /**
  * One `rule-providers:` entry, as `GET /providers/rules` reports it.
@@ -298,7 +303,7 @@ data class RuleProviderInfo(
 )
 
 @Serializable
-internal data class RuleProvidersResponse(val providers: Map<String, RuleProviderInfo> = emptyMap())
+internal data class RuleProvidersResponse(val providers: Map<String, RuleProviderInfo>)
 
 /**
  * One cached lookup from `GET /dns/results`: the engine's live DNS cache,
@@ -394,7 +399,7 @@ data class ConnectionNotes(
 data class ConnectionsSnapshot(
     val downloadTotal: Long = 0,
     val uploadTotal: Long = 0,
-    val connections: List<Connection> = emptyList(),
+    @Required val connections: List<Connection> = emptyList(),
 )
 
 @Serializable
@@ -408,7 +413,7 @@ data class LogEntry(
 @Serializable
 data class RuntimeConfig(
     /** rule | global | direct */
-    val mode: String = "rule",
+    @Required val mode: String = "rule",
     val ipv6: Boolean = false,
     @SerialName("allow-lan") val allowLan: Boolean = false,
     @SerialName("log-level") val logLevel: String = "info",
