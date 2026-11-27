@@ -37,6 +37,8 @@ class MeowInstance(profile: ClashProfile) {
     val profileName: String get() = profile.name
     @Volatile internal var appliedDns: DnsSettings? = null
     @Volatile internal var appliedOverride: ConfigurationOverride? = null
+    internal var fallbackTransition = 0L
+    internal var fallbackRecovery = false
 
     companion object {
         private val random by lazy { SecureRandom() }
@@ -60,6 +62,12 @@ class MeowInstance(profile: ClashProfile) {
             copyGeoxAssets(context, dir)
             MeowCore.nativeSetHomeDir(dir.absolutePath)
             return dir
+        }
+
+        /** Must be awaited on the I/O path; native state is process-local. */
+        fun checkFallbackCountryData(context: Context): Boolean {
+            prepareEngineHome(context)
+            return MeowCore.nativeCheckFallbackGeoIp()
         }
 
         // Copy bundled GeoX databases from APK assets into the engine home
@@ -139,7 +147,12 @@ class MeowInstance(profile: ClashProfile) {
             val selected = activeConfig.takeIf { it.profileId > 0 }
             val issue = DnsSettingsStore.default.startupActivationIssue(
                 dns, selected, registerHome = { MeowCore.nativeSetHomeDir(configDir.absolutePath) },
-                policyFor = { override.dnsWireOverride }, validate = MeowCore::nativeCheckCachedDns,
+                policyFor = { override.dnsWireOverride }, validate = { source, wire, policy ->
+                    MeowCore.nativeCheckCachedDnsForProfile(
+                        source, wire, policy, activeConfig.profileId.takeIf { fallbackTransition > 0 } ?: 0L,
+                        fallbackTransition, fallbackRecovery,
+                    )
+                },
             )
             if (issue != null) throw DnsActivationException(issue)
             val withCore = CoreBehaviorRuntime.apply(runtimeYaml, override.coreBehavior)
@@ -150,6 +163,7 @@ class MeowInstance(profile: ClashProfile) {
             val port = MeowCore.nativeStartEngine(
                 "127.0.0.1:9090", mintCredential(), routeMode, dns.encode(), activeConfig.profileId, capability,
                 sourceDnsRequiresBuiltin, override.dnsWireOverride.wire(),
+                fallbackTransition, fallbackRecovery,
             )
             if (port <= 0) {
                 val error = MeowCore.nativeGetLastError()

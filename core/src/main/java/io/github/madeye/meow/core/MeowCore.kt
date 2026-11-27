@@ -28,6 +28,8 @@ object MeowCore {
         capability: String,
         sourceDnsRequiresBuiltin: Boolean = false,
         nameserverPolicy: String = "null",
+        fallbackTransition: Long = 0L,
+        fallbackRecovery: Boolean = false,
     ): Int
 
     /** Commits a staged preference and, when requested, installs its live resolver. Returns a DNS issue code on failure. */
@@ -37,8 +39,15 @@ object MeowCore {
         nativeCheckCachedDnsForProfile(yaml, settings, nameserverPolicy, 0L)
     external fun nativeCheckCachedDnsForProfile(
         yaml: String, settings: String, nameserverPolicy: String, frozenProfileId: Long,
+        fallbackTransition: Long = 0L, fallbackRecovery: Boolean = false,
     ): String?
     external fun nativeCheckFallbackGeoIp(): Boolean
+    internal external fun nativeBeginFallbackGeoIpTransition(): Long
+    internal external fun nativeStageFallbackGeoIpTransition(
+        token: Long, previousProfileId: Long, previousNeedsReader: Boolean,
+        candidateProfileId: Long, settings: String, nameserverPolicy: String,
+    ): Long
+    internal external fun nativeDiscardFallbackGeoIpTransition(token: Long)
 
     /** Applied DNS status with redacted endpoint details. */
     external fun nativeDnsStatus(): String?

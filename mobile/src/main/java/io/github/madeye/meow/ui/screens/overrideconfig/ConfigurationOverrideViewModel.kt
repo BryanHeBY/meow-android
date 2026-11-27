@@ -2,7 +2,8 @@ package io.github.madeye.meow.ui.screens.overrideconfig
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.Core
+import io.github.madeye.meow.bg.MeowInstance
 import io.github.madeye.meow.preference.DnsFallbackOverride
 import io.github.madeye.meow.preference.DnsPreference
 import io.github.madeye.meow.preference.DnsMode
@@ -88,7 +89,7 @@ internal class ConfigurationOverrideViewModel(
     private val store: ConfigurationOverrideStore,
     private val dns: DnsPreference,
     profiles: ProfileRepository,
-    private val checkFallbackGeoIp: () -> Boolean = MeowCore::nativeCheckFallbackGeoIp,
+    private val checkFallbackGeoIp: () -> Boolean = { MeowInstance.checkFallbackCountryData(Core.app) },
 ) : ViewModel() {
     private val form = MutableStateFlow<OverrideForm?>(null)
     private val _events = Channel<OverrideEvent>(Channel.BUFFERED)

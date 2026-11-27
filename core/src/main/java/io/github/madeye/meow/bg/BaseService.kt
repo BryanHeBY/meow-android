@@ -20,7 +20,9 @@ import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.preference.DnsApplicability
 import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.DnsStatus
+import io.github.madeye.meow.preference.ConfigurationOverride
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
+import io.github.madeye.meow.preference.DnsSettings
 import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.database.PrivateDatabase
@@ -54,7 +56,19 @@ object BaseService {
 
     interface ExpectedException
 
-    internal class Reload(val profile: ClashProfile, val previous: MeowInstance)
+    internal class Reload(
+        val profile: ClashProfile,
+        val previous: MeowInstance,
+        val candidateDns: DnsSettings,
+        val candidateOverride: ConfigurationOverride,
+        val previousDns: DnsSettings?,
+        val previousOverride: ConfigurationOverride?,
+        val fallbackTransition: Long,
+    ) {
+        fun discard() {
+            if (fallbackTransition > 0) MeowCore.nativeDiscardFallbackGeoIpTransition(fallbackTransition)
+        }
+    }
 
     internal class DnsRejection(val selection: ActiveConfig?, val issue: DnsIssue)
 
@@ -231,8 +245,14 @@ object BaseService {
                     if (state == State.Connected && running?.activeConfig == profile) {
                         running?.appliedOverride?.dnsWireOverride
                     } else {
-                        ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
+                        ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride.also {
+                            if (it.usesFallbackGeoIp) MeowInstance.prepareEngineHome(Core.app)
+                        }
                     }
+                },
+                freshExplicitCountry = state != State.Connected || running?.activeConfig != request,
+                frozenGeneration = serviceData.lifecycle.runId.takeIf {
+                    state == State.Connected && running?.activeConfig == request
                 },
             ) { selected, scoped, staged, target ->
                 PrivateDatabase.withProfileTransaction {
@@ -271,11 +291,16 @@ object BaseService {
                 ?: DnsStatus()
             val rejection = data?.dnsRejection?.takeIf { it.selection == selected }?.issue
             val running = data?.meowInstance
-            val issue = rejection ?: store.activationIssue(saved.settings, selected, policyFor = { profile ->
+            val frozenGeneration = data?.lifecycle?.runId.takeIf {
+                data?.state == State.Connected && running?.activeConfig == selected
+            }
+            val issue = rejection ?: store.statusActivationIssue(saved.settings, selected, frozenGeneration, policyFor = { profile ->
                 if (data?.state == State.Connected && running?.activeConfig == profile) {
                     running?.appliedOverride?.dnsWireOverride
                 } else {
-                    ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
+                    ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride.also {
+                        if (it.usesFallbackGeoIp) MeowInstance.prepareEngineHome(Core.app)
+                    }
                 }
             }, validate = { yaml, wire, policy ->
                 val frozenId = selected?.profileId?.takeIf {
@@ -386,28 +411,60 @@ object BaseService {
             val profile = selected ?: return
             if (running == null) return
             val candidate = ActiveConfig.of(profile)
+            val token = MeowCore.nativeBeginFallbackGeoIpTransition()
             data.reloadCheck = data.binder.launch {
-                val store = DnsSettingsStore.default
-                while (data.state == State.Connected && data.meowInstance === running) {
-                    val settings = store.load().settings
-                    val issue = withContext(Dispatchers.IO) {
-                        store.freshActivationIssue(settings, candidate, policyFor = { profile ->
-                            ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
-                        }, validate = MeowCore::nativeCheckCachedDns)
+                var handedOff = false
+                try {
+                    val store = DnsSettingsStore.default
+                    while (data.state == State.Connected && data.meowInstance === running) {
+                        val settings = store.load().settings
+                        val previousDns = running.appliedDns
+                        val previousOverride = running.appliedOverride
+                        var staged = 0L
+                        val next = withContext(Dispatchers.IO) {
+                            val override = ConfigurationOverrideStore.default.effective(profile.id)
+                            val policy = override.dnsWireOverride
+                            val previousNeedsReader = previousOverride?.dnsWireOverride?.usesFallbackGeoIp == true
+                            if (policy.usesFallbackGeoIp || previousNeedsReader) {
+                                staged = MeowCore.nativeStageFallbackGeoIpTransition(
+                                    token, running.activeConfig.profileId, previousNeedsReader,
+                                    profile.id, settings.encode(), policy.wire(),
+                                )
+                            }
+                            val issue = when {
+                                staged == -1L -> DnsIssue.GEOIP_UNAVAILABLE
+                                staged < 0 -> DnsIssue.PROFILE_CHANGED
+                                else -> store.freshActivationIssue(settings, candidate, { policy }) { yaml, wire, policyWire ->
+                                    MeowCore.nativeCheckCachedDnsForProfile(
+                                        yaml, wire, policyWire, if (staged > 0) profile.id else 0L, staged,
+                                    )
+                                }
+                            }
+                            override to issue
+                        }
+                        if (data.state != State.Connected || data.meowInstance !== running) return@launch
+                        if (ActiveConfig.of(Core.currentProfile) != candidate) return@launch
+                        if (store.load().settings != settings || running.appliedDns != previousDns ||
+                            running.appliedOverride != previousOverride) continue
+                        val (override, issue) = next
+                        if (issue != null) {
+                            data.dnsRejection = DnsRejection(candidate, issue)
+                            data.binder.dnsActivationRejected(issue)
+                        } else {
+                            data.dnsRejection = null
+                            data.reload = Reload(profile, running, settings, override, previousDns, previousOverride, staged)
+                            handedOff = staged > 0
+                            Timber.i("Reloading: the selected profile changed")
+                            stopRunner(true)
+                        }
+                        return@launch
                     }
-                    if (data.state != State.Connected || data.meowInstance !== running) return@launch
-                    if (ActiveConfig.of(Core.currentProfile) != candidate) return@launch
-                    if (store.load().settings != settings) continue
-                    if (issue != null) {
-                        data.dnsRejection = DnsRejection(candidate, issue)
-                        data.binder.dnsActivationRejected(issue)
-                    } else {
-                        data.dnsRejection = null
-                        data.reload = Reload(profile, running)
-                        Timber.i("Reloading: the selected profile changed")
-                        stopRunner(true)
-                    }
-                    return@launch
+                } catch (failure: java.io.IOException) {
+                    Timber.w(failure, "Could not read the next DNS profile")
+                    data.dnsRejection = DnsRejection(candidate, DnsIssue.INVALID_SETTINGS)
+                    data.binder.dnsActivationRejected(DnsIssue.INVALID_SETTINGS)
+                } finally {
+                    if (!handedOff) MeowCore.nativeDiscardFallbackGeoIpTransition(token)
                 }
             }
         }
@@ -426,12 +483,16 @@ object BaseService {
                 // it would not bring it back either. Nothing will start behind
                 // the notification stopRunner kept for the restart, so drop it.
                 Timber.w(e, "restart refused")
+                data.reload?.discard()
+                data.reload = null
                 data.notification?.destroy()
                 data.notification = null
             } catch (e: SecurityException) {
                 // A refused launch (see [VpnService.start]); not expected
                 // here, as :vpn is already running, but handled the same.
                 Timber.w(e, "restart refused")
+                data.reload?.discard()
+                data.reload = null
                 data.notification?.destroy()
                 data.notification = null
             }
@@ -444,6 +505,7 @@ object BaseService {
 
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
             if (!restart) {
+                data.reload?.discard()
                 data.reload = null
                 data.reloadCheck?.cancel()
             }
@@ -509,6 +571,8 @@ object BaseService {
             // would turn a VPN the user just stopped back on whenever the stop
             // is what killed :vpn, so it only takes the notification down.
             if (intent == null) {
+                data.reload?.discard()
+                data.reload = null
                 notification.destroy()
                 data.notification = null
                 (this as Service).stopSelf(startId)
@@ -530,15 +594,18 @@ object BaseService {
             } else null
             this as Context
             if (starting == null) {
+                reload?.discard()
                 stopRunner(false, "No profile selected")
                 return Service.START_NOT_STICKY
             }
             notification.setProfileName(starting.name)
 
             data.meowInstance = MeowInstance(starting).also {
-                if (superseded) {
-                    it.appliedDns = reload?.previous?.appliedDns
-                    it.appliedOverride = reload?.previous?.appliedOverride
+                if (reload != null && (reload.fallbackTransition > 0 || superseded)) {
+                    it.fallbackTransition = reload.fallbackTransition
+                    it.fallbackRecovery = superseded
+                    it.appliedDns = if (superseded) reload.previousDns else reload.candidateDns
+                    it.appliedOverride = if (superseded) reload.previousOverride else reload.candidateOverride
                 }
             }
 
@@ -563,11 +630,13 @@ object BaseService {
                     } catch (exc: DnsActivationException) {
                         data.dnsRejection = DnsRejection(attempted, exc.issue)
                         val previous = reload?.previous?.takeUnless { superseded } ?: throw exc
-                        val previousDns = previous.appliedDns ?: throw exc
+                        val previousDns = reload.previousDns ?: throw exc
                         notification.setProfileName(previous.profileName)
                         data.meowInstance = MeowInstance(previous.profile).also {
                             it.appliedDns = previousDns
-                            it.appliedOverride = previous.appliedOverride
+                            it.appliedOverride = reload.previousOverride
+                            it.fallbackTransition = reload.fallbackTransition
+                            it.fallbackRecovery = true
                         }
                         startProcesses()
                         exc.issue
@@ -587,6 +656,7 @@ object BaseService {
                     Timber.w(exc)
                     stopRunner(false, "Service failed: ${exc.localizedMessage}")
                 } finally {
+                    reload?.discard()
                     data.connectingJob = null
                 }
             }

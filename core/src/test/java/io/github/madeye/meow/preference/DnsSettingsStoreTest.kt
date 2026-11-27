@@ -144,6 +144,18 @@ class DnsSettingsStoreTest {
     }
 
     @Test
+    fun `stopped named DNS save cannot reuse a running country verdict`() {
+        val scoped = named.copy(profileId = first.profileId)
+        val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))
+        val policy = DnsWireOverride(fallback = configured)
+        assertNull(store.activationIssue(scoped, first, { policy }) { _, _, _ -> null })
+        val issue = store.commit(scoped.encode(), first.profileId, { first },
+            { _, _, _ -> DnsIssue.GEOIP_UNAVAILABLE.name }, { policy }, freshExplicitCountry = true,
+        ) { _, _, _, _ -> error("Invalid country snapshot reached publication") }
+        assertEquals(DnsIssue.GEOIP_UNAVAILABLE, issue)
+    }
+
+    @Test
     fun `temporary missing country data cannot cache a stale negative preflight`() {
         val scoped = named.copy(profileId = first.profileId)
         val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))

@@ -247,6 +247,7 @@ fn start_engine(
     )
 }
 
+#[cfg(test)]
 fn start_engine_with_policy(
     controllers: Option<ControllerConfig>,
     mode: Option<TunnelMode>,
@@ -254,6 +255,26 @@ fn start_engine_with_policy(
     profile_id: i64,
     source_dns_requires_builtin: bool,
     nameserver_policy: nameserver_policy_override::NameserverPolicyOverride,
+) -> i32 {
+    start_engine_with_prepared_policy(
+        controllers,
+        mode,
+        dns,
+        profile_id,
+        source_dns_requires_builtin,
+        nameserver_policy,
+        None,
+    )
+}
+
+fn start_engine_with_prepared_policy(
+    controllers: Option<ControllerConfig>,
+    mode: Option<TunnelMode>,
+    dns: engine::DnsUpstreams,
+    profile_id: i64,
+    source_dns_requires_builtin: bool,
+    nameserver_policy: nameserver_policy_override::NameserverPolicyOverride,
+    prepared: Option<meow_config::PreparedFallbackGeoIp>,
 ) -> i32 {
     logging::bridge_log("start_engine: acquiring ENGINE lock");
     let mut engine = ENGINE.lock();
@@ -270,6 +291,7 @@ fn start_engine_with_policy(
         profile_id,
         source_dns_requires_builtin,
         nameserver_policy,
+        prepared,
     )) {
         Ok((state, app_port)) => {
             logging::bridge_log("start_engine: engine started successfully");
@@ -294,14 +316,15 @@ async fn start_engine_async(
     profile_id: i64,
     source_dns_requires_builtin: bool,
     nameserver_policy: nameserver_policy_override::NameserverPolicyOverride,
+    prepared: Option<meow_config::PreparedFallbackGeoIp>,
 ) -> Result<(EngineState, u16), anyhow::Error> {
     if source_dns_requires_builtin && !matches!(dns, engine::DnsUpstreams::Builtin) {
         return Err(dns_override::DnsIssue::ResolverRejected.into());
     }
-    let geoip = if nameserver_policy.uses_prepared_geoip() {
-        Some(fallback_geoip::prepare().await?)
-    } else {
-        None
+    let geoip = match prepared {
+        Some(reader) => Some(reader),
+        None if nameserver_policy.uses_prepared_geoip() => Some(fallback_geoip::prepare().await?),
+        None => None,
     };
     install_tracing_subscriber();
     let tcp_policy = engine::StartupTcpPolicy::capture();
@@ -701,6 +724,8 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
     capability: JString,
     source_dns_requires_builtin: jni::sys::jboolean,
     nameserver_policy: JString,
+    transition: jlong,
+    recovery: jni::sys::jboolean,
 ) -> jint {
     let mut read =
         |value: &JString| -> String { env.get_string(value).map(String::from).unwrap_or_default() };
@@ -714,10 +739,25 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
                 &nameserver_policy,
             ))
             .map_err(|_| anyhow::Error::from(dns_override::DnsIssue::InvalidSettings))?;
-            Ok((settings, policy))
+            let prepared = if transition > 0 && policy.uses_prepared_geoip() {
+                let key = fallback_geoip::ActivationKey {
+                    profile: profile_id,
+                    mode: settings.clone(),
+                    policy: policy.clone(),
+                };
+                Some(fallback_geoip::transition_reader(
+                    transition,
+                    &key,
+                    recovery != jni::sys::JNI_FALSE,
+                    true,
+                )?)
+            } else {
+                None
+            };
+            Ok((settings, policy, prepared))
         });
     match settings {
-        Ok((settings, policy)) => start_engine_with_policy(
+        Ok((settings, policy, prepared)) => start_engine_with_prepared_policy(
             Some(ControllerConfig {
                 dashboard_addr: read(&addr),
                 dashboard_secret: read(&dashboard_secret),
@@ -728,6 +768,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
             profile_id,
             source_dns_requires_builtin != jni::sys::JNI_FALSE,
             policy,
+            prepared,
         ),
         Err(error) => {
             set_error(error.to_string());

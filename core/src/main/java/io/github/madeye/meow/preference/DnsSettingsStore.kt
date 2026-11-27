@@ -14,6 +14,7 @@ class DnsSettingsStore(private val file: File) {
         val profile: ActiveConfig,
         val settings: DnsSettings,
         val wireOverride: DnsWireOverride,
+        val frozenGeneration: String?,
         val issue: DnsIssue?,
     )
 
@@ -45,6 +46,14 @@ class DnsSettingsStore(private val file: File) {
         validate: (String, String, String) -> String?,
     ): DnsIssue? = checkActivation(settings, profile, policyFor, validate, fresh = false)
 
+    internal fun statusActivationIssue(
+        settings: DnsSettings,
+        profile: ActiveConfig?,
+        frozenGeneration: String?,
+        policyFor: (ActiveConfig) -> DnsWireOverride?,
+        validate: (String, String, String) -> String?,
+    ): DnsIssue? = checkActivation(settings, profile, policyFor, validate, fresh = false, frozenGeneration = frozenGeneration)
+
     /** Next generation must not reuse an earlier check of the packaged database. */
     internal fun freshActivationIssue(
         settings: DnsSettings,
@@ -71,6 +80,7 @@ class DnsSettingsStore(private val file: File) {
         policyFor: (ActiveConfig) -> DnsWireOverride?,
         validate: (String, String, String) -> String?,
         fresh: Boolean,
+        frozenGeneration: String? = null,
     ): DnsIssue? {
         if (settings.mode == DnsMode.SPLIT) return DnsIssue.SPLIT_UNAVAILABLE
         return when (settings.applicability(profile?.profileId)) {
@@ -79,7 +89,8 @@ class DnsSettingsStore(private val file: File) {
             } else null
             DnsApplicability.PENDING -> DnsIssue.PENDING
             DnsApplicability.UNAVAILABLE -> DnsIssue.PROFILE_UNAVAILABLE
-            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, policyFor, validate, fresh = fresh)
+            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, policyFor, validate, fresh = fresh,
+                frozenGeneration = frozenGeneration)
         }
     }
 
@@ -90,13 +101,16 @@ class DnsSettingsStore(private val file: File) {
         validate: (String, String, String) -> String?,
         fresh: Boolean = false,
         onlyCountry: Boolean = false,
+        frozenGeneration: String? = null,
     ): DnsIssue? {
         val policy = try { policyFor(profile)?.snapshot() ?: DnsWireOverride() } catch (_: IOException) { return DnsIssue.INVALID_SETTINGS }
         val countryEnabled = policy.usesFallbackGeoIp
         if (onlyCountry && !countryEnabled) return null
         val recheckReader = fresh && countryEnabled
+        val generation = frozenGeneration.takeIf { countryEnabled }
         checked?.takeUnless { recheckReader }?.let {
-            if (it.profile == profile && it.settings == settings && it.wireOverride == policy) return it.issue
+            if (it.profile == profile && it.settings == settings && it.wireOverride == policy &&
+                it.frozenGeneration == generation) return it.issue
         }
         val issue = validate(profile.yaml, settings.encode(), policy.wire())?.let(DnsIssue::fromWire)
         // Availability of the packaged reader or the current VPN generation
@@ -104,7 +118,7 @@ class DnsSettingsStore(private val file: File) {
         if (issue == DnsIssue.GEOIP_UNAVAILABLE || issue == DnsIssue.PROFILE_CHANGED) {
             if (recheckReader) checked = null
         } else if (!recheckReader) {
-            checked = Check(profile, settings, policy, issue)
+            checked = Check(profile, settings, policy, generation, issue)
         }
         return issue
     }
@@ -117,6 +131,8 @@ class DnsSettingsStore(private val file: File) {
         selected: () -> ActiveConfig?,
         validate: (String, String, String) -> String?,
         policyFor: (ActiveConfig) -> DnsWireOverride? = { null },
+        freshExplicitCountry: Boolean = false,
+        frozenGeneration: String? = null,
         publish: (ActiveConfig?, DnsSettings, File, File) -> DnsIssue?,
     ): DnsIssue? {
         if (wire.toByteArray().size > DnsSettings.MAX_WIRE_BYTES) return DnsIssue.INVALID_SETTINGS
@@ -133,7 +149,8 @@ class DnsSettingsStore(private val file: File) {
         val validated = scoped.encode().toByteArray(Charsets.UTF_8)
         if (validated.size > DnsSettings.MAX_WIRE_BYTES) return DnsIssue.INVALID_SETTINGS
         if (profile != null && scoped.requiresProfile) {
-            val issue = checkNamed(profile, scoped, policyFor, validate)
+            val issue = checkNamed(profile, scoped, policyFor, validate, fresh = freshExplicitCountry,
+                frozenGeneration = frozenGeneration)
             if (selected() != profile) return DnsIssue.PROFILE_CHANGED
             if (issue != null) return issue
         }

@@ -75,6 +75,23 @@ impl LiveDns {
         }
     }
 
+    fn prepared_snapshot(
+        &self,
+    ) -> Option<(
+        crate::fallback_geoip::ActivationKey,
+        meow_config::PreparedFallbackGeoIp,
+    )> {
+        let reader = self.geoip.clone()?;
+        Some((
+            crate::fallback_geoip::ActivationKey {
+                profile: self.profile_id,
+                mode: self.applied.lock().mode.clone(),
+                policy: self.nameserver_policy.clone(),
+            },
+            reader,
+        ))
+    }
+
     fn candidate(&self, tunnel: &Tunnel, mode: &DnsUpstreams) -> Result<Option<RawConfig>> {
         if self.source_dns_requires_builtin && !matches!(mode, DnsUpstreams::Builtin) {
             bail!(DnsIssue::ResolverRejected);
@@ -295,6 +312,8 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
     settings: JString,
     nameserver_policy: JString,
     frozen_profile: jlong,
+    transition: jlong,
+    recovery: jboolean,
 ) -> jstring {
     let result = (|| {
         let yaml: String = env
@@ -316,7 +335,19 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
         mode.check_android_support()?;
         mode.check_cached_profile(&yaml, &policy)?;
         if policy.uses_prepared_geoip() {
-            if frozen_profile > 0 {
+            if transition > 0 {
+                let key = crate::fallback_geoip::ActivationKey {
+                    profile: frozen_profile,
+                    mode,
+                    policy,
+                };
+                crate::fallback_geoip::transition_reader(
+                    transition,
+                    &key,
+                    recovery != jni::sys::JNI_FALSE,
+                    false,
+                )?;
+            } else if frozen_profile > 0 {
                 let running = crate::ENGINE.lock();
                 if !running.as_ref().is_some_and(|engine| {
                     let live = &engine.live_dns;
@@ -333,6 +364,75 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
         Ok(())
     })();
     dns_result(&env, result)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeBeginFallbackGeoIpTransition(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jlong {
+    crate::fallback_geoip::begin()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStageFallbackGeoIpTransition(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    previous_profile: jlong,
+    previous_needs_reader: jboolean,
+    candidate_profile: jlong,
+    settings: JString,
+    policy: JString,
+) -> jlong {
+    let stage = || -> Result<i64> {
+        let wire: String = env.get_string(&settings)?.into();
+        let policy: String = env.get_string(&policy)?.into();
+        let (mode, _) = DnsUpstreams::decode_scoped(&wire)?;
+        let policy = NameserverPolicyOverride::decode(&policy)?;
+        let previous = {
+            let engine = crate::ENGINE.lock();
+            let live = &engine.as_ref().ok_or(DnsIssue::ProfileChanged)?.live_dns;
+            if live.profile_id != previous_profile {
+                bail!(DnsIssue::ProfileChanged);
+            }
+            live.prepared_snapshot()
+        };
+        if previous_needs_reader != jni::sys::JNI_FALSE && previous.is_none() {
+            bail!(DnsIssue::ProfileChanged);
+        }
+        let candidate = if policy.uses_prepared_geoip() {
+            let key = crate::fallback_geoip::ActivationKey {
+                profile: candidate_profile,
+                mode,
+                policy,
+            };
+            let reader = crate::get_runtime().block_on(crate::fallback_geoip::prepare())?;
+            Some((key, reader))
+        } else {
+            None
+        };
+        let holds_reader = candidate.is_some() || previous.is_some();
+        crate::fallback_geoip::stage(token, candidate, previous)?;
+        Ok(if holds_reader { token } else { 0 })
+    };
+    let mut stage = stage;
+    stage().unwrap_or_else(|error| {
+        if error.downcast_ref::<DnsIssue>() == Some(&DnsIssue::GeoIpUnavailable) {
+            -1
+        } else {
+            -2
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeDiscardFallbackGeoIpTransition(
+    _env: JNIEnv,
+    _class: JClass,
+    transition: jlong,
+) {
+    crate::fallback_geoip::discard(transition);
 }
 
 #[no_mangle]
