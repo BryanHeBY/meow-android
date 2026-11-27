@@ -16,8 +16,8 @@ import io.github.madeye.meow.net.ExitIpLookup
 import io.github.madeye.meow.logbook.LogbookReader
 import io.github.madeye.meow.net.IpGeoLookup
 import io.github.madeye.meow.net.ProxyProber
-import io.github.madeye.meow.preference.BuiltinDnsPreference
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
+import io.github.madeye.meow.preference.DnsPreference
 import io.github.madeye.meow.preference.ExitIpPreference
 import io.github.madeye.meow.preference.RouteModeStore
 import io.github.madeye.meow.preference.ThemeModePreference
@@ -99,8 +99,8 @@ object AppGraph {
 
     /** Settings flips it; Home's exit-IP card follows. */
     val showExitIp: ExitIpPreference by lazy { ExitIpPreference(scope) }
-    val builtinDns: BuiltinDnsPreference by lazy {
-        BuiltinDnsPreference(commit = vpn::applyBuiltinDns)
+    val dnsPreference: DnsPreference by lazy {
+        DnsPreference(commit = vpn::applyDnsSettings, readStatus = vpn::dnsStatus)
     }
     val exitIpLookup: ExitIpLookup by lazy { ExitIpLookup() }
     val ipGeoLookup: IpGeoLookup by lazy { IpGeoLookup { MeowInstance.homeDir(appContext) } }
@@ -220,7 +220,7 @@ object AppGraph {
                 ConfigurationOverrideViewModel::class.java -> ConfigurationOverrideViewModel(
                     extras.createSavedStateHandle().toRoute<Dest.ConfigurationOverride>().profileId,
                     ConfigurationOverrideStore.default,
-                    builtinDns,
+                    dnsPreference,
                     profiles,
                 )
 

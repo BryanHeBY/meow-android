@@ -83,6 +83,10 @@ abstract class PrivateDatabase : RoomDatabase() {
 
         val profileDao get() = instance.profileDao()
         val dailyTrafficDao get() = instance.dailyTrafficDao()
+
+        // Keep the selected row stable across the DNS file and resolver commit.
+        internal fun <T> withProfileTransaction(block: () -> T): T =
+            instance.runInTransaction(java.util.concurrent.Callable { block() })
     }
 
     abstract fun profileDao(): ProfileDao

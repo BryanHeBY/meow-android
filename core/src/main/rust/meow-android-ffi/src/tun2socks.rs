@@ -989,9 +989,10 @@ impl ClashIngress {
                     {
                         FlowExit::Clash => {
                             // Preserve the configured resolver and all DNS qtypes.
-                            let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
+                            let Some(slot) = crate::DNS_RESOLVER.read().clone() else {
                                 return;
                             };
+                            let resolver = Arc::clone(&slot.read().resolver);
                             let Ok(bytes) =
                                 DnsServer::handle_query(parsed.payload, &resolver).await
                             else {
@@ -1881,10 +1882,38 @@ mod tests {
         let config = rt
             .block_on(meow_config::load_config_from_str(&stripped))
             .unwrap();
-        *crate::DNS_RESOLVER.write() = Some(Arc::clone(&config.dns.resolver));
+        *crate::DNS_RESOLVER.write() = Some(Arc::clone(&config.dns.resolver_slot));
         let fds = start_on_fake_tun();
-        let (_, peer) = fds;
+        let answer = query_fake_tun(fds.1);
+        stop_and_close(fds);
+        *crate::DNS_RESOLVER.write() = None;
+        assert!(from_the_profile_nameserver(&answer));
+    }
 
+    #[test]
+    fn dns_intercept_uses_the_published_resolver_slot_without_network_io() {
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let config = |code: &str| {
+            let yaml = format!("dns: {{nameserver: ['rcode://{code}']}}\nrules: [MATCH,DIRECT]\n");
+            let stripped = engine::strip_and_inject(&yaml, engine::DnsUpstreams::Inherit).unwrap();
+            rt.block_on(meow_config::load_config_from_str(&stripped))
+                .unwrap()
+        };
+        let initial = config("refused");
+        let slot = initial.dns.resolver_slot;
+        *crate::DNS_RESOLVER.write() = Some(Arc::clone(&slot));
+        let fds = start_on_fake_tun();
+        assert_eq!(query_fake_tun(fds.1)[3] & 0x0f, 5);
+        let success = config("success");
+        meow_tunnel::Tunnel::new_with_slot(slot)
+            .set_resolver(success.dns.resolver, success.dns.enabled);
+        assert_eq!(query_fake_tun(fds.1)[3] & 0x0f, 0);
+        stop_and_close(fds);
+        *crate::DNS_RESOLVER.write() = None;
+    }
+
+    fn query_fake_tun(peer: RawFd) -> Vec<u8> {
         let query = dns_query_packet("meow-test.invalid", 16);
         let sent = unsafe { libc::write(peer, query.as_ptr() as *const c_void, query.len()) };
         assert_eq!(sent, query.len() as isize);
@@ -1901,19 +1930,10 @@ mod tests {
             0
         };
 
-        stop_and_close(fds);
-        *crate::DNS_RESOLVER.write() = None;
         assert!(n > 28, "no answer to the TXT query");
         let reply = &reply[..n as usize];
-        assert_eq!(
-            &reply[20..24],
-            &[0, 53, 0x9c, 0x41],
-            "not from :53 to :40001"
-        );
-        assert!(
-            from_the_profile_nameserver(&reply[28..]),
-            "the answer did not come from the profile's nameserver"
-        );
+        assert_eq!(&reply[20..24], &[0, 53, 0x9c, 0x41]);
+        reply[28..].to_vec()
     }
 
     #[test]

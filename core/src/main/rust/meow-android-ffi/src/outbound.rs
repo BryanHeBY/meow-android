@@ -110,7 +110,7 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.yaml"), "rules:\n  - MATCH,DIRECT\n").unwrap();
         *crate::HOME_DIR.lock() = Some(home.to_str().unwrap().to_string());
-        let started = crate::start_engine(None, None, None, crate::engine::DnsUpstreams::Builtin);
+        let started = crate::start_engine(None, None, crate::engine::DnsUpstreams::Builtin, 0);
         let error = crate::get_error();
         let reset = reset("Wi-Fi 324".into()).map(|task| get_runtime().block_on(task));
         crate::stop_engine();

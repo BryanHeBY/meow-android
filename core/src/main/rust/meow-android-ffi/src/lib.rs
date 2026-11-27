@@ -8,8 +8,8 @@
 //! in-process via `meow_tunnel::tcp::handle_tcp` — no SOCKS5 loopback
 //! hop. DNS is delegated to meow's resolver, pinned to fake-IP mode
 //! (28.0.0.0/8) by `engine::strip_and_inject` but on the profile's own
-//! upstreams (the built-in CN-side pool when it names none, or when Settings'
-//! "Built-in DNS" switch is on; `live_dns` applies a flip without a restart);
+//! upstreams or an explicit override. `live_dns` changes the resolver
+//! without restarting the tunnel.
 //! the tun2socks UDP/53 intercept hands every in-TUN DNS datagram straight to
 //! `meow_dns::DnsServer::handle_query`.
 
@@ -18,6 +18,7 @@ mod configuration_override;
 mod diagnostics;
 #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 mod direct_exit;
+mod dns_override;
 mod engine;
 mod ip_info;
 mod live_dns;
@@ -100,13 +101,23 @@ pub(crate) struct EngineState {
     pub(crate) tunnel: Tunnel,
     /// Whether the VPN routes IPv6 into the TUN (see `engine::tun_ipv6`).
     tun_ipv6: bool,
-    /// What Settings' "Built-in DNS" switch rebuilds the resolver from.
+    /// The profile and published state for live DNS settings.
     pub(crate) live_dns: Arc<live_dns::LiveDns>,
     /// The API's providers: a network switch resets the sessions of their
     /// proxies too, as no group may reach them (`outbound`).
     pub(crate) proxy_providers: Arc<DashMap<String, Arc<ProxyProvider>>>,
-    dashboard_task: tokio::task::JoinHandle<()>,
-    app_task: tokio::task::JoinHandle<()>,
+    controllers: Option<ControllerTasks>,
+}
+
+struct ControllerConfig {
+    dashboard_addr: String,
+    dashboard_secret: String,
+    capability: String,
+}
+
+struct ControllerTasks {
+    dashboard: tokio::task::JoinHandle<()>,
+    app: tokio::task::JoinHandle<()>,
     app_controller: Arc<app_controller::AppController>,
 }
 
@@ -114,7 +125,7 @@ pub(crate) static ENGINE: Mutex<Option<EngineState>> = Mutex::new(None);
 pub(crate) static HOME_DIR: Mutex<Option<String>> = Mutex::new(None);
 // Overwritten on every engine start (and cleared on stop) so tun2socks' DNS
 // intercept always queries the current session's resolver, not the first one.
-pub(crate) static DNS_RESOLVER: RwLock<Option<Arc<meow_dns::Resolver>>> = RwLock::new(None);
+pub(crate) static DNS_RESOLVER: RwLock<Option<meow_dns::ResolverSlot>> = RwLock::new(None);
 
 // ---------------------------------------------------------------------------
 // Thread-local error message
@@ -225,11 +236,10 @@ fn drain_log_buffer() -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 fn start_engine(
-    external_controller: String,
-    dashboard_secret: String,
+    controllers: Option<ControllerConfig>,
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
-    capability: String,
+    profile_id: i64,
 ) -> i32 {
     logging::bridge_log("start_engine: acquiring ENGINE lock");
     let mut engine = ENGINE.lock();
@@ -239,13 +249,7 @@ fn start_engine(
     }
 
     let rt = get_runtime();
-    match rt.block_on(start_engine_async(
-        external_controller,
-        dashboard_secret,
-        mode,
-        dns,
-        capability,
-    )) {
+    match rt.block_on(start_engine_async(controllers, mode, dns, profile_id)) {
         Ok((state, app_port)) => {
             logging::bridge_log("start_engine: engine started successfully");
             *engine = Some(state);
@@ -256,20 +260,18 @@ fn start_engine(
             meow_common::logbook::engine_stopped(meow_common::logbook::Stop::Failed(&format!(
                 "{e:#}"
             )));
-            set_error(format!("start proxy: {}", e));
+            set_error(e.to_string());
             -1
         }
     }
 }
 
 async fn start_engine_async(
-    external_controller: String,
-    dashboard_secret: String,
+    controllers: Option<ControllerConfig>,
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
-    capability: String,
+    profile_id: i64,
 ) -> Result<(EngineState, u16), anyhow::Error> {
-    let app_controller = app_controller::AppController::new(capability)?;
     install_tracing_subscriber();
 
     // Resolve config path + set XDG_CONFIG_HOME (meow-config looks for
@@ -295,14 +297,20 @@ async fn start_engine_async(
     // load_config, so no pre-VPN network fetch is needed here. See
     // `core/build.gradle.kts` (downloadGeoxAssets) for the bundling path.
 
-    // Load via engine::load_stripped_config: strips listener/sniffer blocks
-    // and pins the profile's DNS to in-process fake-IP, on the upstreams
-    // `dns` picks. Falls back to the minimal config (also passed through
-    // strip_and_inject) when no home dir is set or the file is unreadable.
+    // Apply DNS in a runtime copy. The minimal profile is used only when
+    // there is no configuration file.
+    let load_error = |error: anyhow::Error| {
+        if dns.requires_profile() && !error.is::<dns_override::DnsIssue>() {
+            dns_override::DnsIssue::ResolverRejected.into()
+        } else {
+            error
+        }
+    };
     let (loaded, loaded_from) = match config_path.as_deref() {
         Some(path) if std::path::Path::new(path).exists() => {
             logging::bridge_log(&format!(
-                "start_engine_async: loading config from {path}, DNS upstreams: {dns:?}"
+                "start_engine_async: loading config from {path}, DNS mode: {}",
+                dns.mode()
             ));
             // The logbook opens under the engine home (`XDG_CONFIG_HOME`,
             // set above) before the load, so the load's own events — a
@@ -313,7 +321,9 @@ async fn start_engine_async(
             meow_common::traffic_ledger::apply(ledger, ledger_options);
             let stripped_path = engine::sibling_stripped_path(path);
             (
-                engine::load_stripped_config(path, dns).await?,
+                engine::load_stripped_config(path, &dns)
+                    .await
+                    .map_err(load_error)?,
                 stripped_path.to_str().map(str::to_string),
             )
         }
@@ -321,12 +331,11 @@ async fn start_engine_async(
             logging::bridge_log("start_engine_async: using minimal config");
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
-            let stripped = engine::strip_and_inject(MINIMAL_CONFIG, engine::DnsUpstreams::Builtin)?;
-            let loaded = engine::Loaded {
-                config: meow_config::load_config_from_str(&stripped).await?,
-                profile_dns: None,
-                upstreams: engine::DnsUpstreams::Builtin,
-            };
+            let loaded = engine::load_profile(MINIMAL_CONFIG, &dns, |stripped| {
+                Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+            })
+            .await
+            .map_err(load_error)?;
             (loaded, None)
         }
     };
@@ -338,30 +347,47 @@ async fn start_engine_async(
     let engine::Loaded {
         mut config,
         profile_dns,
-        upstreams,
     } = loaded;
+    dns.check_targets(|name| config.proxies.get(name).map(Arc::as_ref))?;
+    dns.check_resolver(&config.dns.resolver)?;
     logging::bridge_log(&format!(
         "start_engine_async: config loaded, proxies={}, rules={}",
         config.proxies.len(),
         config.rules.len()
     ));
 
-    let dashboard_addr: std::net::SocketAddr = external_controller.parse()?;
-    anyhow::ensure!(
-        dashboard_addr.ip().is_loopback(),
-        "controller must bind to loopback"
-    );
-    config.api.external_controller = Some(dashboard_addr);
-    let dashboard_secret = engine::api_secret(config.api.secret.take(), Some(dashboard_secret))
-        .ok_or_else(|| anyhow::anyhow!("dashboard controller requires authentication"))?;
-    // Bind both ports before spawning either server or publishing engine state.
-    let dashboard_listener = tokio::net::TcpListener::bind(dashboard_addr)
-        .await
-        .map_err(|e| anyhow::anyhow!("bind dashboard controller: {e}"))?;
-    let app_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(|e| anyhow::anyhow!("bind app controller: {e}"))?;
-    let app_addr = app_listener.local_addr()?;
+    // JNI always supplies both controllers. Resolver-only host tests may
+    // omit them so they can exercise the engine without network listeners.
+    let controllers = if let Some(controllers) = controllers {
+        let app = app_controller::AppController::new(controllers.capability)?;
+        let dashboard_addr: std::net::SocketAddr = controllers.dashboard_addr.parse()?;
+        anyhow::ensure!(
+            dashboard_addr.ip().is_loopback(),
+            "controller must bind to loopback"
+        );
+        config.api.external_controller = Some(dashboard_addr);
+        let dashboard_secret =
+            engine::api_secret(config.api.secret.take(), Some(controllers.dashboard_secret))
+                .ok_or_else(|| anyhow::anyhow!("dashboard controller requires authentication"))?;
+        // Bind both ports before spawning either server or publishing engine state.
+        let dashboard_listener = tokio::net::TcpListener::bind(dashboard_addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("bind dashboard controller: {e}"))?;
+        let app_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .map_err(|e| anyhow::anyhow!("bind app controller: {e}"))?;
+        let app_addr = app_listener.local_addr()?;
+        Some((
+            dashboard_addr,
+            dashboard_secret,
+            dashboard_listener,
+            app_addr,
+            app_listener,
+            app,
+        ))
+    } else {
+        None
+    };
     let tun_ipv6 = engine::tun_ipv6(config.raw.ipv6);
     // The app's route-mode picker outlives a session, so its pick replaces
     // the profile's `mode:`. `raw` is what `GET /configs` echoes back.
@@ -388,7 +414,7 @@ async fn start_engine_async(
         ),
     ));
 
-    *DNS_RESOLVER.write() = Some(config.dns.resolver.clone());
+    *DNS_RESOLVER.write() = Some(Arc::clone(&config.dns.resolver_slot));
 
     // Same startup order as meow-app's `run`: share the config's resolver
     // slot, install the provider dialer registry before the first
@@ -396,6 +422,7 @@ async fn start_engine_async(
     // then publish the routing table in one step.
     let raw_config = Arc::new(RwLock::new(config.raw.clone()));
     let tunnel = Tunnel::new_with_slot(Arc::clone(&config.dns.resolver_slot));
+    tunnel.set_dns_outbound_cell(config.provider_dns_cell.clone());
     tunnel.set_dialer_registry(config.provider_dialer_registry.clone());
     tunnel.set_mode(config.general.mode);
     tunnel.set_connection_notes(config.general.connection_notes);
@@ -427,9 +454,11 @@ async fn start_engine_async(
     // No DNS listener: tun2socks answers in-TUN queries in-process.
     let dns_server = Arc::new(RwLock::new(None));
     let live_dns = Arc::new(live_dns::LiveDns::new(
+        profile_id,
         profile_dns,
         loaded_from,
-        upstreams,
+        dns,
+        &config.dns.resolver,
         Arc::clone(&raw_config),
         Arc::clone(&rule_providers),
         Arc::clone(&dns_server),
@@ -439,8 +468,7 @@ async fn start_engine_async(
     let rule_provider_refresh =
         Arc::new(meow_config::rule_provider_refresh::RefreshSupervisor::default());
     rule_provider_refresh.reconcile(&rule_providers);
-    // The providers the load left out, recorded once now that it is the
-    // running config: a DNS fallback loads the profile twice.
+    // Record the providers the load left out now that it is running.
     config.dropped_providers.record();
     let proxy_provider_refresh =
         Arc::new(meow_config::proxy_provider_refresh::ProxyProviderRefreshSupervisor::default());
@@ -478,21 +506,41 @@ async fn start_engine_async(
             None,
         )
     };
-    let dashboard = api_server(dashboard_addr, dashboard_secret);
-    let app = api_server(app_addr, app_controller.secret()).router();
-    let dashboard_task = tokio::spawn(async move {
-        if let Err(e) = dashboard.run_on(dashboard_listener).await {
-            tracing::error!("Dashboard controller error: {}", e);
+    let (controllers, app_port) = match controllers {
+        Some((
+            dashboard_addr,
+            secret,
+            dashboard_listener,
+            app_addr,
+            app_listener,
+            app_controller,
+        )) => {
+            let dashboard = api_server(dashboard_addr, secret);
+            let app = api_server(app_addr, app_controller.secret()).router();
+            let dashboard = tokio::spawn(async move {
+                if let Err(e) = dashboard.run_on(dashboard_listener).await {
+                    tracing::error!("Dashboard controller error: {}", e);
+                }
+            });
+            let app = tokio::spawn({
+                let app_controller = Arc::clone(&app_controller);
+                async move {
+                    if let Err(e) = app_controller.serve(app_listener, app).await {
+                        tracing::error!("App controller error: {}", e);
+                    }
+                }
+            });
+            (
+                Some(ControllerTasks {
+                    dashboard,
+                    app,
+                    app_controller,
+                }),
+                app_addr.port(),
+            )
         }
-    });
-    let app_task = tokio::spawn({
-        let app_controller = Arc::clone(&app_controller);
-        async move {
-            if let Err(e) = app_controller.serve(app_listener, app).await {
-                tracing::error!("App controller error: {}", e);
-            }
-        }
-    });
+        None => (None, 0),
+    };
 
     // No SOCKS5 / HTTP loopback listener — tun2socks dispatches every flow
     // through `meow_tunnel::tcp::handle_tcp` in-process (same path as
@@ -508,11 +556,9 @@ async fn start_engine_async(
             tun_ipv6,
             live_dns,
             proxy_providers,
-            dashboard_task,
-            app_task,
-            app_controller,
+            controllers,
         },
-        app_addr.port(),
+        app_port,
     ))
 }
 
@@ -585,51 +631,35 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
     mut env: JNIEnv,
     _class: JClass,
     addr: JString,
-    secret: JString,
+    dashboard_secret: JString,
     mode: JString,
-    builtin_dns: jboolean,
+    dns: JString,
+    profile_id: jlong,
     capability: JString,
 ) -> jint {
-    let addr_str: String = env.get_string(&addr).map(|s| s.into()).unwrap_or_default();
-    let secret_str: String = env
-        .get_string(&secret)
-        .map(|s| s.into())
-        .unwrap_or_default();
-    let mode_str: String = env.get_string(&mode).map(|s| s.into()).unwrap_or_default();
-    start_engine(
-        addr_str,
-        secret_str,
-        parse_mode_override(&mode_str),
-        dns_upstreams(builtin_dns),
-        env.get_string(&capability)
-            .map(|s| s.into())
-            .unwrap_or_default(),
-    )
-}
-
-/// Settings' "Built-in DNS" switch: on ignores the profile's upstreams.
-fn dns_upstreams(builtin_dns: jboolean) -> engine::DnsUpstreams {
-    if builtin_dns == JNI_FALSE {
-        engine::DnsUpstreams::Profile
-    } else {
-        engine::DnsUpstreams::Builtin
-    }
-}
-
-/// Applies Settings' "Built-in DNS" switch to the running engine, keeping
-/// the VPN up (see `live_dns`). Returns 0 when it is applied or nothing is
-/// running, -1 with `nativeGetLastError` set when the engine keeps its DNS.
-#[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeSetBuiltinDns(
-    _env: JNIEnv,
-    _class: JClass,
-    builtin_dns: jboolean,
-) -> jint {
-    match live_dns::switch(dns_upstreams(builtin_dns)) {
-        Ok(()) => 0,
-        Err(e) => {
-            logging::bridge_log(&format!("nativeSetBuiltinDns: ERROR: {e:#}"));
-            set_error(format!("{e:#}"));
+    let mut read =
+        |value: &JString| -> String { env.get_string(value).map(String::from).unwrap_or_default() };
+    let dns = read(&dns);
+    let settings = engine::DnsUpstreams::decode_scoped(&dns)
+        .map_err(|_| anyhow::Error::from(dns_override::DnsIssue::InvalidSettings))
+        .and_then(|(settings, owner)| {
+            settings.check_android_support()?;
+            settings.require_scope(owner, profile_id)?;
+            Ok(settings)
+        });
+    match settings {
+        Ok(settings) => start_engine(
+            Some(ControllerConfig {
+                dashboard_addr: read(&addr),
+                dashboard_secret: read(&dashboard_secret),
+                capability: read(&capability),
+            }),
+            parse_mode_override(&read(&mode)),
+            settings,
+            profile_id,
+        ),
+        Err(error) => {
+            set_error(error.to_string());
             -1
         }
     }
@@ -670,7 +700,9 @@ fn stop_engine() {
     // would otherwise install its resolver after this.
     *DNS_RESOLVER.write() = None;
     if let Some(state) = engine.take() {
-        state.app_controller.stop();
+        if let Some(controllers) = &state.controllers {
+            controllers.app_controller.stop();
+        }
         // What the connections carried since the last minute's flush, while
         // the tunnel still holds them.
         meow_common::traffic_ledger::flush();
@@ -679,11 +711,13 @@ fn stop_engine() {
         state.tunnel.close_all_udp_sessions();
         // Join both accept loops while holding ENGINE so the next start sees
         // neither old listener. The private gate also revokes accepted sockets.
-        state.app_task.abort();
-        state.dashboard_task.abort();
-        get_runtime().block_on(async {
-            let _ = tokio::join!(state.app_task, state.dashboard_task);
-        });
+        if let Some(controllers) = state.controllers {
+            controllers.app.abort();
+            controllers.dashboard.abort();
+            get_runtime().block_on(async {
+                let _ = tokio::join!(controllers.app, controllers.dashboard);
+            });
+        }
         meow_common::logbook::engine_stopped(meow_common::logbook::Stop::Requested("app"));
     }
 }
@@ -912,25 +946,63 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeGetDownloa
     }
 }
 
+fn validate_effective_config(yaml: &str, mode: &engine::DnsUpstreams) -> anyhow::Result<()> {
+    mode.check_android_support()?;
+    // The core's offline flag is process-wide. Validation runs in the
+    // app process; holding ENGINE also prevents a same-process caller
+    // from starting a serving resolver under this flag.
+    let engine = ENGINE.lock();
+    anyhow::ensure!(
+        engine.is_none(),
+        "Cannot validate while the engine is running in this process"
+    );
+    struct Offline;
+    impl Drop for Offline {
+        fn drop(&mut self) {
+            meow_config::set_offline_validate(false);
+        }
+    }
+    meow_config::set_offline_validate(true);
+    let _offline = Offline;
+    let load = engine::load_profile(yaml, mode, |stripped| {
+        Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+    });
+    let loaded = get_runtime().block_on(load)?;
+    mode.check_targets(|name| loaded.config.proxies.get(name).map(Arc::as_ref))?;
+    mode.check_resolver(&loaded.config.dns.resolver)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeValidateConfig(
     mut env: JNIEnv,
     _class: JClass,
     yaml: JString,
+    dns: JString,
 ) -> jint {
-    let yaml_str: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
-    // Validate what the engine will actually load: the started engine runs
-    // the config through strip_and_inject (drops listener ports, sniffer,
-    // external-controller, pins DNS to fake-IP, …) and falls back to the
-    // built-in DNS when the profile's cannot be set up, so validating the
-    // raw YAML rejects configs that would run fine — e.g. mihomo's
-    // `external-controller: :9090` shorthand, stripped at start but fatal
-    // to a raw parse.
-    // Boxed for the same reason as in `engine::load_stripped_config`.
-    let load = crate::engine::load_with_dns_fallback(&yaml_str, |stripped| {
-        Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
-    });
-    match get_runtime().block_on(load) {
+    let yaml: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
+    let dns: String = env.get_string(&dns).map(|s| s.into()).unwrap_or_default();
+    let validate = || {
+        let (mode, _) = engine::DnsUpstreams::decode_scoped(&dns)
+            .map_err(|_| dns_override::DnsIssue::InvalidSettings)?;
+        validate_effective_config(&yaml, &mode)
+    };
+    match validate() {
+        Ok(()) => 0,
+        Err(e) => {
+            set_error(format!("validate config: {}", e));
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeValidateProfileStructure(
+    mut env: JNIEnv,
+    _class: JClass,
+    yaml: JString,
+) -> jint {
+    let yaml: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
+    match engine::validate_profile_structure(&yaml) {
         Ok(_) => 0,
         Err(e) => {
             set_error(format!("validate config: {}", e));

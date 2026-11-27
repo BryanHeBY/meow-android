@@ -10,14 +10,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,6 +47,7 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
     val viewModel: ConfigurationOverrideViewModel = viewModel(factory = AppGraph.viewModelFactory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val (form, profile) = state
+    val dnsStatus by viewModel.dnsStatus.collectAsStateWithLifecycle()
     val saving = form?.saving == true
     val global = viewModel.profileId == null
 
@@ -62,7 +61,7 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
                 OverrideEvent.Saved -> saved
                 OverrideEvent.DnsSaved -> dnsSaved
                 OverrideEvent.SaveFailed -> failed
-                is OverrideEvent.DnsFailed -> String.format(dnsFailed, it.reason)
+                is OverrideEvent.DnsFailed -> String.format(dnsFailed, it.issue.message)
             }
             snackbarHost.showSnackbar(message)
         }
@@ -89,10 +88,10 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
             if (!global && profile == null && form != null) {
                 Text(stringResource(R.string.override_profile_unavailable))
             } else if (form != null) {
-                OverrideFields(
-                    form, profile, global, viewModel::edit, viewModel::save,
-                )
-                form.draftDns?.let { DnsFields(it, form, viewModel::editDns, viewModel::saveDns) }
+                form.draftDns?.let {
+                    DnsOverrideFields(it, form, profile, dnsStatus, viewModel::editDns) { viewModel.saveDns(profile?.id) }
+                }
+                OverrideFields(form, profile, global, viewModel::edit, viewModel::save)
             }
         }
     }
@@ -160,35 +159,6 @@ private fun OverrideFields(
         ) { Text(stringResource(R.string.override_reset)) }
         Button(onClick = onSave, enabled = form.canSave, modifier = Modifier.testTag("save_configuration_override")) {
             Text(stringResource(R.string.common_save))
-        }
-    }
-}
-
-@Composable
-private fun DnsFields(builtin: Boolean, form: OverrideForm, onEdit: (Boolean) -> Unit, onSave: () -> Unit) {
-    SectionHeader(stringResource(R.string.settings_builtin_dns))
-    GlassCard {
-        Row(
-            Modifier.fillMaxWidth().toggleable(
-                value = builtin, enabled = !form.saving, role = Role.Switch, onValueChange = onEdit,
-            ).padding(vertical = 4.dp).testTag("settings_builtin_dns"),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.override_dns_force), style = MaterialTheme.typography.titleSmall)
-                val desc = if (builtin) R.string.settings_builtin_dns_desc else R.string.override_dns_profile
-                Text(stringResource(desc), style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = builtin, onCheckedChange = null, enabled = !form.saving)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { onEdit(true) }, enabled = !form.saving && !builtin) {
-                Text(stringResource(R.string.override_dns_reset))
-            }
-            Button(onClick = onSave, enabled = form.canSaveDns, modifier = Modifier.testTag("save_builtin_dns")) {
-                Text(stringResource(R.string.override_save_dns))
-            }
         }
     }
 }

@@ -18,9 +18,9 @@ interface IMeowService {
     String probeProxy(long id, String proxy, String kind, String arg);
     oneway void cancelProxyProbe(long id);
 
-    // Save the switch and apply it to a running engine (see src/live_dns.rs).
-    // Returns null on success, else the transaction error.
-    String setBuiltinDns(boolean enabled);
+    // Save against the selection the editor showed. Zero means no selected profile.
+    // Returns a DNS issue code, or null on success.
+    String setDnsSettings(String settings, long selectedId);
 
     // The running session's start time and its traffic per kind of network;
     // null while no engine is up.
@@ -30,4 +30,6 @@ interface IMeowService {
     int applyZeroTier();
     int setMeowForwarding(boolean enabled);
     int getForwardingFlags();
+
+    String getDnsStatus();
 }

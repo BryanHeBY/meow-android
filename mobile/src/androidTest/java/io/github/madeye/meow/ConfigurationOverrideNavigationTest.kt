@@ -17,20 +17,20 @@ class ConfigurationOverrideNavigationTest {
     @Test
     fun settingsNetworkOpensTheGlobalFormWithAnUnsavedDraft() {
         compose.onNodeWithTag("tab_settings").performClick()
-        compose.onNodeWithTag("settings_builtin_dns").assertDoesNotExist()
+        compose.onNodeWithTag("dns_mode").assertDoesNotExist()
         compose.onNodeWithTag("configuration_override").performScrollTo().performClick()
 
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodesWithTag("save_configuration_override").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("save_configuration_override").assertIsNotEnabled()
-        compose.onNodeWithTag("settings_builtin_dns").assertExists()
+        compose.onNodeWithTag("dns_mode").assertExists()
         val forceOn = compose.onNodeWithTag("override_ipv6_force_on")
         val forceOff = compose.onNodeWithTag("override_ipv6_force_off")
         val checked = forceOn.fetchSemanticsNode().config[SemanticsProperties.Selected]
         (if (checked) forceOff else forceOn).performScrollTo().performClick()
         val save = compose.onNodeWithTag("save_configuration_override")
         save.assertIsEnabled()
-        compose.onNodeWithTag("save_builtin_dns").assertIsNotEnabled()
+        compose.onNodeWithTag("save_dns").assertIsNotEnabled()
     }
 }

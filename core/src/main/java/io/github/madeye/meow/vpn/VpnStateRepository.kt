@@ -9,6 +9,7 @@ import io.github.madeye.meow.aidl.VpnServiceSnapshot
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.net.ProxyProbeTransport
+import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +75,13 @@ class VpnStateRepository(
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
+    private val _dnsIssues = MutableSharedFlow<DnsIssue>(extraBufferCapacity = 4)
+    val dnsIssues: SharedFlow<DnsIssue> = _dnsIssues.asSharedFlow()
+
+    override fun dnsActivationRejected(issue: DnsIssue) {
+        _dnsIssues.tryEmit(issue)
+    }
+
     fun bind(context: Context) = connection.connect(context, this)
 
     fun unbind(context: Context) = connection.disconnect(context)
@@ -120,8 +128,9 @@ class VpnStateRepository(
 
     override fun cancel(id: Long) = connection.cancelProxyProbe(id)
 
-    /** See [MeowConnection.setBuiltinDns]; blocks, so not on Main. */
-    fun applyBuiltinDns(enabled: Boolean): String? = connection.setBuiltinDns(enabled)
+    fun applyDnsSettings(settings: String, selectedId: Long): String? = connection.setDnsSettings(settings, selectedId)
+
+    fun dnsStatus(): String? = connection.dnsStatus()
 
     /** See [MeowConnection.sessionStats]; a binder call, so not on Main. */
     fun sessionStats(): SessionStats? = connection.sessionStats()

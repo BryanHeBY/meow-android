@@ -190,15 +190,14 @@ class SubscribeViewModel(
     }
 
     /**
-     * Imports a YAML file the user picked. The engine validates it — the UI
-     * never parses config itself, so an import can't be accepted here and then
-     * rejected at connect time.
+     * Imports a YAML file the user picked. The engine validates the profile's
+     * structure here and checks its effective DNS settings on activation.
      */
     fun import(name: String, yaml: String) {
         viewModelScope.launch {
             busy.value = true
             try {
-                val error = validator.validate(yaml)
+                val error = validator.validateStructure(yaml)
                 if (error != null) {
                     _events.tryEmit(SubscribeEvent.ImportFailed(error))
                     return@launch

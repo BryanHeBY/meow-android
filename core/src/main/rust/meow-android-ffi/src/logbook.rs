@@ -278,7 +278,7 @@ rules:
 ";
         std::fs::write(home.path().join("config.yaml"), profile).unwrap();
         *crate::HOME_DIR.lock() = Some(home.path().to_str().unwrap().to_string());
-        let started = crate::start_engine(None, None, None, crate::engine::DnsUpstreams::Builtin);
+        let started = crate::start_engine(None, None, crate::engine::DnsUpstreams::Builtin, 0);
         let error = crate::get_error();
         crate::stop_engine();
         *crate::HOME_DIR.lock() = None;

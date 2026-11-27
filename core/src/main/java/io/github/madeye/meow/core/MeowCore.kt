@@ -15,27 +15,25 @@ object MeowCore {
      * [dashboardSecret] guards the dashboard API unless the profile sets its own `secret:`.
      * [capability] guards the app's private listener. Returns its bound port, or -1 on failure.
      * [mode] overrides the config's `mode:` (`rule`/`global`/`direct`); empty keeps it.
-     * [builtinDns] drops the profile's DNS upstreams for the built-in pool;
-     * [nativeSetBuiltinDns] flips it on the running engine.
+     * [dns] carries the saved DNS preference.
+     * [profileId] is the immutable ID of the profile this engine will run.
      */
     external fun nativeStartEngine(
         addr: String,
         dashboardSecret: String,
         mode: String,
-        builtinDns: Boolean,
+        dns: String,
+        profileId: Long,
         capability: String,
     ): Int
 
-    /**
-     * Puts the running engine on the built-in pool ([builtinDns]) or the
-     * profile's DNS, without a restart. 0 when applied or no engine runs;
-     * -1 with [nativeGetLastError] set when the new DNS did not build, and
-     * the engine keeps the one it had.
-     */
-    external fun nativeSetBuiltinDns(builtinDns: Boolean): Int
+    /** Commits a staged preference and, when requested, installs its live resolver. Returns a DNS issue code on failure. */
+    external fun nativeCommitDns(dns: String, staged: String, target: String, selectedId: Long, applyLive: Boolean): String?
 
-    /** Resolver mode to restore on a failed preference write: 0 profile, 1 built-in, -1 stopped. */
-    external fun nativeAppliedBuiltinDns(): Int
+    external fun nativeCheckCachedDns(yaml: String, settings: String): String?
+
+    /** Applied DNS status with redacted endpoint details. */
+    external fun nativeDnsStatus(): String?
 
     /**
      * Whether the VPN routes IPv6 for the running engine's profile: off only
@@ -62,7 +60,8 @@ object MeowCore {
     external fun nativeIsRunning(): Boolean
     external fun nativeGetUploadTraffic(): Long
     external fun nativeGetDownloadTraffic(): Long
-    external fun nativeValidateConfig(yaml: String): Int
+    external fun nativeValidateConfig(yaml: String, dns: String): Int
+    external fun nativeValidateProfileStructure(yaml: String): Int
     external fun nativeGetLastError(): String
     external fun nativeVersion(): String
     external fun nativeGetLogs(): String

@@ -7,4 +7,5 @@ interface IMeowServiceCallback {
     void trafficUpdated(long profileId, in TrafficStats stats);
     void trafficPersisted(long profileId);
     oneway void forwardingChanged(int flags);
+    oneway void dnsActivationRejected(String issue);
 }

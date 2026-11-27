@@ -34,20 +34,24 @@ pub(crate) async fn txt_nameserver() -> SocketAddr {
     tokio::spawn(async move {
         let mut buf = [0u8; 1500];
         while let Ok((n, peer)) = socket.recv_from(&mut buf).await {
-            let Some(end) = question_end(&buf[..n]) else {
+            let Some(reply) = txt_reply(&buf[..n]) else {
                 continue;
             };
-            let mut reply = buf[..end].to_vec();
-            reply[2..4].copy_from_slice(&0x8180u16.to_be_bytes()); // response, RD, RA
-            reply[6..12].copy_from_slice(&[0, 1, 0, 0, 0, 0]); // one answer
-            reply.extend_from_slice(&[0xc0, 0x0c, 0, 16, 0, 1, 0, 0, 0, 60]);
-            reply.extend_from_slice(&(PROFILE_TXT.len() as u16 + 1).to_be_bytes());
-            reply.push(PROFILE_TXT.len() as u8);
-            reply.extend_from_slice(PROFILE_TXT);
             let _ = socket.send_to(&reply, peer).await;
         }
     });
     addr
+}
+
+pub(crate) fn txt_reply(query: &[u8]) -> Option<Vec<u8>> {
+    let mut reply = query[..question_end(query)?].to_vec();
+    reply[2..4].copy_from_slice(&0x8180u16.to_be_bytes());
+    reply[6..12].copy_from_slice(&[0, 1, 0, 0, 0, 0]);
+    reply.extend_from_slice(&[0xc0, 0x0c, 0, 16, 0, 1, 0, 0, 0, 60]);
+    reply.extend_from_slice(&(PROFILE_TXT.len() as u16 + 1).to_be_bytes());
+    reply.push(PROFILE_TXT.len() as u8);
+    reply.extend_from_slice(PROFILE_TXT);
+    Some(reply)
 }
 
 /// A DNS query for `name`'s records of `qtype`.

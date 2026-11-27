@@ -192,6 +192,9 @@ private fun ProfileReloadNotice(snackbarHost: SnackbarHostState) {
     LaunchedEffect(lifecycle, reconnecting, rejected) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val reloader = AppGraph.configReloader
+            launch {
+                AppGraph.vpn.dnsIssues.collect { snackbarHost.showSnackbar(it.message) }
+            }
             merge(
                 reloader.reloads.map { reconnecting },
                 // The engine's error goes to the log only; it runs too long
