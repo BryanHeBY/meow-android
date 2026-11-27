@@ -516,4 +516,14 @@
     <string name="advanced_dns_hosts_replace">Hosts ဇယား အစားထိုးရန်</string>
     <string name="advanced_dns_hosts_format">တစ်ကြောင်းလျှင် host အမည်နှင့် IP လိပ်စာတစ်ခု ထည့်ပါ။ ဇယားအလွတ်က ဆက်ခံထားသော မှတ်တမ်းများကို ဖယ်ရှားမည်။</string>
     <string name="advanced_dns_hosts_invalid">မထပ်သော host အမည်နှင့် IPv4 သို့မဟုတ် IPv6 လိပ်စာ ထည့်ပါ။</string>
+    <string name="advanced_log_level">မှတ်တမ်းအဆင့်</string>
+    <string name="advanced_log_level_detail">ဒက်ရှ်ဘုတ် အပါအဝင် အသစ်ထွက်လာသော တိုက်ရိုက်မှတ်တမ်းများကို ထိန်းချုပ်သည်။ သိမ်းထားသော မှတ်တမ်းစာအုပ်ကို မပြောင်းပါ။</string>
+    <string name="advanced_log_debug">အမှားရှာဖွေမှု</string>
+    <string name="advanced_log_info">အချက်အလက်</string>
+    <string name="advanced_log_warning">သတိပေးချက်</string>
+    <string name="advanced_log_error">အမှား</string>
+    <string name="advanced_log_silent">မပြရန်</string>
+    <string name="advanced_route_mode_next">နောက်တစ်ကြိမ် စတင်ချိန်၏ လမ်းကြောင်းစနစ်</string>
+    <string name="advanced_route_mode_next_detail">Meow နောက်တစ်ကြိမ် စတင်ရန် ချက်ချင်း သိမ်းဆည်းသည်။ လက်ရှိချိတ်ဆက်မှုကို မပြောင်းပါ။ ယခု ပြောင်းရန် ပင်မစာမျက်နှာကို သုံးပါ။</string>
+    <string name="advanced_route_mode_save_failed">နောက်တစ်ကြိမ် စတင်ရန် လမ်းကြောင်းစနစ်ကို မသိမ်းဆည်းနိုင်ပါ။</string>
 </resources>

@@ -529,4 +529,14 @@
     <string name="advanced_dns_hosts_replace">جایگزینی جدول میزبان‌ها</string>
     <string name="advanced_dns_hosts_format">در هر خط یک نام میزبان و یک نشانی IP وارد کنید. جدول خالی رکوردهای ارثی را پاک می‌کند.</string>
     <string name="advanced_dns_hosts_invalid">نام میزبان یکتا و نشانی عددی IPv4 یا IPv6 وارد کنید.</string>
+    <string name="advanced_log_level">سطح گزارش</string>
+    <string name="advanced_log_level_detail">گزارش‌های زندهٔ جدید، از جمله گزارش‌های داشبورد، را تنظیم می‌کند. گزارش‌های نگه‌داری‌شده تغییر نمی‌کنند.</string>
+    <string name="advanced_log_debug">اشکال‌زدایی</string>
+    <string name="advanced_log_info">اطلاعات</string>
+    <string name="advanced_log_warning">هشدار</string>
+    <string name="advanced_log_error">خطا</string>
+    <string name="advanced_log_silent">بی‌صدا</string>
+    <string name="advanced_route_mode_next">حالت مسیریابی در اجرای بعدی</string>
+    <string name="advanced_route_mode_next_detail">برای اجرای بعدی Meow فوراً ذخیره می‌شود. اتصال فعلی تغییر نمی‌کند. برای تغییر فوری از صفحهٔ اصلی استفاده کنید.</string>
+    <string name="advanced_route_mode_save_failed">ذخیرهٔ حالت مسیریابی برای اجرای بعدی ممکن نشد.</string>
 </resources>

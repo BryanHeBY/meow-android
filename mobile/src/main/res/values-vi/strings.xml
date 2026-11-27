@@ -511,4 +511,14 @@
     <string name="advanced_dns_hosts_replace">Thay bảng máy chủ tĩnh</string>
     <string name="advanced_dns_hosts_format">Mỗi dòng nhập một tên máy chủ và một địa chỉ IP. Bảng trống sẽ xóa các bản ghi được kế thừa.</string>
     <string name="advanced_dns_hosts_invalid">Nhập tên máy chủ không trùng và địa chỉ IPv4 hoặc IPv6 dạng số.</string>
+    <string name="advanced_log_level">Mức ghi nhật ký</string>
+    <string name="advanced_log_level_detail">Điều chỉnh các mục nhật ký trực tiếp mới, kể cả trên bảng điều khiển. Không thay đổi nhật ký đã lưu.</string>
+    <string name="advanced_log_debug">Gỡ lỗi</string>
+    <string name="advanced_log_info">Thông tin</string>
+    <string name="advanced_log_warning">Cảnh báo</string>
+    <string name="advanced_log_error">Lỗi</string>
+    <string name="advanced_log_silent">Tắt ghi</string>
+    <string name="advanced_route_mode_next">Chế độ định tuyến khi khởi động lần sau</string>
+    <string name="advanced_route_mode_next_detail">Lưu ngay để dùng khi Meow khởi động lần sau. Kết nối hiện tại không thay đổi. Để đổi ngay, hãy dùng Trang chủ.</string>
+    <string name="advanced_route_mode_save_failed">Không lưu được chế độ định tuyến cho lần khởi động sau.</string>
 </resources>

@@ -541,4 +541,14 @@
     <string name="advanced_dns_hosts_replace">Заменить таблицу хостов</string>
     <string name="advanced_dns_hosts_format">По одному имени хоста и IP-адресу в строке. Пустая таблица удаляет унаследованные записи.</string>
     <string name="advanced_dns_hosts_invalid">Укажите уникальные имена хостов и числовые адреса IPv4 или IPv6.</string>
+    <string name="advanced_log_level">Уровень журналирования</string>
+    <string name="advanced_log_level_detail">Управляет новыми записями текущего лога, в том числе на панели управления. Сохранённый журнал не меняется.</string>
+    <string name="advanced_log_debug">Отладка</string>
+    <string name="advanced_log_info">Информация</string>
+    <string name="advanced_log_warning">Предупреждение</string>
+    <string name="advanced_log_error">Ошибка</string>
+    <string name="advanced_log_silent">Без записей</string>
+    <string name="advanced_route_mode_next">Режим маршрутизации при следующем запуске</string>
+    <string name="advanced_route_mode_next_detail">Сохраняется сразу для следующего запуска Meow. Текущее подключение не изменится. Чтобы переключить режим сейчас, откройте главный экран.</string>
+    <string name="advanced_route_mode_save_failed">Не удалось сохранить режим маршрутизации для следующего запуска.</string>
 </resources>

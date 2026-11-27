@@ -573,4 +573,14 @@
     <string name="advanced_dns_hosts_replace">استبدال جدول المضيفين</string>
     <string name="advanced_dns_hosts_format">اسم مضيف وعنوان IP في كل سطر. يمسح الجدول الفارغ السجلات الموروثة.</string>
     <string name="advanced_dns_hosts_invalid">أدخل أسماء مضيفين فريدة وعناوين IPv4 أو IPv6 رقمية.</string>
+    <string name="advanced_log_level">مستوى السجل</string>
+    <string name="advanced_log_level_detail">يضبط السجلات المباشرة الجديدة، بما فيها سجلات لوحة التحكم. لا يغيّر السجل المحفوظ.</string>
+    <string name="advanced_log_debug">تصحيح الأخطاء</string>
+    <string name="advanced_log_info">معلومات</string>
+    <string name="advanced_log_warning">تحذير</string>
+    <string name="advanced_log_error">خطأ</string>
+    <string name="advanced_log_silent">صامت</string>
+    <string name="advanced_route_mode_next">وضع التوجيه عند التشغيل التالي</string>
+    <string name="advanced_route_mode_next_detail">يُحفظ فورًا للتشغيل التالي لـ Meow. لا يغيّر الاتصال الحالي. للتبديل الآن، استخدم الصفحة الرئيسية.</string>
+    <string name="advanced_route_mode_save_failed">تعذّر حفظ وضع التوجيه للتشغيل التالي.</string>
 </resources>

@@ -521,4 +521,14 @@
     <string name="advanced_dns_hosts_replace">Ana makine tablosunu değiştir</string>
     <string name="advanced_dns_hosts_format">Her satıra bir ana makine adı ve IP adresi girin. Boş tablo devralınan kayıtları siler.</string>
     <string name="advanced_dns_hosts_invalid">Benzersiz ana makine adları ve sayısal IPv4 veya IPv6 adresleri girin.</string>
+    <string name="advanced_log_level">Günlük düzeyi</string>
+    <string name="advanced_log_level_detail">Kontrol panelindekiler de dahil olmak üzere yeni canlı günlük kayıtlarını yönetir. Saklanan geçmişi değiştirmez.</string>
+    <string name="advanced_log_debug">Hata ayıklama</string>
+    <string name="advanced_log_info">Bilgi</string>
+    <string name="advanced_log_warning">Uyarı</string>
+    <string name="advanced_log_error">Hata</string>
+    <string name="advanced_log_silent">Sessiz</string>
+    <string name="advanced_route_mode_next">Sonraki başlatmada yönlendirme modu</string>
+    <string name="advanced_route_mode_next_detail">Meow’un bir sonraki başlatması için hemen kaydedilir. Mevcut bağlantı değişmez. Şimdi değiştirmek için Ana Sayfa’yı kullanın.</string>
+    <string name="advanced_route_mode_save_failed">Sonraki başlatma için yönlendirme modu kaydedilemedi.</string>
 </resources>
