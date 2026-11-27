@@ -52,6 +52,7 @@ internal data class OverrideForm(
     fun draftFor(section: OverrideSection): ConfigurationOverride = when (section) {
         OverrideSection.MAIN -> saved.copy(ipv6 = draft.ipv6, appQuic = draft.appQuic)
         OverrideSection.CORE -> saved.copy(coreBehavior = draft.coreBehavior)
+        OverrideSection.HOSTS -> saved.copy(dnsHosts = draft.dnsHosts)
     }
 
     fun canSave(section: OverrideSection) = !saving && saved != draftFor(section)
@@ -60,7 +61,7 @@ internal data class OverrideForm(
             (draftDns.requiresProfile && draftDns.profileId != dnsSelectedId))
 }
 
-internal enum class OverrideSection { MAIN, CORE }
+internal enum class OverrideSection { MAIN, CORE, HOSTS }
 
 internal sealed interface OverrideEvent {
     data object Saved : OverrideEvent

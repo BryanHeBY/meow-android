@@ -44,6 +44,7 @@ import io.github.madeye.meow.ui.components.MeowScaffold
 import io.github.madeye.meow.ui.components.SectionHeader
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverrideFields
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverridePage
+import io.github.madeye.meow.ui.screens.advancedconfig.DnsHostsEditor
 
 internal const val CONFIGURATION_OVERRIDE_TAG = "configuration_override"
 internal const val PROFILE_OVERRIDE_TAG = "profile_configuration_override"
@@ -114,6 +115,11 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
                     TextButton(onClick = { advanced = AdvancedOverridePage.INDEX }, enabled = !saving) {
                         Text(stringResource(R.string.advanced_title))
                     }
+                } else if (page == AdvancedOverridePage.HOSTS) {
+                    DnsHostsEditor(form, global,
+                        onEdit = { viewModel.edit(form.draft.copy(dnsHosts = it)) },
+                        onSave = { viewModel.save(OverrideSection.HOSTS) },
+                    )
                 } else {
                     AdvancedOverrideFields(
                         page, form, profile, global, { advanced = it },

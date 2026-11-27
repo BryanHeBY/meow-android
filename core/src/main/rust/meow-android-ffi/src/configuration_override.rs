@@ -19,6 +19,80 @@ fn runtime_yaml(yaml: &str, enabled: bool) -> Result<String> {
     .context("starting the YAML parser")?
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DnsHostsOverride {
+    hosts: Option<std::collections::BTreeMap<String, std::net::IpAddr>>,
+    use_hosts: Option<bool>,
+}
+
+fn dns_hosts_yaml(yaml: &str, options: DnsHostsOverride) -> Result<String> {
+    meow_common::yaml::run_on_parse_stack(yaml, move |yaml| {
+        use serde_yaml::Value;
+        let mut doc: Value = serde_yaml::from_str(yaml).context("parsing profile YAML")?;
+        doc.apply_merge().context("applying profile YAML merges")?;
+        let map = doc.as_mapping_mut().context("expected a profile mapping")?;
+        if let Some(hosts) = options.hosts {
+            anyhow::ensure!(hosts.len() <= 256, "too many host records");
+            for name in hosts.keys() {
+                anyhow::ensure!(
+                    !name.is_empty()
+                        && name.len() <= 253
+                        && name.split('.').all(|label| {
+                            !label.is_empty()
+                                && label.len() <= 63
+                                && !label.starts_with('-')
+                                && !label.ends_with('-')
+                                && label.bytes().all(|c| {
+                                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'
+                                })
+                        }),
+                    "invalid host record name"
+                );
+            }
+            map.insert("hosts".into(), serde_yaml::to_value(hosts)?);
+        }
+        if let Some(enabled) = options.use_hosts {
+            let block = map.entry("dns".into()).or_insert(Value::Null);
+            if block.is_null() {
+                *block = Value::Mapping(serde_yaml::Mapping::new());
+            }
+            block
+                .as_mapping_mut()
+                .context("expected a DNS mapping")?
+                .insert("use-hosts".into(), enabled.into());
+        }
+        serde_yaml::to_string(&doc).context("serializing runtime profile")
+    })
+    .context("starting the YAML parser")?
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeOverrideDnsHosts(
+    mut env: JNIEnv,
+    _class: JClass,
+    yaml: JString,
+    options: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let yaml: String = env.get_string(&yaml)?.into();
+        let options: String = env.get_string(&options)?.into();
+        dns_hosts_yaml(&yaml, serde_json::from_str(&options)?)
+    })();
+    match result {
+        Ok(runtime) => env
+            .new_string(runtime)
+            .map_or(std::ptr::null_mut(), |s| s.into_raw()),
+        Err(_) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Could not prepare the profile with the saved DNS hosts overrides",
+            );
+            std::ptr::null_mut()
+        }
+    }
+}
+
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CoreBehaviorOverride {
@@ -210,6 +284,83 @@ mod tests {
                 u16::from_be_bytes([response[6], response[7]]),
                 u16::from(enabled)
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn override_hosts_affects_actual_dns_answers_in_each_mode() {
+        let authored = r#"
+ipv6: true
+hosts: {v4.hosts.test: 192.0.2.1, v6.hosts.test: '2001:db8::1'}
+dns: {nameserver: ['rcode://refused']}
+rules: ['MATCH,DIRECT']
+"#;
+        let expected_v4 = std::net::Ipv4Addr::new(192, 0, 2, 53).octets();
+        let expected_v6 = "2001:db8::53"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets();
+        for mode in [DnsUpstreams::Builtin, DnsUpstreams::Profile] {
+            for (json, expect_override, expect_authored) in [
+                (
+                    r#"{"hosts":{"v4.hosts.test":"192.0.2.53","v6.hosts.test":"2001:db8::53"},"useHosts":true}"#,
+                    true,
+                    false,
+                ),
+                (
+                    r#"{"hosts":{"v4.hosts.test":"192.0.2.53","v6.hosts.test":"2001:db8::53"},"useHosts":false}"#,
+                    false,
+                    false,
+                ),
+                (r#"{"hosts":{}}"#, false, false),
+                (r#"{}"#, false, true),
+            ] {
+                let runtime =
+                    dns_hosts_yaml(authored, serde_json::from_str(json).unwrap()).unwrap();
+                let stripped = engine::strip_and_inject(&runtime, mode.clone()).unwrap();
+                // Keep the real DNS packet handler, but make every upstream synthetic.
+                let mut dns_only: serde_yaml::Value = serde_yaml::from_str(&stripped).unwrap();
+                let dns = dns_only["dns"].as_mapping_mut().unwrap();
+                for key in [
+                    "nameserver",
+                    "default-nameserver",
+                    "proxy-server-nameserver",
+                ] {
+                    dns.insert(
+                        key.into(),
+                        serde_yaml::to_value(["rcode://refused"]).unwrap(),
+                    );
+                }
+                let config =
+                    meow_config::load_config_from_str(&serde_yaml::to_string(&dns_only).unwrap())
+                        .await
+                        .unwrap();
+                let resolver = &config.dns.resolver;
+                for (name, kind, expected, original) in [
+                    (
+                        "v4.hosts.test",
+                        1,
+                        &expected_v4[..],
+                        &std::net::Ipv4Addr::new(192, 0, 2, 1).octets()[..],
+                    ),
+                    (
+                        "v6.hosts.test",
+                        28,
+                        &expected_v6[..],
+                        &"2001:db8::1"
+                            .parse::<std::net::Ipv6Addr>()
+                            .unwrap()
+                            .octets()[..],
+                    ),
+                ] {
+                    let query = crate::test_support::dns_query(name, kind);
+                    let reply = meow_dns::DnsServer::handle_query(&query, resolver)
+                        .await
+                        .unwrap();
+                    assert_eq!(reply.ends_with(expected), expect_override, "{json} {name}");
+                    assert_eq!(reply.ends_with(original), expect_authored, "{json} {name}");
+                }
+            }
         }
     }
 

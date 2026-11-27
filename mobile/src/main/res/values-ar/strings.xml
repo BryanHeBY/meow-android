@@ -355,7 +355,7 @@
     <string name="advanced_routing">التوجيه والسجلات</string>
     <string name="advanced_sniffer">فحص حركة البيانات</string>
     <string name="advanced_data">البيانات والأدوات</string>
-    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر هنا خيارات مستقلة لـ IPv6 في DNS أو DNS عبر HTTP/3 أو DNS النظام أو منافذ استقبال DNS أو المضيفين أو الخوادم الاحتياطية أو السياسات أو مرشحات Fake-IP.</string>
+    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر هنا خيارات مستقلة لـ IPv6 في DNS أو DNS عبر HTTP/3 أو DNS النظام أو منافذ استقبال DNS أو الخوادم الاحتياطية أو السياسات أو مرشحات Fake-IP.</string>
     <string name="advanced_listeners_unavailable">لا يشغّل VPN في Android منافذ استقبال لوكلاء HTTP أو SOCKS أو الوكلاء المختلطين أو الشفافين. لا تتوفر خيارات المنافذ أو المصادقة أو الربط بالشبكة المحلية.</string>
     <string name="advanced_controller_unavailable">يدير Meow وحدة التحكم المحلية المحمية بالمصادقة. لا تتوفر تجاوزات Android لعناوين وحدة التحكم أو TLS أو CORS أو بيانات الاعتماد.</string>
     <string name="advanced_routing_unavailable">تدير الشاشة الرئيسية وضع التوجيه. لا يوفر Android مستوى سجل خاصًا بكل ملف.</string>
@@ -567,4 +567,10 @@
     <string name="controller_waiting_providers">في انتظار مزوّدي الوكيل…</string>
     <string name="proxy_groups_select_failed">تعذّر تبديل الوكيل.</string>
     <string name="home_route_mode_failed">تعذّر تبديل وضع التوجيه.</string>
+    <string name="advanced_dns_hosts">مضيفو DNS</string>
+    <string name="advanced_dns_hosts_use">استخدام سجلات المضيفين</string>
+    <string name="advanced_dns_hosts_table">جدول المضيفين</string>
+    <string name="advanced_dns_hosts_replace">استبدال جدول المضيفين</string>
+    <string name="advanced_dns_hosts_format">اسم مضيف وعنوان IP في كل سطر. يمسح الجدول الفارغ السجلات الموروثة.</string>
+    <string name="advanced_dns_hosts_invalid">أدخل أسماء مضيفين فريدة وعناوين IPv4 أو IPv6 رقمية.</string>
 </resources>

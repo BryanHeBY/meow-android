@@ -44,6 +44,7 @@ object MeowCore {
     external fun nativeOverrideIpv6(yaml: String, enabled: Boolean): String
 
     /** Applies the typed core behavior choices to the runtime copy. */
+    external fun nativeOverrideDnsHosts(yaml: String, options: String): String
     external fun nativeOverrideCoreBehavior(yaml: String, options: String): String
 
     /** Startup values from the profile, without using the network. */

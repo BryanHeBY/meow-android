@@ -11,6 +11,7 @@ import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.preference.ConfigurationOverride
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.CoreBehaviorRuntime
+import io.github.madeye.meow.preference.DnsHostsRuntime
 import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.DnsSettings
 import io.github.madeye.meow.preference.DnsSettingsStore
@@ -137,7 +138,8 @@ class MeowInstance(profile: ClashProfile) {
             val selected = activeConfig.takeIf { it.profileId > 0 }
             val issue = DnsSettingsStore.default.activationIssue(dns, selected, MeowCore::nativeCheckCachedDns)
             if (issue != null) throw DnsActivationException(issue)
-            configFile.writeText(CoreBehaviorRuntime.apply(runtimeYaml, override.coreBehavior))
+            val withCore = CoreBehaviorRuntime.apply(runtimeYaml, override.coreBehavior)
+            configFile.writeText(DnsHostsRuntime.apply(withCore, override.dnsHosts))
             MeowCore.nativeSetHomeDir(configDir.absolutePath)
             val port = MeowCore.nativeStartEngine(
                 "127.0.0.1:9090", mintCredential(), routeMode, dns.encode(), activeConfig.profileId, capability,

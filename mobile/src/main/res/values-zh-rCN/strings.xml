@@ -303,7 +303,7 @@
     <string name="advanced_routing">路由和日志</string>
     <string name="advanced_sniffer">流量嗅探</string>
     <string name="advanced_data">数据和工具</string>
-    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。此处无法单独设置 DNS IPv6、HTTP/3 DNS、系统 DNS、DNS 监听、主机映射、回退、策略或 Fake-IP 过滤。</string>
+    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。此处无法单独设置 DNS IPv6、HTTP/3 DNS、系统 DNS、DNS 监听、回退、策略或 Fake-IP 过滤。</string>
     <string name="advanced_listeners_unavailable">Android VPN 不会启动 HTTP、SOCKS、混合或透明代理监听。监听端口、认证和局域网绑定不可用。</string>
     <string name="advanced_controller_unavailable">Meow 管理经过认证的环回控制器。Android 覆写不支持自定义控制器地址、TLS、CORS 或凭据。</string>
     <string name="advanced_routing_unavailable">路由模式由首页管理。Android 不支持按配置设置日志级别。</string>
@@ -505,4 +505,10 @@
     <string name="controller_waiting_providers">正在等待代理提供者…</string>
     <string name="proxy_groups_select_failed">无法切换代理。</string>
     <string name="home_route_mode_failed">无法切换路由模式。</string>
+    <string name="advanced_dns_hosts">DNS Hosts</string>
+    <string name="advanced_dns_hosts_use">使用 Hosts 记录</string>
+    <string name="advanced_dns_hosts_table">Hosts 表</string>
+    <string name="advanced_dns_hosts_replace">替换 Hosts 表</string>
+    <string name="advanced_dns_hosts_format">每行填写一个主机名和一个 IP 地址。空表会清除继承的记录。</string>
+    <string name="advanced_dns_hosts_invalid">请输入不重复的主机名及 IPv4 或 IPv6 地址。</string>
 </resources>

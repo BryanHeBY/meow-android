@@ -26,6 +26,7 @@ import io.github.madeye.meow.ui.screens.overrideconfig.OverrideSection
 internal enum class AdvancedOverridePage(val title: Int, val unavailableReason: Int? = null) {
     INDEX(R.string.advanced_title),
     CORE(R.string.advanced_core_title),
+    HOSTS(R.string.advanced_dns_hosts),
     DNS(R.string.override_dns, R.string.advanced_dns_unavailable),
     LISTENERS(R.string.advanced_listeners, R.string.advanced_listeners_unavailable),
     CONTROLLER(R.string.advanced_controller, R.string.advanced_controller_unavailable),

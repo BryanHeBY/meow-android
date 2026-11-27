@@ -311,7 +311,7 @@
     <string name="advanced_routing">Yönlendirme ve günlükler</string>
     <string name="advanced_sniffer">Trafik inceleme</string>
     <string name="advanced_data">Veri ve araçlar</string>
-    <string name="advanced_dns_unavailable">Android, VPN içinde Fake-IP DNS gerektirir. DNS IPv6, HTTP/3 üzerinden DNS, sistem DNS, DNS dinleyicileri, hosts, yedek sunucular, ilkeler ve Fake-IP filtreleri burada ayrı ayrı ayarlanamaz.</string>
+    <string name="advanced_dns_unavailable">Android, VPN içinde Fake-IP DNS gerektirir. DNS IPv6, HTTP/3 üzerinden DNS, sistem DNS, DNS dinleyicileri, yedek sunucular, ilkeler ve Fake-IP filtreleri burada ayrı ayrı ayarlanamaz.</string>
     <string name="advanced_listeners_unavailable">Android VPN HTTP, SOCKS, karma veya şeffaf proxy dinleyicileri başlatmaz. Dinleme portları, kimlik doğrulama ve yerel ağ bağlaması kullanılamaz.</string>
     <string name="advanced_controller_unavailable">Meow, kimlik doğrulamalı yerel denetleyiciyi yönetir. Android geçersiz kılmalarında denetleyici adresi, TLS, CORS ve kimlik bilgileri değiştirilemez.</string>
     <string name="advanced_routing_unavailable">Yönlendirme modu ana ekrandan yönetilir. Android profillere özel günlük düzeyi sunmaz.</string>
@@ -515,4 +515,10 @@
     <string name="controller_waiting_providers">Proxy sağlayıcıları bekleniyor…</string>
     <string name="proxy_groups_select_failed">Proxy değiştirilemedi.</string>
     <string name="home_route_mode_failed">Yönlendirme modu değiştirilemedi.</string>
+    <string name="advanced_dns_hosts">DNS ana makineleri</string>
+    <string name="advanced_dns_hosts_use">Ana makine kayıtlarını kullan</string>
+    <string name="advanced_dns_hosts_table">Ana makine tablosu</string>
+    <string name="advanced_dns_hosts_replace">Ana makine tablosunu değiştir</string>
+    <string name="advanced_dns_hosts_format">Her satıra bir ana makine adı ve IP adresi girin. Boş tablo devralınan kayıtları siler.</string>
+    <string name="advanced_dns_hosts_invalid">Benzersiz ana makine adları ve sayısal IPv4 veya IPv6 adresleri girin.</string>
 </resources>

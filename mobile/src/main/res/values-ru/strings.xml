@@ -327,7 +327,7 @@
     <string name="advanced_routing">Маршрутизация и журналы</string>
     <string name="advanced_sniffer">Анализ трафика</string>
     <string name="advanced_data">Данные и инструменты</string>
-    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, hosts, резервных серверов, политик и фильтров Fake-IP.</string>
+    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов, политик и фильтров Fake-IP.</string>
     <string name="advanced_listeners_unavailable">VPN Android не запускает HTTP-, SOCKS-, смешанные и прозрачные прокси-слушатели. Порты, аутентификация и привязка к локальной сети недоступны.</string>
     <string name="advanced_controller_unavailable">Meow управляет локальным контроллером с аутентификацией. Адреса контроллера, TLS, CORS и учётные данные недоступны для переопределения в Android.</string>
     <string name="advanced_routing_unavailable">Режим маршрутизации задаётся на главном экране. Android не поддерживает уровень журнала для отдельных профилей.</string>
@@ -535,4 +535,10 @@
     <string name="controller_waiting_providers">Ожидание поставщиков прокси…</string>
     <string name="proxy_groups_select_failed">Не удалось переключить прокси.</string>
     <string name="home_route_mode_failed">Не удалось изменить режим маршрутизации.</string>
+    <string name="advanced_dns_hosts">Хосты DNS</string>
+    <string name="advanced_dns_hosts_use">Использовать записи хостов</string>
+    <string name="advanced_dns_hosts_table">Таблица хостов</string>
+    <string name="advanced_dns_hosts_replace">Заменить таблицу хостов</string>
+    <string name="advanced_dns_hosts_format">По одному имени хоста и IP-адресу в строке. Пустая таблица удаляет унаследованные записи.</string>
+    <string name="advanced_dns_hosts_invalid">Укажите уникальные имена хостов и числовые адреса IPv4 или IPv6.</string>
 </resources>

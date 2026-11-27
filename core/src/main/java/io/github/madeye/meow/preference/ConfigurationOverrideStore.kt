@@ -28,15 +28,23 @@ data class CoreBehaviorOverride(
     )
 }
 
+/** The table is replaced as a unit. Null inherits; an empty table clears it. */
+data class DnsHostsOverride(val hosts: Map<String, String>? = null, val useHosts: Boolean? = null) {
+    fun withInherited(global: DnsHostsOverride) =
+        DnsHostsOverride(hosts ?: global.hosts, useHosts ?: global.useHosts)
+}
+
 data class ConfigurationOverride(
     val ipv6: Ipv6Override = Ipv6Override.INHERIT,
     val appQuic: AppQuicOverride = AppQuicOverride.INHERIT,
     val coreBehavior: CoreBehaviorOverride = CoreBehaviorOverride(),
+    val dnsHosts: DnsHostsOverride = DnsHostsOverride(),
 ) {
     fun withInherited(global: ConfigurationOverride) = ConfigurationOverride(
         ipv6.takeUnless { it == Ipv6Override.INHERIT } ?: global.ipv6,
         appQuic.takeUnless { it == AppQuicOverride.INHERIT } ?: global.appQuic,
         coreBehavior.withInherited(global.coreBehavior),
+        dnsHosts.withInherited(global.dnsHosts),
     )
 
     val blocksAppUdp443: Boolean get() = appQuic == AppQuicOverride.BLOCK_UDP_443
@@ -61,7 +69,7 @@ class ConfigurationOverrideStore(private val directory: File) {
                 return ConfigurationOverride(ipv6 ?: Ipv6Override.INHERIT, quic ?: AppQuicOverride.INHERIT)
             }
             val root = Json.parseToJsonElement(text) as? JsonObject ?: error("expected object")
-            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior") }) { "unknown override field" }
+            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts") }) { "unknown override field" }
             val version = root["version"]?.jsonPrimitive
             require(version?.isString == false && version.intOrNull == 1) { "unsupported override version" }
             fun enumName(key: String) = root[key]?.jsonPrimitive?.let {
@@ -81,8 +89,21 @@ class ConfigurationOverrideStore(private val directory: File) {
                 require(it.isString) { "invalid findProcessMode" }
                 FindProcessOverride.valueOf(it.content)
             }
+            val dnsHosts = (root["dnsHosts"] ?: JsonObject(emptyMap())) as? JsonObject
+                ?: error("invalid dnsHosts")
+            require(dnsHosts.keys.all { it in setOf("hosts", "useHosts") }) { "unknown DNS hosts field" }
+            val hosts = dnsHosts["hosts"]?.let { element ->
+                (element as? JsonObject ?: error("invalid hosts")).mapValues { (_, value) ->
+                    value.jsonPrimitive.also { require(it.isString) }.content
+                }
+            }
+            val useHosts = dnsHosts["useHosts"]?.jsonPrimitive?.let {
+                require(!it.isString)
+                it.booleanOrNull ?: error("invalid useHosts")
+            }
             return ConfigurationOverride(
                 ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process),
+                DnsHostsOverride(hosts, useHosts),
             )
         } catch (e: IllegalArgumentException) {
             throw IOException("Cannot read configuration override", e)
@@ -116,6 +137,8 @@ class ConfigurationOverrideStore(private val directory: File) {
             put("ipv6", JsonPrimitive(override.ipv6.name))
             put("appQuic", JsonPrimitive(override.appQuic.name))
             if (core.isNotEmpty()) put("coreBehavior", JsonObject(core))
+            val hosts = override.dnsHosts.toJson()
+            if (hosts.isNotEmpty()) put("dnsHosts", hosts)
         })
         val temp = File.createTempFile("override-", ".tmp", directory)
         try {

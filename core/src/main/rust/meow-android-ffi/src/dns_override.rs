@@ -403,7 +403,20 @@ fn valid_hostname(host: &str) -> bool {
 
 pub(crate) fn engine_dns_block(profile: Option<Value>, mode: &DnsUpstreams) -> Result<Mapping> {
     let mut dns = match (mode, profile) {
-        (DnsUpstreams::Builtin, _) | (_, None | Some(Value::Null)) => Mapping::new(),
+        // Built-in changes upstreams, not local host-table policy. Retain
+        // only a valid boolean; no network paths from the profile are used.
+        (DnsUpstreams::Builtin, profile) => {
+            let mut dns = Mapping::new();
+            if let Some(enabled) = profile
+                .as_ref()
+                .and_then(|value| value.get("use-hosts"))
+                .and_then(Value::as_bool)
+            {
+                dns.insert("use-hosts".into(), enabled.into());
+            }
+            dns
+        }
+        (_, None | Some(Value::Null)) => Mapping::new(),
         (_, Some(Value::Mapping(dns))) => {
             // Expand before checking for absent keys. The live rebuild then
             // sees the same inherited lists as startup.

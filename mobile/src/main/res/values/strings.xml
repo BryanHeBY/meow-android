@@ -322,7 +322,7 @@
     <string name="advanced_routing">Routing and logging</string>
     <string name="advanced_sniffer">Traffic sniffing</string>
     <string name="advanced_data">Data and tools</string>
-    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, hosts, fallback, policies, and fake-IP filters are unavailable here.</string>
+    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback, policies, and fake-IP filters are unavailable here.</string>
     <string name="advanced_listeners_unavailable">The Android VPN starts no HTTP, SOCKS, mixed, or transparent proxy listeners. Listener ports, authentication, and LAN binding are unavailable.</string>
     <string name="advanced_controller_unavailable">Meow manages the authenticated loopback controller. Custom controller addresses, TLS, CORS, and credentials are unavailable as Android overrides.</string>
     <string name="advanced_routing_unavailable">The Home screen owns routing mode. Android has no profile-scoped log-level control.</string>
@@ -526,4 +526,10 @@
     <string name="controller_waiting_providers">Waiting for proxy providers…</string>
     <string name="proxy_groups_select_failed">Could not switch proxies.</string>
     <string name="home_route_mode_failed">Could not switch route mode.</string>
+    <string name="advanced_dns_hosts">DNS hosts</string>
+    <string name="advanced_dns_hosts_use">Use hosts records</string>
+    <string name="advanced_dns_hosts_table">Hosts table</string>
+    <string name="advanced_dns_hosts_replace">Replace hosts table</string>
+    <string name="advanced_dns_hosts_format">One hostname and IP address per line. An empty table removes inherited records.</string>
+    <string name="advanced_dns_hosts_invalid">Enter unique hostnames with literal IPv4 or IPv6 addresses.</string>
 </resources>
