@@ -5,6 +5,7 @@ on:
     paths:
       - 'buildSrc/**'
       - 'core/**'
+      - 'vendor/meow-rs'
       - 'mobile/**'
       - 'tools/verify-android-edition.py'
       - 'tools/gradle-ci.sh'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'buildSrc/**'
       - 'core/**'
+      - 'vendor/meow-rs'
       - 'mobile/**'
       - 'tools/verify-android-edition.py'
       - 'tools/gradle-ci.sh'
