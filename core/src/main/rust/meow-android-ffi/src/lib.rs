@@ -106,7 +106,7 @@ pub(crate) struct EngineState {
     /// The API's providers: a network switch resets the sessions of their
     /// proxies too, as no group may reach them (`outbound`).
     pub(crate) proxy_providers: Arc<DashMap<String, Arc<ProxyProvider>>>,
-    _handles: Vec<tokio::task::JoinHandle<()>>,
+    controller: Option<tokio::task::JoinHandle<()>>,
 }
 
 pub(crate) static ENGINE: Mutex<Option<EngineState>> = Mutex::new(None);
@@ -340,6 +340,17 @@ async fn start_engine_async(
         config.api.external_controller = addr.parse().ok();
     }
     config.api.secret = engine::api_secret(config.api.secret.take(), secret);
+    // Bind before publishing any engine state or starting background tasks.
+    let controller = if let Some(addr) = config.api.external_controller {
+        Some((
+            addr,
+            tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(|e| anyhow::anyhow!("bind controller at {addr}: {e}"))?,
+        ))
+    } else {
+        None
+    };
     let api_secret = config.api.secret.clone().unwrap_or_default();
     let tun_ipv6 = engine::tun_ipv6(config.raw.ipv6);
     // The app's route-mode picker outlives a session, so its pick replaces
@@ -400,8 +411,6 @@ async fn start_engine_async(
         config.raw.proxy_groups.as_deref().unwrap_or(&[]),
     ));
 
-    let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-
     let proxy_providers: Arc<DashMap<_, _>> =
         Arc::new(config.proxy_providers.into_iter().collect());
     let rule_providers = Arc::new(RwLock::new(config.rule_providers));
@@ -435,7 +444,7 @@ async fn start_engine_async(
     let listeners_for_api = config.listeners.named.clone();
     let log_tx = log_broadcast_tx().clone();
 
-    if let Some(api_addr) = config.api.external_controller {
+    let controller = controller.map(|(api_addr, listener)| {
         let api_server = ApiServer::new(
             tunnel.clone(),
             Some(api_addr),
@@ -459,22 +468,19 @@ async fn start_engine_async(
             // No embedded NTP supervisor in the Android service.
             None,
         );
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = api_server.run().await {
+        tokio::spawn(async move {
+            if let Err(e) = api_server.run_on(listener).await {
                 tracing::error!("API server error: {}", e);
             }
-        }));
-    }
+        })
+    });
 
     // No SOCKS5 / HTTP loopback listener — tun2socks dispatches every flow
     // through `meow_tunnel::tcp::handle_tcp` in-process (same path as
     // meow-ios). The `listeners.*` block in user configs is intentionally
     // ignored on Android.
 
-    logging::bridge_log(&format!(
-        "start_engine_async: all tasks spawned, handles={}",
-        handles.len()
-    ));
+    logging::bridge_log("start_engine_async: all tasks spawned");
     // Last: a start that fails from here on is recorded as a failed stop.
     meow_common::logbook::engine_started(&config_source);
     Ok(EngineState {
@@ -483,7 +489,7 @@ async fn start_engine_async(
         tun_ipv6,
         live_dns,
         proxy_providers,
-        _handles: handles,
+        controller,
     })
 }
 
@@ -643,8 +649,11 @@ fn stop_engine() {
         // Ends the tun2socks UDP reply readers now rather than at their next
         // idle check.
         state.tunnel.close_all_udp_sessions();
-        for handle in state._handles {
-            handle.abort();
+        if let Some(controller) = state.controller {
+            // Join the aborted accept loop while holding ENGINE so the next
+            // start cannot try to bind before this listener has been dropped.
+            controller.abort();
+            let _ = get_runtime().block_on(controller);
         }
         meow_common::logbook::engine_stopped(meow_common::logbook::Stop::Requested("app"));
     }
