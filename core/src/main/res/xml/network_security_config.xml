@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The engine's controller API is plain HTTP on loopback (MeowInstance binds
-  127.0.0.1:9090; MeowApi talks to it). Since targetSdk 28 the platform blocks
+  The dashboard and per-run app controllers use plain HTTP on loopback.
+  Since targetSdk 28 the platform blocks
   cleartext by default and loopback is *not* exempt, and OkHttp enforces that
   policy in RealConnection.connect — so every controller call failed with
   "CLEARTEXT communication to 127.0.0.1 not permitted by network security

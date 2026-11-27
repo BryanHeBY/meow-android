@@ -16,7 +16,6 @@ import io.github.madeye.meow.net.ExitIpLookup
 import io.github.madeye.meow.logbook.LogbookReader
 import io.github.madeye.meow.net.IpGeoLookup
 import io.github.madeye.meow.net.ProxyProber
-import io.github.madeye.meow.preference.ApiSecretStore
 import io.github.madeye.meow.preference.BuiltinDnsPreference
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.ExitIpPreference
@@ -79,7 +78,7 @@ object AppGraph {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val api: MeowApi by lazy { MeowApi(secret = ApiSecretStore.default::load) }
+    private val api by lazy { MeowApi.SessionFactory() }
     val vpn: VpnStateRepository by lazy { VpnStateRepository() }
     val controller: ControllerAccess by lazy { ControllerAccess(vpn.lifecycle) }
 
@@ -156,7 +155,7 @@ object AppGraph {
         override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T =
             when (modelClass) {
                 HomeViewModel::class.java ->
-                    HomeViewModel(vpn, controller, profiles, api, analytics, routeModes, routeChanges)
+                    HomeViewModel(vpn, controller, profiles, api::forSession, analytics, routeModes, routeChanges)
 
                 ExitIpViewModel::class.java -> ExitIpViewModel(
                     lookup = exitIpLookup::lookup,
@@ -169,11 +168,11 @@ object AppGraph {
 
                 ProxyGroupsViewModel::class.java ->
                     ProxyGroupsViewModel(
-                        controller, profiles.observeSelected(), api, routeChanges::notifyChanged,
+                        controller, profiles.observeSelected(), api::forSession, routeChanges::notifyChanged,
                         analytics::proxyNodeSelect, profiles::saveSelectedProxy,
                     )
 
-                ProxyServersViewModel::class.java -> ProxyServersViewModel(controller, api, profiles)
+                ProxyServersViewModel::class.java -> ProxyServersViewModel(controller, api::forSession, profiles)
 
                 ProxyEditViewModel::class.java -> ProxyEditViewModel(
                     extras.createSavedStateHandle(),
@@ -187,8 +186,8 @@ object AppGraph {
                         name = route.name,
                         testUrl = route.testUrl,
                         controller = controller,
-                        describe = api::proxy,
-                        tcpDelay = { name, url -> api.testProxyDelay(name, url) },
+                        describe = { session, name -> api.forSession(session).proxy(name) },
+                        tcpDelay = { session, name, url -> api.forSession(session).testProxyDelay(name, url) },
                         prober = proxyProber,
                     )
                 }
@@ -199,8 +198,8 @@ object AppGraph {
                     analytics,
                     RuleSetUpdater(
                         controller = controller,
-                        listProviders = api::ruleProviders,
-                        updateProvider = api::updateRuleProvider,
+                        listProviders = { session -> api.forSession(session).ruleProviders() },
+                        updateProvider = { session, name -> api.forSession(session).updateRuleProvider(name) },
                     ),
                 )
 
@@ -231,32 +230,35 @@ object AppGraph {
                 YamlEditorViewModel::class.java ->
                     YamlEditorViewModel(extras.createSavedStateHandle(), profiles, configValidator, analytics)
 
-                ConnectionsViewModel::class.java -> ConnectionsViewModel(controller, api, recentConnections, appLabels)
+                ConnectionsViewModel::class.java -> ConnectionsViewModel(controller, api::forSession, recentConnections, appLabels)
                 RulesViewModel::class.java -> {
                     val route = extras.createSavedStateHandle().toRoute<Dest.Rules>()
-                    RulesViewModel(controller, api, route.focus, route.runId)
+                    RulesViewModel(controller, api::forSession, route.focus, route.runId)
                 }
 
                 ConnectionDetailViewModel::class.java -> ConnectionDetailViewModel(
                     id = extras.createSavedStateHandle().toRoute<Dest.ConnectionDetail>().id,
                     store = recentConnections,
                     controller = controller,
-                    polling = connectionsPolling(controller, recentConnections) { api.connections().connections },
-                    rules = api::rules,
-                    closeConnection = api::closeConnection,
-                    proxies = api::proxies,
-                    dnsCache = { host -> api.dnsResults(search = host) },
+                    polling = connectionsPolling(controller, recentConnections) { api.forSession(it).connections().connections },
+                    rules = { session -> api.forSession(session).rules() },
+                    closeConnection = { session, id -> api.forSession(session).closeConnection(id) },
+                    proxies = { session -> api.forSession(session).proxies() },
+                    dnsCache = { session, host -> api.forSession(session).dnsResults(search = host) },
                     ipGeo = ipGeoLookup::lookup,
                     appLabel = appLabels::labelOf,
-                    connectionNotes = api::connectionNotes,
+                    connectionNotes = { session, id -> api.forSession(session).connectionNotes(id) },
                 )
-                DnsViewModel::class.java -> DnsViewModel(fetch = { search -> api.dnsResults(search) })
+                DnsViewModel::class.java -> DnsViewModel(controller) { session, search ->
+                    api.forSession(session).dnsResults(search)
+                }
                 StatisticsViewModel::class.java -> StatisticsViewModel(
+                    controller = controller,
                     // A binder call into :vpn; not on the main thread.
                     session = { withContext(Dispatchers.IO) { vpn.sessionStats() } },
-                    proxyTraffic = api::proxyTraffic,
+                    proxyTraffic = { session -> api.forSession(session).proxyTraffic() },
                 )
-                LogsViewModel::class.java -> LogsViewModel(controller, api)
+                LogsViewModel::class.java -> LogsViewModel(controller, api::forSession)
                 LogbookViewModel::class.java -> LogbookViewModel(
                     read = { before, since, limit, kind -> logbookReader.read(before, since, limit, kind = kind) },
                     kindLabel = { kind -> LogbookKinds.of(kind)?.let { appContext.getString(it.label) } },

@@ -17,7 +17,6 @@ sealed class MeowApiException(message: String, cause: Throwable? = null) :
     class Http(
         val operation: String,
         val code: Int,
-        internal val authorizationChanged: (() -> Boolean)? = null,
     ) : MeowApiException("$operation returned HTTP $code")
 
     /** Nothing is listening — usually just means the VPN is not connected. */

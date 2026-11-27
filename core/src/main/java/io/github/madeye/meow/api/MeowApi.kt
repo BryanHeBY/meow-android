@@ -1,12 +1,13 @@
 package io.github.madeye.meow.api
 
 import io.github.madeye.meow.aidl.ByteTotals
+import io.github.madeye.meow.aidl.ControllerEndpoint
+import io.github.madeye.meow.vpn.ControllerSession
 import java.io.IOException
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -14,7 +15,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -35,31 +35,36 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import timber.log.Timber
 
-/**
- * Client for the embedded engine's Clash-compatible controller API.
- *
- * The engine runs in-process (in `:vpn`) and binds its listener on
- * `127.0.0.1:9090` — see `MeowInstance.start`. [baseUrl] is a constructor
- * parameter rather than a hardcoded constant purely so tests can point it at a
- * `MockWebServer`.
- *
- * Every request, the `/logs` websocket included, carries
- * `Authorization: Bearer` with the value [secret] returns at that moment
- * (the app passes `ApiSecretStore.default::load`); none when it returns null
- * or empty. Asked per request because the engine changes it on every start.
- *
- * Ported from `flutter_module/lib/services/meow_api.dart`.
- */
-class MeowApi(
-    private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
-    baseClient: OkHttpClient = defaultClient(),
-    private val json: Json = MeowJson,
-    private val secret: () -> String? = { null },
+/** Client for one endpoint of the Clash-compatible controller. */
+class MeowApi private constructor(
+    private val baseUrl: HttpUrl,
+    private val clients: Clients,
+    private val json: Json,
+    private val authorization: String?,
 ) {
-    private val client: OkHttpClient = baseClient
+    /** An explicit controller URL, for protocol fixtures. App callers use [SessionFactory]. */
+    internal constructor(
+        baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
+        baseClient: OkHttpClient = defaultClient(),
+        json: Json = MeowJson,
+        secret: String? = null,
+    ) : this(baseUrl, Clients(baseClient), json, secret?.takeIf(String::isNotEmpty)?.let { "Bearer $it" })
+
+    class SessionFactory(baseClient: OkHttpClient = defaultClient(), private val json: Json = MeowJson) {
+        private val clients = Clients(baseClient)
+
+        fun forSession(session: ControllerSession): MeowApi = forEndpoint(session.controller)
+
+        internal fun forEndpoint(endpoint: ControllerEndpoint): MeowApi = MeowApi(
+            LOOPBACK.newBuilder().port(endpoint.port).build(), clients, json, endpoint.authorizationHeader(),
+        )
+    }
+
+    private val client: OkHttpClient get() = clients.client
 
     companion object {
-        const val DEFAULT_BASE_URL = "http://127.0.0.1:9090"
+        private const val DEFAULT_BASE_URL = "http://127.0.0.1:9090"
+        private val LOOPBACK = DEFAULT_BASE_URL.toHttpUrl()
 
         /**
          * Probe target for the delay endpoints when a group sets no testUrl:
@@ -105,28 +110,16 @@ class MeowApi(
      * [PROBE_CONCURRENCY] and queue every other API call behind probes that
      * can each take seconds to time out.
      */
-    private val probeDispatcher by lazy {
-        Dispatcher().apply { maxRequestsPerHost = PROBE_CONCURRENCY }
-    }
-
-    /**
-     * [updateRuleProvider]'s client. The engine answers that call only after
-     * downloading the provider, and gives the download 15 s to connect and
-     * 60 s to read, so [client]'s 10 s read timeout would abandon an ordinary
-     * refresh of a large list while the engine is still working on it. Built
-     * once from [client], so it shares its connection pool and dispatcher.
-     */
-    private val providerUpdateClient by lazy {
-        client.newBuilder().readTimeout(90, TimeUnit.SECONDS).build()
+    private class Clients(val client: OkHttpClient) {
+        val probeDispatcher by lazy { Dispatcher().apply { maxRequestsPerHost = PROBE_CONCURRENCY } }
+        // The engine answers only after download, with up to 15 s to connect and 60 s to read.
+        val providerUpdate by lazy { client.newBuilder().readTimeout(90, TimeUnit.SECONDS).build() }
+        val groupOrder by lazy { client.newBuilder().callTimeout(1, TimeUnit.SECONDS).build() }
     }
 
     // -------------------------------------------------------------------------
     // Proxies
     // -------------------------------------------------------------------------
-
-    private val groupOrderClient by lazy {
-        client.newBuilder().callTimeout(1, TimeUnit.SECONDS).build()
-    }
 
     /** `/proxies`, plus the profile's group order from [proxyGroupOrder]. */
     suspend fun proxies(): ProxiesResult {
@@ -147,7 +140,7 @@ class MeowApi(
      */
     private suspend fun proxyGroupOrder(): List<String> =
         try {
-            val body = get("/api/proxy-groups", operation = "proxyGroups", client = groupOrderClient)
+            val body = get("/api/proxy-groups", operation = "proxyGroups", client = clients.groupOrder)
             decode("proxyGroups") {
                 json.decodeFromString(ListSerializer(ConfiguredGroup.serializer()), body)
                     .map { it.name }
@@ -209,7 +202,7 @@ class MeowApi(
         // The engine answers only once the probe ends, so the read has to
         // outlast the probe's own timeout.
         val scoped = client.newBuilder()
-            .dispatcher(probeDispatcher)
+            .dispatcher(clients.probeDispatcher)
             .readTimeout(timeoutMs + 5_000L, TimeUnit.MILLISECONDS)
             .build()
         val request = Request.Builder().url(requestUrl).build()
@@ -281,7 +274,7 @@ class MeowApi(
             .get()
             .build()
         // A provider without a health-check answers 204 without probing.
-        execute(request, "healthCheckProxyProvider", okCodes = setOf(200, 204), client = providerUpdateClient)
+        execute(request, "healthCheckProxyProvider", okCodes = setOf(200, 204), client = clients.providerUpdate)
     }
 
     /** Probes one provider node, recording the result in the engine. */
@@ -353,7 +346,7 @@ class MeowApi(
             )
             .put(ByteArray(0).toRequestBody())
             .build()
-        execute(request, "updateRuleProvider", okCodes = setOf(200, 204), client = providerUpdateClient)
+        execute(request, "updateRuleProvider", okCodes = setOf(200, 204), client = clients.providerUpdate)
     }
 
     suspend fun connections(): ConnectionsSnapshot {
@@ -486,9 +479,8 @@ class MeowApi(
             .build()
         val attemptOffset = java.util.concurrent.atomic.AtomicInteger(0)
         return callbackFlow {
-            val token = withContext(Dispatchers.IO) { secret() }
             val request = Request.Builder().url(url)
-                .bearer(token)
+                .authenticate()
                 .build()
             val socket = client.newWebSocket(
                 request,
@@ -509,7 +501,7 @@ class MeowApi(
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        close(if (response == null) t else httpError("logs", response.code, token))
+                        close(if (response == null) t else MeowApiException.Http("logs", response.code))
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -553,19 +545,14 @@ class MeowApi(
         operation: String,
         okCodes: Set<Int> = setOf(200),
         client: OkHttpClient = this.client,
-    ): String = withContext(Dispatchers.IO) {
-        // Loading the current engine's secret can read disk. Snapshot it here
-        // before enqueue so OkHttp cannot pick up another engine's token.
-        val token = secret()
+    ): String {
         val authenticated = request.newBuilder()
-            // A previous engine can share the profile secret and still own
-            // an accepted socket after its listener stops.
             .header("Connection", "close")
-            .bearer(token)
+            .authenticate()
             .build()
-        try {
+        return try {
             client.newCall(authenticated).awaitBody {
-                if (it.code !in okCodes) throw httpError(operation, it.code, token)
+                if (it.code !in okCodes) throw MeowApiException.Http(operation, it.code)
                 it.body?.string().orEmpty()
             }
         } catch (e: MeowApiException) {
@@ -576,11 +563,8 @@ class MeowApi(
         }
     }
 
-    private fun Request.Builder.bearer(token: String?): Request.Builder =
-        if (token.isNullOrEmpty()) this else header("Authorization", "Bearer $token")
-
-    private fun httpError(operation: String, code: Int, token: String?) =
-        MeowApiException.Http(operation, code, if (code == 401) ({ secret() != token }) else null)
+    private fun Request.Builder.authenticate(): Request.Builder =
+        if (authorization == null) this else header("Authorization", authorization)
 
     private inline fun <T> decode(operation: String, block: () -> T): T =
         try {

@@ -33,6 +33,7 @@ import io.github.madeye.meow.ui.components.ControllerMessage
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import io.github.madeye.meow.api.MeowApi
+import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.ui.theme.meow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -57,7 +58,7 @@ data class LogsUiState(
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class LogsViewModel(controller: ControllerAccess, api: MeowApi) : ViewModel() {
+class LogsViewModel(controller: ControllerAccess, apiForSession: (ControllerSession) -> MeowApi) : ViewModel() {
     private val reload = MutableStateFlow(0L)
 
     val uiState: StateFlow<LogsUiState> = controller.lifecycle.flatMapLatest { vpn ->
@@ -69,7 +70,7 @@ class LogsViewModel(controller: ControllerAccess, api: MeowApi) : ViewModel() {
                 var lines = emptyList<LogEntry>()
                 emit(LogsUiState())
                 try {
-                    api.logStream { error, backoff ->
+                    apiForSession(session).logStream { error, backoff ->
                         controller.requireCurrent(session)
                         if (connected) emit(LogsUiState(lines, ControllerStatus.Stale))
                         (connected || ++failures < MAX_STARTUP_ATTEMPTS) &&
@@ -85,7 +86,7 @@ class LogsViewModel(controller: ControllerAccess, api: MeowApi) : ViewModel() {
                     emit(LogsUiState(lines, if (connected) ControllerStatus.Stale else ControllerStatus.Failed))
                 }
             }
-        }
+        }.buffer(0)
     }.buffer(0).stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), LogsUiState())
 
     fun retry() { reload.update { it + 1 } }

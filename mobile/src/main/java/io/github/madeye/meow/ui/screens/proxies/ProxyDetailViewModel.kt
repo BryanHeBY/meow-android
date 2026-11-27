@@ -102,13 +102,13 @@ class ProxyDetailViewModel(
     /** The health-check URL of the group the page was opened from, if it has one. */
     private val testUrl: String?,
     private val controller: ControllerAccess,
-    private val describe: suspend (String) -> ProxyInfo,
-    private val tcpDelay: suspend (name: String, url: String) -> Int,
+    private val describe: suspend (ControllerSession, String) -> ProxyInfo,
+    private val tcpDelay: suspend (session: ControllerSession, name: String, url: String) -> Int,
     private val prober: ProxyProber,
 ) : ViewModel() {
 
     private val reload = MutableStateFlow(0L)
-    private val descriptions = controller.observe(reload) { describe(name) }
+    private val descriptions = controller.observe(reload) { session -> describe(session, name) }
     private val state = MutableStateFlow(ProxyDetailUiState(name))
     val uiState: StateFlow<ProxyDetailUiState> = combine(
         controller.lifecycle, descriptions, state,
@@ -146,7 +146,7 @@ class ProxyDetailViewModel(
         set(probe, ProbeState.Running)
         running[probe] = viewModelScope.launch {
             val outcome = try {
-                ProbeState.Done(controller.write(session) { measure(probe) })
+                ProbeState.Done(controller.write(session) { measure(session, probe) })
             } catch (e: IOException) {
                 controller.requireCurrent(session)
                 Timber.d(e, "proxy detail: %s of %s failed", probe, name)
@@ -156,9 +156,9 @@ class ProxyDetailViewModel(
         }
     }
 
-    private suspend fun measure(probe: ProxyProbe): ProbeResult = when (probe) {
+    private suspend fun measure(session: ControllerSession, probe: ProxyProbe): ProbeResult = when (probe) {
         ProxyProbe.TcpLatency -> {
-            val ms = tcpDelay(name, testUrl ?: MeowApi.DELAY_TEST_URL)
+            val ms = tcpDelay(session, name, testUrl ?: MeowApi.DELAY_TEST_URL)
             if (ms <= 0) throw ProxyProbeException("no answer in time", ProxyProbeException.TIMEOUT)
             ProbeResult.Latency(ms.toLong())
         }

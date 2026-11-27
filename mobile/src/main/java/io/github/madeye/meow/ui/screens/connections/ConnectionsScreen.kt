@@ -46,6 +46,7 @@ import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
+import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.theme.MeowTextStyles
 import io.github.madeye.meow.ui.theme.meow
@@ -112,7 +113,7 @@ internal fun ConnectionLists.rows(): List<ConnectionRow> =
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionsViewModel(
     private val controller: ControllerAccess,
-    private val api: MeowApi,
+    private val apiForSession: (ControllerSession) -> MeowApi,
     private val recentConnections: RecentConnectionsStore,
     private val appLabels: AppLabels,
 ) : ViewModel() {
@@ -122,7 +123,7 @@ class ConnectionsViewModel(
     val closeFailed = _closeFailed.asSharedFlow()
 
     private val polling = reload.flatMapLatest {
-        connectionsPolling(controller, recentConnections) { api.connections().connections }
+        connectionsPolling(controller, recentConnections) { session -> apiForSession(session).connections().connections }
     }
 
     val uiState: StateFlow<ConnectionsUiState> =
@@ -145,7 +146,7 @@ class ConnectionsViewModel(
         if (!recentConnections.hasActiveIn(session.runId)) return
         viewModelScope.launch {
             try {
-                controller.write(session) { api.closeAllConnections() }
+                controller.write(session) { apiForSession(session).closeAllConnections() }
                 recentConnections.closeAllLocal()
             } catch (_: MeowApiException) {
                 if (controller.isCurrent(session)) _closeFailed.tryEmit(Unit)
@@ -164,7 +165,7 @@ private const val FAILED_POLL_INTERVAL_MS = 5_000L
 internal fun connectionsPolling(
     controller: ControllerAccess,
     store: RecentConnectionsStore,
-    getConnections: suspend () -> List<Connection>,
+    getConnections: suspend (ControllerSession) -> List<Connection>,
 ): Flow<ControllerStatus> = controller.lifecycle.flatMapLatest { vpn ->
     val session = vpn.session
     if (session == null) {
@@ -180,7 +181,7 @@ internal fun connectionsPolling(
             while (true) {
                 val ticket = store.snapshotTicket()
                 try {
-                    val connections = controller.read(session, getConnections)
+                    val connections = controller.read(session) { getConnections(session) }
                     store.onSnapshot(connections, ticket)
                     loaded = true
                     emit(ControllerStatus.Ready)

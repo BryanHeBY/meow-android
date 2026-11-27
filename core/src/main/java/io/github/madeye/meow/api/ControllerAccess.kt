@@ -1,13 +1,11 @@
 package io.github.madeye.meow.api
 
-import android.os.SystemClock
 import io.github.madeye.meow.bg.BaseService
 import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.vpn.VpnLifecycle
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -21,7 +19,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.transformLatest
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ControllerStatus { Offline, Loading, Ready, Stale, Failed }
@@ -36,7 +33,6 @@ data class ControllerSnapshot<T>(
 /** A successful authenticated GET is itself a readiness check for the resource it reads. */
 class ControllerAccess(
     val lifecycle: StateFlow<VpnLifecycle>,
-    private val now: () -> Long = SystemClock::elapsedRealtime,
 ) {
     val session: ControllerSession? get() = lifecycle.value.session
 
@@ -48,7 +44,7 @@ class ControllerAccess(
 
     /**
      * For idempotent reads only. Use a single bounded window for startup/refused
-     * sockets and authenticate afresh on every attempt.
+     * sockets. Every attempt belongs to the same session.
      */
     suspend fun <T> read(session: ControllerSession, get: suspend () -> T): T = inSession(session) {
         val result = withTimeoutOrNull(READ_TIMEOUT_MS) {
@@ -92,12 +88,6 @@ class ControllerAccess(
     suspend fun retryTransport(session: ControllerSession, error: Throwable, backoff: Long): Boolean {
         requireCurrent(session)
         when {
-            error is MeowApiException.Http && error.code == 401 -> {
-                if (!mayRetryAuth(session, error)) return false
-                delay(backoff)
-                requireCurrent(session)
-                return mayRetryAuth(session, error)
-            }
             error is MeowApiException.Unreachable ||
                 (error is IOException && error !is MeowApiException) -> {
                 delay(backoff)
@@ -107,10 +97,6 @@ class ControllerAccess(
             else -> return false
         }
     }
-
-    private suspend fun mayRetryAuth(session: ControllerSession, error: MeowApiException.Http): Boolean =
-        now() - session.connectedAtMillis < AUTH_STARTUP_MS ||
-            error.authorizationChanged?.let { changed -> withContext(Dispatchers.IO) { changed() } } == true
 
     /**
      * Maintains the last successful read within one attachment. Only a configured
@@ -157,7 +143,6 @@ class ControllerAccess(
     private data class ReadValue<T>(val value: T)
 
     private companion object {
-        const val AUTH_STARTUP_MS = 1_500L
         const val READ_TIMEOUT_MS = 6_000L
         val READ_DELAYS = listOf(100L, 200L, 400L, 800L, 1_200L, 1_600L)
         val PROVIDER_DELAYS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L)

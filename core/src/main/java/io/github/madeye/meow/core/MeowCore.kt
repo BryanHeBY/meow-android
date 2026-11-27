@@ -12,13 +12,19 @@ object MeowCore {
     external fun nativeInit()
     external fun nativeSetHomeDir(dir: String)
     /**
-     * [secret] guards the controller API unless the profile sets its own
-     * `secret:`; [nativeApiSecret] says which one the engine runs with.
+     * [dashboardSecret] guards the dashboard API unless the profile sets its own `secret:`.
+     * [capability] guards the app's private listener. Returns its bound port, or -1 on failure.
      * [mode] overrides the config's `mode:` (`rule`/`global`/`direct`); empty keeps it.
      * [builtinDns] drops the profile's DNS upstreams for the built-in pool;
      * [nativeSetBuiltinDns] flips it on the running engine.
      */
-    external fun nativeStartEngine(addr: String, secret: String, mode: String, builtinDns: Boolean): Int
+    external fun nativeStartEngine(
+        addr: String,
+        dashboardSecret: String,
+        mode: String,
+        builtinDns: Boolean,
+        capability: String,
+    ): Int
 
     /**
      * Puts the running engine on the built-in pool ([builtinDns]) or the
@@ -31,8 +37,6 @@ object MeowCore {
     /** Resolver mode to restore on a failed preference write: 0 profile, 1 built-in, -1 stopped. */
     external fun nativeAppliedBuiltinDns(): Int
 
-    /** The running engine's API secret; empty when it is stopped or has none. */
-    external fun nativeApiSecret(): String?
     /**
      * Whether the VPN routes IPv6 for the running engine's profile: off only
      * for an explicit `ipv6: false`, as in mihomo. False when it is stopped.

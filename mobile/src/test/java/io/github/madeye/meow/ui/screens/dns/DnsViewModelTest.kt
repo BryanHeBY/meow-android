@@ -1,5 +1,8 @@
 package io.github.madeye.meow.ui.screens.dns
 
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.runningVpn
+import kotlinx.coroutines.flow.MutableStateFlow
 import io.github.madeye.meow.api.DnsResult
 import io.github.madeye.meow.api.MeowApiException
 import java.io.IOException
@@ -47,10 +50,10 @@ class DnsViewModelTest {
     private var collector: Job? = null
 
     private fun TestScope.viewModel(): DnsViewModel {
-        val vm = DnsViewModel(fetch = { search ->
+        val vm = DnsViewModel(ControllerAccess(MutableStateFlow(runningVpn("dns")))) { _, search ->
             searches += search
             answer(search)
-        })
+        }
         // uiState is WhileSubscribed, as it is under the real screen.
         collector = backgroundScope.launch { vm.uiState.collect {} }
         runCurrent()

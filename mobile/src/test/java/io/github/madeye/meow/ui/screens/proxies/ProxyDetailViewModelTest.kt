@@ -3,6 +3,7 @@ package io.github.madeye.meow.ui.screens.proxies
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.api.ControllerAccess
 import io.github.madeye.meow.vpn.VpnLifecycle
+import io.github.madeye.meow.runningVpn
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.ProxyInfo
@@ -69,8 +70,8 @@ class ProxyDetailViewModelTest {
     }
 
     private val transport = FakeTransport()
-    private val vpnState = MutableStateFlow(VpnLifecycle(state = BaseService.State.Connected, runId = "test"))
-    private val controller = ControllerAccess(vpnState) { 0L }
+    private val vpnState = MutableStateFlow(runningVpn("test"))
+    private val controller = ControllerAccess(vpnState)
     private val described = CopyOnWriteArrayList<String>()
     private val tcpTests = CopyOnWriteArrayList<Pair<String, String>>()
     private var tcpDelay: suspend () -> Int = { 120 }
@@ -100,11 +101,11 @@ class ProxyDetailViewModelTest {
         name = "Tokyo 01",
         testUrl = testUrl,
         controller = controller,
-        describe = { name ->
+        describe = { _, name ->
             described += name
             ProxyInfo(name = name, type = "Snell", udp = true, history = emptyList())
         },
-        tcpDelay = { name, url ->
+        tcpDelay = { _, name, url ->
             tcpTests += name to url
             tcpDelay()
         },
@@ -124,7 +125,7 @@ class ProxyDetailViewModelTest {
         assertNull(vm.uiState.value.type)
         assertTrue(described.isEmpty())
 
-        vpnState.value = VpnLifecycle(state = BaseService.State.Connected, runId = "new")
+        vpnState.value = runningVpn("new")
         val state = withTimeout(5_000) { vm.uiState.first { it.type != null } }
 
         assertEquals("Snell", state.type)
@@ -215,8 +216,8 @@ class ProxyDetailViewModelTest {
             name = "Tokyo 01",
             testUrl = null,
             controller = controller,
-            describe = { throw MeowApiException.Http("proxy", 404) },
-            tcpDelay = { _, _ -> 1 },
+            describe = { _, _ -> throw MeowApiException.Http("proxy", 404) },
+            tcpDelay = { _, _, _ -> 1 },
             prober = ProxyProber(object : ProxyProbeTransport {
                 override fun probe(id: Long, proxy: String, kind: String, arg: String): String =
                     throw IOException("the VPN service is not bound")

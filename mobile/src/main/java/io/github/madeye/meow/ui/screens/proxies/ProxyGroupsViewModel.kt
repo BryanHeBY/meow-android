@@ -70,7 +70,7 @@ private data class GroupsRead(val rows: List<ProxyGroupUi>, val pendingProviders
 class ProxyGroupsViewModel(
     private val controller: ControllerAccess,
     selectedProfile: Flow<ClashProfile?>,
-    private val api: MeowApi,
+    private val apiForSession: (ControllerSession) -> MeowApi,
     private val onRouteChanged: () -> Unit,
     private val onNodeSelected: (String) -> Unit,
     private val saveSelection: suspend (Long, String, () -> Boolean) -> Unit,
@@ -79,14 +79,14 @@ class ProxyGroupsViewModel(
     private val expanded = MutableStateFlow<String?>(null)
     private val groupTests = MutableStateFlow<Map<String, GroupTestProgress>>(emptyMap())
     private val testJobs = HashMap<String, Job>()
-    private val delayTester = GroupDelayTester(api)
     private val selection = Mutex()
     private val _selectionFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val selectionFailed = _selectionFailed.asSharedFlow()
     private val _testFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val testFailed = _testFailed.asSharedFlow()
 
-    private val snapshot = controller.observe(reload, GroupsRead::pendingProviders, ::recordLoadFailure) {
+    private val snapshot = controller.observe(reload, GroupsRead::pendingProviders, ::recordLoadFailure) { session ->
+        val api = apiForSession(session)
         val mode = api.configs().routeMode
         val proxies = api.proxies()
         val pending = api.proxyProviders().any { it.awaitingFirstUpdate }
@@ -142,7 +142,7 @@ class ProxyGroupsViewModel(
             selection.withLock {
                 if (!controller.isCurrent(session)) return@withLock
                 try {
-                    controller.write(session) { api.selectProxy(group, node) }
+                    controller.write(session) { apiForSession(session).selectProxy(group, node) }
                     onRouteChanged()
                     onNodeSelected(node)
                     // The database selection can move before the service restarts.
@@ -169,6 +169,7 @@ class ProxyGroupsViewModel(
             val self = coroutineContext.job
             try {
                 controller.write(session) {
+                    val delayTester = GroupDelayTester(apiForSession(session))
                     delayTester.test(group, target.type, members, target.testUrl).collect { result ->
                         controller.requireCurrent(session)
                         groupTests.update { tests ->

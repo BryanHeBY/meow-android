@@ -1,5 +1,8 @@
 package io.github.madeye.meow.ui.screens.statistics
 
+import io.github.madeye.meow.api.ControllerAccess
+import io.github.madeye.meow.runningVpn
+import kotlinx.coroutines.flow.MutableStateFlow
 import io.github.madeye.meow.aidl.ByteTotals
 import io.github.madeye.meow.aidl.SessionStats
 import java.io.IOException
@@ -55,6 +58,7 @@ class StatisticsViewModelTest {
 
     private fun TestScope.viewModel(): StatisticsViewModel {
         val vm = StatisticsViewModel(
+            controller = ControllerAccess(MutableStateFlow(runningVpn("stats"))),
             session = { session },
             proxyTraffic = {
                 trafficRequests++

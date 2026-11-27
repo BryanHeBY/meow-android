@@ -1870,6 +1870,7 @@ dependencies = [
  "android_logger",
  "anyhow",
  "async-trait",
+ "axum",
  "dashmap",
  "futures",
  "httparse",
@@ -1895,8 +1896,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "smol_str",
+ "subtle",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

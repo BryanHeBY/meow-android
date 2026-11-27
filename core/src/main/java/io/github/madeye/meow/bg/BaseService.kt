@@ -97,7 +97,9 @@ object BaseService {
                 },
                 profileId = profile?.id?.takeIf { it > 0 },
                 profileName = profile?.name.orEmpty(),
-                connectedAtMillis = if (s == State.Connected) android.os.SystemClock.elapsedRealtime() else 0,
+                controller = if (s == State.Connected) {
+                    checkNotNull(meowInstance?.controllerEndpoint) { "App controller was not started" }
+                } else null,
             )
             lifecycle = next
             _localState.value = s

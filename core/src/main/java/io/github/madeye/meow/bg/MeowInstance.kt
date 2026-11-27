@@ -3,27 +3,34 @@ package io.github.madeye.meow.bg
 import android.content.Context
 import android.net.Network
 import io.github.madeye.meow.Core
+import io.github.madeye.meow.aidl.ControllerEndpoint
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.database.ClashProfile
-import io.github.madeye.meow.preference.ApiSecretStore
 import io.github.madeye.meow.preference.BuiltinDnsStore
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.Ipv6Override
 import io.github.madeye.meow.preference.RouteModeStore
 import io.github.madeye.meow.traffic.TrafficNetwork
+import java.io.File
+import java.security.SecureRandom
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.io.File
 
 class MeowInstance(val profile: ClashProfile) {
     val profileName: String get() = profile.name
 
     companion object {
+        private val random by lazy { SecureRandom() }
+
+        private fun mintCredential(): String =
+            ByteArray(32).also(random::nextBytes).joinToString("") { String.format(Locale.US, "%02x", it) }
+
         /// The engine home dir (`.../no_backup/meow`). meow-rs resolves
         /// geodata at `$XDG_CONFIG_HOME/meow/Country.mmdb`, i.e. relative to
         /// this dir's parent.
@@ -78,6 +85,8 @@ class MeowInstance(val profile: ClashProfile) {
     private var networks: DefaultNetwork? = null
     @Volatile internal var physicalNetwork: Network? = null
         private set
+    internal var controllerEndpoint: ControllerEndpoint? = null
+        private set
 
     // JNI startup blocks while loading remote proxy/rule providers. Keep it
     // off the service's main thread so lifecycle callbacks remain responsive.
@@ -111,16 +120,16 @@ class MeowInstance(val profile: ClashProfile) {
         // The Home route-mode pick overrides the profile's `mode:`; empty
         // means the user never picked one.
         val routeMode = RouteModeStore.default.load()?.wire.orEmpty()
-        // A fresh secret per start, so no other app on the device can use the
-        // API; a profile that sets `secret:` keeps its own instead.
+        val capability = mintCredential()
         // Before the start, so the traffic ledger counts days in the
         // device's zone from its first flush.
         pushTimeZone()
         BuiltinDnsStore.default.withSavedValue { builtinDns ->
-            val result = MeowCore.nativeStartEngine("127.0.0.1:9090", ApiSecretStore.mint(), routeMode, builtinDns)
-            if (result != 0) {
+            val port = MeowCore.nativeStartEngine("127.0.0.1:9090", mintCredential(), routeMode, builtinDns, capability)
+            if (port <= 0) {
                 throw RuntimeException("Failed to start engine: ${MeowCore.nativeGetLastError()}")
             }
+            controllerEndpoint = ControllerEndpoint(port, capability)
         }
         val meter = NetworkTrafficMeter(startedAt = System.currentTimeMillis())
         var outbound: Network? = null
@@ -150,14 +159,6 @@ class MeowInstance(val profile: ClashProfile) {
             outbound = network
         }.also { it.start() }
         this@MeowInstance.meter = meter
-        // Before the service reports Connected, which is when the UI starts
-        // calling the API. Should the write fail, the VPN still runs; only the
-        // app's own screens are refused (401) until the next start.
-        try {
-            ApiSecretStore.default.save(MeowCore.nativeApiSecret().orEmpty())
-        } catch (e: Exception) {
-            Timber.e(e, "MeowInstance: could not share the API secret")
-        }
         Timber.d("MeowInstance: engine started")
     }
 
@@ -191,6 +192,7 @@ class MeowInstance(val profile: ClashProfile) {
         networks = null
         physicalNetwork = null
         meter = null
+        controllerEndpoint = null
         MeowCore.nativeStopEngine()
         Timber.d("MeowInstance: engine stopped")
     }

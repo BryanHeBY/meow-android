@@ -6,6 +6,7 @@ import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.api.MeowApi
 import io.github.madeye.meow.bg.BaseService.State
 import io.github.madeye.meow.database.ClashProfile
+import io.github.madeye.meow.runningVpn
 import io.github.madeye.meow.vpn.VpnLifecycle
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
@@ -94,6 +95,20 @@ class ProxyGroupsReadinessTest {
     }
 
     @Test
+    fun `a listener that recovers with no groups becomes ready with no available actions`() = runBlocking {
+        show(selectionCode = { 204 }, failFirstConfig = true, emptyGroups = true)
+        assertEquals(0, configs.get())
+        lifecycle.value = running("first")
+        val empty = withTimeout(3_000) { viewModel.uiState.first { it.status == ControllerStatus.Ready } }
+        assertEquals(2, configs.get())
+        assertTrue(empty.groups.isEmpty())
+        viewModel.onSelectNode("Proxy", "b")
+        viewModel.onTestGroup("Proxy")
+        assertEquals(0, writes.get())
+        assertTrue(saved.isEmpty())
+    }
+
+    @Test
     fun `a successful PUT response from before a same profile restart has no completion side effects`() = runBlocking {
         val requested = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -121,8 +136,8 @@ class ProxyGroupsReadinessTest {
         assertTrue(selectedEvents.isEmpty())
     }
 
-    private fun show(selectionCode: () -> Int, failFirstConfig: Boolean = false) {
-        val api = MeowApi(
+    private fun show(selectionCode: () -> Int, failFirstConfig: Boolean = false, emptyGroups: Boolean = false) {
+        val api = MeowApi.SessionFactory(
             baseClient = OkHttpClient.Builder().addInterceptor { chain ->
                 val request = chain.request()
                 val (code, body) = when {
@@ -136,15 +151,15 @@ class ProxyGroupsReadinessTest {
                     }
                     request.url.encodedPath == "/providers/proxies" -> 200 to """{"providers":{}}"""
                     request.url.encodedPath == "/api/proxy-groups" -> 200 to "[]"
+                    emptyGroups -> 200 to """{"proxies":{}}"""
                     else -> 200 to """{"proxies":{"Proxy":{"type":"Selector","all":["a","b"],"now":"a"}}}"""
                 }
                 Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code)
                     .message("test").body(body.toResponseBody()).build()
             }.build(),
-            secret = { "same-profile-secret" },
         )
         viewModel = ProxyGroupsViewModel(
-            ControllerAccess(lifecycle) { 100 }, selected, api, {}, { selectedEvents += it },
+            ControllerAccess(lifecycle), selected, api::forSession, {}, { selectedEvents += it },
             { id, node, isCurrent -> if (isCurrent()) saved += id to node },
         )
         viewModel.viewModelScope.launch { viewModel.uiState.collect {} }
@@ -154,5 +169,5 @@ class ProxyGroupsReadinessTest {
         viewModel.uiState.first { it.status == ControllerStatus.Ready && it.groups.isNotEmpty() }
     }
 
-    private fun running(id: String) = VpnLifecycle(state = State.Connected, runId = id, profileId = 9)
+    private fun running(id: String) = runningVpn(id, profileId = 9)
 }

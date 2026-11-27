@@ -41,6 +41,8 @@ import io.github.madeye.meow.api.ControllerAccess
 import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.ui.components.ControllerMessage
 import io.github.madeye.meow.api.Rule
+import io.github.madeye.meow.api.controllerStatus
+import io.github.madeye.meow.vpn.ControllerSession
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.theme.MeowTextStyles
 import io.github.madeye.meow.ui.theme.meow
@@ -73,7 +75,7 @@ data class RulesUiState(
 
 class RulesViewModel(
     controller: ControllerAccess,
-    api: MeowApi,
+    apiForSession: (ControllerSession) -> MeowApi,
     focus: Int = -1,
     focusRunId: String? = null,
 ) : ViewModel() {
@@ -81,11 +83,13 @@ class RulesViewModel(
     private val reload = MutableStateFlow(0L)
 
     val uiState: StateFlow<RulesUiState> = combine(
-        controller.observe(reload) { api.rules() },
+        controller.observe(reload) { session -> apiForSession(session).rules() },
         query,
-    ) { data, search ->
-        val currentFocus = focus.takeIf { focusRunId == null || data.session?.runId == focusRunId } ?: -1
-        RulesUiState(data.value.orEmpty(), search, data.status, currentFocus)
+        controller.lifecycle,
+    ) { data, search, vpn ->
+        val current = data.takeIf { it.session != null && it.session == vpn.session }
+        val currentFocus = focus.takeIf { focusRunId == null || current?.session?.runId == focusRunId } ?: -1
+        RulesUiState(current?.value.orEmpty(), search, current?.status ?: vpn.controllerStatus, currentFocus)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), RulesUiState())
 
     fun onQueryChange(value: String) { query.value = value }

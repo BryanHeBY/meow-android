@@ -4,6 +4,7 @@ import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.api.ControllerAccess
 import io.github.madeye.meow.api.ControllerStatus
 import io.github.madeye.meow.vpn.VpnLifecycle
+import io.github.madeye.meow.runningVpn
 import io.github.madeye.meow.api.RuleProviderInfo
 import io.github.madeye.meow.bg.BaseService.State
 import java.io.IOException
@@ -26,7 +27,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RuleSetUpdaterTest {
 
-    private val vpn = MutableStateFlow(VpnLifecycle(state = State.Connected, runId = "one"))
+    private val vpn = MutableStateFlow(runningVpn("one"))
 
     /** What the engine lists; replaced to stand for an update or a reload. */
     private var providers = listOf(
@@ -50,13 +51,13 @@ class RuleSetUpdaterTest {
     private fun millis(iso: String) = Instant.parse(iso).toEpochMilli()
 
     private fun updater() = RuleSetUpdater(
-        controller = ControllerAccess(vpn) { 0L },
+        controller = ControllerAccess(vpn),
         listProviders = {
             listings++
             if (listFails) throw MeowApiException.Http("ruleProviders", 500)
             providers
         },
-        updateProvider = { name ->
+        updateProvider = { _, name ->
             updated += name
             answer(name)
         },
@@ -135,7 +136,7 @@ class RuleSetUpdaterTest {
 
         // Coming back up lists again: another profile may be running now.
         providers = listOf(provider("other", "HTTP", ""))
-        vpn.value = VpnLifecycle(state = State.Connected, runId = "two")
+        vpn.value = runningVpn("two")
         runCurrent()
         assertEquals(RuleSetSummary(1, null), state.value!!.summary)
         assertEquals(2, listings)

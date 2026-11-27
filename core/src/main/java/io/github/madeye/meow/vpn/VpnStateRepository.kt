@@ -98,7 +98,7 @@ class VpnStateRepository(
                 runId = snapshot.runId,
                 profileId = snapshot.profileId,
                 profileName = snapshot.profileName,
-                connectedAtMillis = snapshot.connectedAtMillis,
+                controller = snapshot.controller,
             )
         }
         if (next.session != null && next.session != _lifecycle.value.session) recorder.reset()

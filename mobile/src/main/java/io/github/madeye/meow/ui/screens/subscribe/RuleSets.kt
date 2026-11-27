@@ -85,8 +85,8 @@ data class RuleSetsUi(
  */
 class RuleSetUpdater(
     private val controller: ControllerAccess,
-    private val listProviders: suspend () -> List<RuleProviderInfo>,
-    private val updateProvider: suspend (name: String) -> Unit,
+    private val listProviders: suspend (ControllerSession) -> List<RuleProviderInfo>,
+    private val updateProvider: suspend (session: ControllerSession, name: String) -> Unit,
 ) {
     companion object {
         /**
@@ -102,7 +102,7 @@ class RuleSetUpdater(
     private val read = controller.observe(
         reload,
         pendingProviders = { providers: List<RuleProviderInfo> -> providers.any { it.isHttp && it.updatedAt.isBlank() } },
-    ) { listProviders() }
+    ) { session -> listProviders(session) }
 
     val state: Flow<RuleSetsUi> = combine(controller.lifecycle, read, updating) { vpn, snapshot, running ->
         val session = vpn.session
@@ -131,7 +131,7 @@ class RuleSetUpdater(
         if (updating.value == session) return null
         updating.value = session
         try {
-            val names = controller.read(session, listProviders).filter { it.isHttp }.map { it.name }
+            val names = controller.read(session) { listProviders(session) }.filter { it.isHttp }.map { it.name }
             val limiter = Semaphore(UPDATE_CONCURRENCY)
             val failed = coroutineScope {
                 names.map { name ->
@@ -152,7 +152,7 @@ class RuleSetUpdater(
 
     private suspend fun update(session: ControllerSession, name: String): Boolean =
         try {
-            controller.write(session) { updateProvider(name) }
+            controller.write(session) { updateProvider(session, name) }
             true
         } catch (e: IOException) {
             controller.requireCurrent(session)

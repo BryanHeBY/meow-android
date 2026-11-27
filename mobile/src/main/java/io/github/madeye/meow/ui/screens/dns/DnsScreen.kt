@@ -33,11 +33,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.R
+import io.github.madeye.meow.api.ControllerAccess
 import io.github.madeye.meow.api.DnsResult
 import io.github.madeye.meow.api.MeowApiException
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.theme.MeowTextStyles
 import io.github.madeye.meow.ui.theme.meow
+import io.github.madeye.meow.vpn.ControllerSession
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -45,11 +47,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
-import kotlinx.coroutines.flow.update
 
 /** Why the latest poll failed. The previous results stay on screen meanwhile, as on iOS. */
 enum class DnsError { Offline, Failed }
@@ -68,7 +71,8 @@ data class DnsUiState(
  * new request rather than a local filter.
  */
 class DnsViewModel(
-    private val fetch: suspend (search: String?) -> List<DnsResult>,
+    private val controller: ControllerAccess,
+    private val fetch: suspend (ControllerSession, search: String?) -> List<DnsResult>,
 ) : ViewModel() {
 
     companion object {
@@ -80,7 +84,6 @@ class DnsViewModel(
     }
 
     private val query = MutableStateFlow("")
-    private val latest = MutableStateFlow(DnsUiState())
 
     /**
      * Runs only while [uiState] is collected. A query change cancels the
@@ -88,31 +91,36 @@ class DnsViewModel(
      * query can never land after the new one.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val polling: Flow<Unit> = query
-        .transformLatest<String, Unit> { search ->
-            if (search.isNotBlank()) delay(DEBOUNCE_MS)
-            while (true) {
-                poll(search.trim().ifEmpty { null })
-                delay(POLL_INTERVAL_MS)
-            }
-        }
-        .onStart { emit(Unit) }
+    private val polling: Flow<Pair<ControllerSession?, DnsUiState>> =
+        controller.lifecycle.flatMapLatest { vpn ->
+            val session = vpn.session ?: return@flatMapLatest flowOf(null to DnsUiState(loaded = true, error = DnsError.Offline))
+            var latest = DnsUiState()
+            query.transformLatest { search ->
+                if (search.isNotBlank()) delay(DEBOUNCE_MS)
+                while (true) {
+                    val next = try {
+                        val results = fetch(session, search.trim().ifEmpty { null })
+                        DnsUiState(results = results, loaded = true)
+                    } catch (e: IOException) {
+                        val error = if (e is MeowApiException.Unreachable) DnsError.Offline else DnsError.Failed
+                        latest.copy(loaded = true, error = error)
+                    }
+                    controller.requireCurrent(session)
+                    latest = next
+                    emit(session to next)
+                    delay(POLL_INTERVAL_MS)
+                }
+            }.buffer(0)
+        }.buffer(0)
 
     val uiState: StateFlow<DnsUiState> =
-        combine(latest, query, polling) { state, search, _ -> state.copy(query = search) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DnsUiState())
+        combine(polling, query, controller.lifecycle) { (session, state), search, vpn ->
+            val current = state.takeIf { session == vpn.session } ?: DnsUiState()
+            current.copy(query = search)
+        }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), DnsUiState())
 
     fun onQueryChange(value: String) { query.value = value }
-
-    private suspend fun poll(search: String?) {
-        try {
-            latest.value = DnsUiState(results = fetch(search), loaded = true)
-        } catch (e: IOException) {
-            // MeowApiException is an IOException, and so is a body cut off mid-read.
-            val error = if (e is MeowApiException.Unreachable) DnsError.Offline else DnsError.Failed
-            latest.update { it.copy(loaded = true, error = error) }
-        }
-    }
 }
 
 @Composable

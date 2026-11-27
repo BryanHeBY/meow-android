@@ -5,8 +5,7 @@ import io.github.madeye.meow.api.Connection
 import io.github.madeye.meow.api.ConnectionMeta
 import io.github.madeye.meow.api.ControllerAccess
 import io.github.madeye.meow.api.ControllerStatus
-import io.github.madeye.meow.bg.BaseService
-import io.github.madeye.meow.vpn.VpnLifecycle
+import io.github.madeye.meow.runningVpn
 import io.github.madeye.meow.api.ConnectionNote
 import io.github.madeye.meow.api.ConnectionNotes
 import io.github.madeye.meow.api.DnsResult
@@ -46,9 +45,7 @@ class ConnectionDetailViewModelTest {
 
     private var now = 1_000L
     private val store = RecentConnectionsStore(clock = { now }).apply { onEngineRun("test") }
-    private val controller = ControllerAccess(
-        MutableStateFlow(VpnLifecycle(state = BaseService.State.Connected, runId = "test")),
-    ) { now }
+    private val controller = ControllerAccess(MutableStateFlow(runningVpn("test")))
     private val ruleLookups = AtomicInteger()
     private var rules: suspend () -> List<Rule> = { RULES }
     private val closed = CopyOnWriteArrayList<String>()
@@ -83,9 +80,9 @@ class ConnectionDetailViewModelTest {
             ruleLookups.incrementAndGet()
             rules()
         },
-        closeConnection = { closed += it },
+        closeConnection = { _, id -> closed += id },
         proxies = { PROXIES },
-        dnsCache = { host -> listOf(DnsResult(name = host, ips = listOf("9.9.9.9"))) },
+        dnsCache = { _, host -> listOf(DnsResult(name = host, ips = listOf("9.9.9.9"))) },
         ipGeo = { ip ->
             geoLookups += ip
             IpGeo(country = "CN", asn = 136958, org = "China Unicom Guangdong IP network")
@@ -94,7 +91,7 @@ class ConnectionDetailViewModelTest {
             labelLookups += pkg
             "Label of $pkg"
         },
-        connectionNotes = {
+        connectionNotes = { _, _ ->
             val read = noteReads.getAndIncrement()
             noteAnswers[read.coerceAtMost(noteAnswers.lastIndex)]
         },

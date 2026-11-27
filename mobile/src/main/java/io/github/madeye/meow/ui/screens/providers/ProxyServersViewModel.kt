@@ -81,7 +81,7 @@ private data class ServersRead(
 /** Loads both configured provider nodes and inline `proxies:` nodes. */
 class ProxyServersViewModel(
     private val controller: ControllerAccess,
-    private val api: MeowApi,
+    private val apiForSession: (ControllerSession) -> MeowApi,
     private val profiles: ProfileRepository,
 ) : ViewModel() {
     private val reload = MutableStateFlow(0L)
@@ -95,6 +95,7 @@ class ProxyServersViewModel(
     val probeFailed = _probeFailed.asSharedFlow()
 
     private val observation = controller.observe(reload, ServersRead::pendingProviders) { session ->
+        val api = apiForSession(session)
         coroutineScope {
             val inline = async { api.proxies() }
             val providers = api.proxyProviders()
@@ -159,6 +160,7 @@ class ProxyServersViewModel(
         if (provider.checking) return
         setProviderChecking(providerId, true)
         probes.launch {
+            val api = apiForSession(session)
             try {
                 controller.write(session) { api.healthCheckProxyProvider(provider.name) }
                 val refreshed = controller.read(session) { api.proxyProviders() }.firstOrNull { it.name == provider.name }
@@ -179,6 +181,7 @@ class ProxyServersViewModel(
         if (node.testing) return
         updateNode(providerId, nodeName) { it.copy(testing = true) }
         probes.launch {
+            val api = apiForSession(session)
             try {
                 val delay = controller.write(session) {
                     if (provider.kind == ProxyServerKind.Inline) {

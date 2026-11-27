@@ -98,16 +98,16 @@ class ConnectionDetailViewModel(
     private val store: RecentConnectionsStore,
     private val controller: ControllerAccess,
     polling: Flow<ControllerStatus>,
-    private val rules: suspend () -> List<Rule>,
-    private val closeConnection: suspend (String) -> Unit,
-    private val proxies: suspend () -> ProxiesResult,
+    private val rules: suspend (ControllerSession) -> List<Rule>,
+    private val closeConnection: suspend (ControllerSession, String) -> Unit,
+    private val proxies: suspend (ControllerSession) -> ProxiesResult,
     /** The engine's DNS cache entries matching a host name. */
-    private val dnsCache: suspend (host: String) -> List<DnsResult>,
+    private val dnsCache: suspend (session: ControllerSession, host: String) -> List<DnsResult>,
     private val ipGeo: suspend (ip: String) -> IpGeo,
     /** An installed app's display name by package name. */
     private val appLabel: suspend (packageName: String) -> String,
     /** The engine's notes on a connection; null when it has none to give. */
-    private val connectionNotes: suspend (id: String) -> ConnectionNotes?,
+    private val connectionNotes: suspend (session: ControllerSession, id: String) -> ConnectionNotes?,
     private val notesPollIntervalMillis: Long = NOTES_POLL_INTERVAL_MS,
 ) : ViewModel() {
 
@@ -133,8 +133,8 @@ class ConnectionDetailViewModel(
                     if (connection.metadata.destinationIP.isEmpty() && remote.value == null) {
                         val found = remoteIpOf(
                             connection,
-                            { controller.read(session, proxies) },
-                            { host -> controller.read(session) { dnsCache(host) } },
+                            { controller.read(session) { proxies(session) } },
+                            { host -> controller.read(session) { dnsCache(session, host) } },
                         )
                         controller.requireCurrent(session)
                         showRemote(found)
@@ -180,7 +180,7 @@ class ConnectionDetailViewModel(
     private suspend fun loadRule(connection: Connection, session: ControllerSession) {
         if (UnlistedRoute.of(connection) != null || connection.rule.isEmpty()) return
         try {
-            val index = controller.read(session, rules).indexOfMatch(connection)
+            val index = controller.read(session) { rules(session) }.indexOfMatch(connection)
             if (index != null) ruleIndex.value = session to index
         } catch (_: MeowApiException) { }
     }
@@ -192,7 +192,7 @@ class ConnectionDetailViewModel(
 
     private suspend fun refreshNotes(session: ControllerSession): Boolean {
         val read = try {
-            controller.read(session) { connectionNotes(id) }
+            controller.read(session) { connectionNotes(session, id) }
         } catch (_: MeowApiException) {
             return false
         }
@@ -210,7 +210,7 @@ class ConnectionDetailViewModel(
         if (store.runIdOf(id) != session.runId) return
         viewModelScope.launch {
             try {
-                controller.write(session) { closeConnection(id) }
+                controller.write(session) { closeConnection(session, id) }
                 store.closeLocal(id)
             } catch (_: MeowApiException) {
                 if (controller.isCurrent(session)) _closeFailed.tryEmit(Unit)

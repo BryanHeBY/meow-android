@@ -1,7 +1,6 @@
 package io.github.madeye.meow.api
 
 import io.github.madeye.meow.aidl.ByteTotals
-import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.mockwebserver.Dispatcher
@@ -70,52 +69,6 @@ class MeowApiTest {
     // -------------------------------------------------------------------------
     // /proxies — the heterogeneous map, discriminated by `type` value
     // -------------------------------------------------------------------------
-
-    @Test
-    fun `selection loads the engine secret off the calling thread`() = kotlinx.coroutines.runBlocking {
-        val caller = Thread.currentThread()
-        server.enqueue(MockResponse().setResponseCode(204))
-        val client = MeowApi(server.url("/"), secret = {
-            check(Thread.currentThread() !== caller) { "credential lookup blocked the caller" }
-            "test-engine"
-        })
-
-        client.selectProxy("G", "A")
-        assertEquals("Bearer test-engine", server.takeRequest().getHeader("Authorization"))
-    }
-
-    @Test
-    fun `queued selection keeps original engine secret after restart`() = kotlinx.coroutines.runBlocking {
-        val release = java.util.concurrent.CountDownLatch(1)
-        val first = java.util.concurrent.CountDownLatch(1)
-        val tokens = java.util.concurrent.CopyOnWriteArrayList<String?>()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                tokens += request.getHeader("Authorization")
-                if (tokens.size == 1) {
-                    first.countDown()
-                    release.await(4, java.util.concurrent.TimeUnit.SECONDS)
-                }
-                return MockResponse().setResponseCode(204)
-            }
-        }
-        val dispatcher = okhttp3.Dispatcher().apply { maxRequests = 1; maxRequestsPerHost = 1 }
-        val token = java.util.concurrent.atomic.AtomicReference("old-engine")
-        val client = MeowApi(server.url("/"), okhttp3.OkHttpClient.Builder().dispatcher(dispatcher).build(), secret = token::get)
-        val one = async(kotlinx.coroutines.Dispatchers.Default) { client.selectProxy("G", "A") }
-        assertTrue(first.await(2, java.util.concurrent.TimeUnit.SECONDS))
-        val two = async(kotlinx.coroutines.Dispatchers.Default) { client.selectProxy("H", "B") }
-        try {
-            kotlinx.coroutines.withTimeout(2000) {
-                while (dispatcher.queuedCallsCount() != 1) kotlinx.coroutines.delay(5)
-            }
-            token.set("replacement-engine")
-        } finally {
-            release.countDown()
-        }
-        one.await(); two.await()
-        assertEquals(listOf("Bearer old-engine", "Bearer old-engine"), tokens.toList())
-    }
 
     @Test
     fun `proxies splits groups from leaf nodes`() = runTest {
@@ -481,22 +434,19 @@ class MeowApiTest {
     // -------------------------------------------------------------------------
 
     @Test
-    fun `every client sends the secret current at the time of the call`() = runTest {
-        var secret: String? = "first"
-        val authed = MeowApi(baseUrl = server.url("/"), secret = { secret })
+    fun `derived clients keep the endpoint credential`() = runTest {
+        val authed = MeowApi(baseUrl = server.url("/"), secret = "fixture-secret")
         server.enqueue(MockResponse().setResponseCode(204))
         server.enqueue(MockResponse().setResponseCode(204))
         enqueue("""{"delay": 142}""")
 
         authed.closeAllConnections()
-        // An engine restart mints a new one; the next call picks it up.
-        secret = "second"
         // These two run on clients derived for longer timeouts.
         authed.updateRuleProvider("ads")
         authed.testProxyDelay("Tokyo 01")
 
         assertEquals(
-            listOf("Bearer first", "Bearer second", "Bearer second"),
+            List(3) { "Bearer fixture-secret" },
             List(3) { server.takeRequest().getHeader("Authorization") },
         )
     }
@@ -507,7 +457,7 @@ class MeowApiTest {
         server.enqueue(MockResponse().setResponseCode(204))
 
         api.closeAllConnections()
-        MeowApi(baseUrl = server.url("/"), secret = { "" }).closeAllConnections()
+        MeowApi(baseUrl = server.url("/"), secret = "").closeAllConnections()
 
         assertNull(server.takeRequest().getHeader("Authorization"))
         assertNull(server.takeRequest().getHeader("Authorization"))

@@ -63,7 +63,7 @@ class HomeViewModel(
     private val vpn: VpnStateRepository,
     private val controller: ControllerAccess,
     private val profiles: ProfileRepository,
-    private val api: MeowApi,
+    private val apiForSession: (ControllerSession) -> MeowApi,
     private val analytics: Analytics,
     private val routeModes: RouteModeStore,
     private val routeChanges: RouteChanges,
@@ -86,8 +86,8 @@ class HomeViewModel(
         profiles.observeSelected().map { it?.yamlContent }.distinctUntilChanged(),
     ) { saved, yaml -> saved ?: yaml?.let(RouteMode::configured) ?: RouteMode.Rule }
 
-    private val runtimeMode = controller.observe(reloadMode) {
-        modeSwitch.withLock { api.configs() }
+    private val runtimeMode = controller.observe(reloadMode) { session ->
+        modeSwitch.withLock { apiForSession(session).configs() }
     }
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -157,7 +157,7 @@ class HomeViewModel(
     private suspend fun switchRouteMode(mode: RouteMode, session: ControllerSession?) {
         if (session != null) {
             try {
-                controller.write(session) { api.setMode(mode) }
+                controller.write(session) { apiForSession(session).setMode(mode) }
             } catch (e: MeowApiException) {
                 if (!controller.isCurrent(session)) return
                 Timber.w(e, "switching route mode failed")
@@ -180,7 +180,7 @@ class HomeViewModel(
         if (session != null && controller.isCurrent(session)) {
             refreshRouteMode()
             try {
-                controller.write(session) { api.closeAllConnections() }
+                controller.write(session) { apiForSession(session).closeAllConnections() }
             } catch (e: MeowApiException) {
                 Timber.w(e, "closing connections after a route mode switch failed")
             }

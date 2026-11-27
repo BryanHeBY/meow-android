@@ -108,17 +108,15 @@ engine's own controller API on loopback, which crosses into `:vpn`.
 ### Engine API client (`core/src/main/java/io/github/madeye/meow/api/`)
 
 - **MeowApi.kt**: OkHttp + kotlinx-serialization client for the embedded engine's
-  Clash-compatible controller (`http://127.0.0.1:9090`, started by `MeowInstance`).
+  Clash-compatible controller (started by `MeowInstance`).
   Proxies/groups, delay probes, rules, rule providers (`updateRuleProvider` gets its
   own 90 s read timeout: the engine answers only after the download), connections,
   configs, per-proxy traffic (`proxyTraffic`, `GET /statistics`; null on an engine
   without it), and the `/logs` websocket (500ms→30s reconnect ramp). Every call,
-  the websocket handshake included, sends `Authorization: Bearer` with the
-  secret read from `preference/ApiSecretStore` at call time: `MeowInstance`
-  mints a fresh one per engine start, the profile's own `secret:` wins (kept by
-  `strip_and_inject` for on-device dashboards), and `:vpn` writes the one the
-  engine runs with (`nativeApiSecret`) before the service reports Connected.
-  `baseUrl` and `secret` are injectable for tests.
+  the websocket handshake included, uses the app-only loopback port and
+  per-run capability in the VPN service's atomic Binder snapshot. The built-in
+  dashboard stays at `127.0.0.1:9090` and uses the profile's `secret:` or a
+  separately minted fallback.
 - **MeowApiModels.kt**: `/proxies` is a heterogeneous map discriminated by a field
   *value*, so it is parsed by hand; `ProxyHistory.time` accepts both the Go string
   and Rust `SystemTime` encodings.

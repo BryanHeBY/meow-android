@@ -77,7 +77,7 @@ class MeowApiLogStreamTest {
                 }
             }),
         )
-        val authed = MeowApi(baseUrl = server.url("/"), secret = { "s3cret" })
+        val authed = MeowApi(baseUrl = server.url("/"), secret = "s3cret")
 
         withTimeout(10_000) { authed.logs().take(1).toList() }
 
