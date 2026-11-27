@@ -1,6 +1,6 @@
 package io.github.madeye.meow.update
 
-import io.github.madeye.meow.api.await
+import io.github.madeye.meow.api.awaitBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +60,7 @@ class GitHubReleases(
             // GitHub rejects API calls without one.
             .header("User-Agent", userAgent)
             .build()
-        val body = client.newCall(request).await().use { response ->
+        val body = client.newCall(request).awaitBody { response ->
             if (!response.isSuccessful) {
                 // An exhausted rate limit is a 403 or 429 with nothing remaining.
                 val limited = response.code in RATE_LIMITED && response.header("x-ratelimit-remaining") == "0"

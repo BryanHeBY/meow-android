@@ -591,7 +591,7 @@ data class LogStreamEvent(val entry: LogEntry? = null)
 private class StreamClosed(code: Int, reason: String) :
     IOException("websocket closed ($code${if (reason.isEmpty()) "" else ": $reason"})")
 
-private suspend fun Call.awaitBody(read: (Response) -> String): String = suspendCancellableCoroutine { cont ->
+internal suspend fun Call.awaitBody(read: (Response) -> String): String = suspendCancellableCoroutine { cont ->
     cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {

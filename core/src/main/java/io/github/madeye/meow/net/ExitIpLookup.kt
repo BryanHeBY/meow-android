@@ -1,6 +1,6 @@
 package io.github.madeye.meow.net
 
-import io.github.madeye.meow.api.await
+import io.github.madeye.meow.api.awaitBody
 import java.io.IOException
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
@@ -103,7 +103,7 @@ class ExitIpLookup(
                 .url(url)
                 .header("Accept", "application/json")
                 .build()
-            client.newCall(request).await().use { response ->
+            client.newCall(request).awaitBody { response ->
                 // Rate limits come back as 403 (ip.sb) or 429 (ipinfo.io).
                 if (!response.isSuccessful) throw IOException("${url.host} returned HTTP ${response.code}")
                 response.body?.string().orEmpty()
