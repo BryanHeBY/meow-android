@@ -48,6 +48,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+      # Gradle caches its own dependencies; Cargo archives live outside that cache.
+      - name: Restore Cargo dependency downloads
+        id: cargo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: meowz-cargo-downloads-v1-${{ runner.os }}-aarch64-linux-android-${{ matrix.edition }}-${{ hashFiles('core/src/main/rust/meow-android-ffi/Cargo.lock', 'vendor/meow-rs/Cargo.lock') }}
+
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.event.repository.default_branch != github.ref_name && (github.event_name != 'push' || github.ref != 'refs/heads/feat/zerotier-overlay-policy') }}
@@ -79,3 +90,13 @@ jobs:
           name: meowz-${{ matrix.edition }}-arm64-v8a-debug
           path: mobile/build/outputs/apk/debug/mobile-debug.apk
           compression-level: 0
+
+      - name: Save Cargo dependency downloads
+        if: ${{ success() && steps.cargo-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && (github.event.repository.default_branch == github.ref_name || github.ref == 'refs/heads/feat/zerotier-overlay-policy') }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
