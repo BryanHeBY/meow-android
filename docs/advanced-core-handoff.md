@@ -1,0 +1,46 @@
+# MeowZ Advanced overrides handoff
+
+The integration base is `9c531764731fa960c00c21ecb29641b381c3506c`, with parents `f6ade6ea8498e3567c6e9df20386d8cbece1607e` and `b13979172ed6532777f2ecf66b28ea5bc3403c83`. Android pins Meow core `c77bfd0d018825ee935f1653218ae3546d3110c4` (0.30.0). The app, core and dependency pins stay at the integration base pending exact-core CI.
+
+## Settings and runtime
+
+- Configuration Override keeps DNS, IPv6 and captured app UDP/443 on the main page. The DNS editor keeps its existing profile binding, preflight, live resolver transaction and applied status. Split DNS remains unavailable. Its separate acceptance test must demonstrate Android UDP resolution and egress through the chosen route, including both the proxied and direct DNS paths.
+- Advanced → Core behavior offers `unified-delay` and `tcp-concurrent` with inherit, on and off. Unified delay changes how core measures proxy health probes. TCP concurrency controls how core tries multiple resolved addresses, including the initial provider build. Off selects serial attempts. Core defaults are unified delay off and concurrent TCP on.
+- `find-process-mode` offers Off and Always on Android 10 and later. Always asks Android for the app package and UID on eligible captured Meow TCP and new UDP flows. Missing owner data falls through normal routing. Off skips the lookup, so app rules and per-app statistics can lack owner information. Separate overlay authorization still checks owners under its existing policy. Strict is disabled because the pinned core cannot request the Android owner from its rule-time lookup. An absent or Strict profile value retains Android's existing eager lookup. Below Android 10, the editor is disabled because the platform owner API is absent.
+- Each field inherits independently from profile override to global override to profile YAML to the applicable default. The previews use the drafts and the selected profile's values. They describe a future start. Each editor saves and resets its own fields at the current scope. Reset stages inheritance and takes effect after Save. The VPN snapshots the saved values at startup, and a DNS activation rollback uses the previous session's override snapshot. Saves leave the running session untouched. The existing authenticated dashboard remains a separate live interface.
+- Legacy two-line IPv6 and UDP/443 files load at both scopes and migrate to versioned JSON on save. Explicit false survives merge and serialization. Writes rename a temporary sibling file into place, and unknown versions or malformed documents are refused. Profile YAML and the DNS preference keep their existing storage and ownership.
+
+## Parity inventory and next work
+
+These entries are unavailable as Advanced overrides. The field names come from the `parity.jsonl` audit of Clash Meta for Android and mihomo. The UI and integration use Meow's own components and runtime paths. [Official override model](https://github.com/MetaCubeX/ClashMetaForAndroid/blob/6e635124cc72f8c102b7e76d849c384deba28b3f/core/src/main/java/com/github/kr328/clash/core/model/ConfigurationOverride.kt), [official override screen](https://github.com/MetaCubeX/ClashMetaForAndroid/blob/6e635124cc72f8c102b7e76d849c384deba28b3f/design/src/main/java/com/github/kr328/clash/design/OverrideSettingsDesign.kt), [official Meta feature screen](https://github.com/MetaCubeX/ClashMetaForAndroid/blob/6e635124cc72f8c102b7e76d849c384deba28b3f/design/src/main/java/com/github/kr328/clash/design/MetaFeatureSettingsDesign.kt), [mihomo config](https://github.com/MetaCubeX/mihomo/blob/0455d0d28c4526937380505153e65a843d8612e8/config/config.go).
+
+| Field or action | Android boundary and acceptance work |
+| --- | --- |
+| `port`, `socks-port`, `mixed-port` | Android starts no proxy listeners. Wire lifecycle, then prove local protocol handshakes, shutdown and port collision handling. |
+| `redir-port`, `tproxy-port` | Transparent listeners need Android traffic delivery and platform prerequisites. Prove packet interception and cleanup for each supported mode. |
+| `authentication`, `allow-lan`, `bind-address` | Require a running listener. Prove credential enforcement and interface binding, including empty or unavailable addresses. |
+| `external-controller`, `external-controller-tls`, `external-controller-cors.allow-origins`, `external-controller-cors.allow-private-network`, `secret` | Android owns two authenticated loopback endpoints. Design any external listener separately, then prove TLS, credential rotation and CORS without affecting internal readiness. |
+| `mode` | Home owns the route picker. Any additional editor needs one precedence model and observed routing across direct, global and rule modes. |
+| `log-level` | Android has no demonstrated per-profile logger filter. Wire one and prove effective severity before and after restart. |
+| `hosts`, `dns.use-hosts` | Require overrides for both the map and its toggle with explicit merge and empty-map semantics. Verify answers across supported upstream modes. |
+| `dns.enable`, `dns.enhanced-mode`, `dns.listen` | Android owns in-VPN fake-IP DNS with no DNS socket. Independent controls need an Android routing and resolver design and tests for domain and literal-IP flows. |
+| `dns.prefer-h3` | The FFI build lacks the DNS QUIC feature. Enable it deliberately and prove HTTPS upstream H3 negotiation and fallback. |
+| `clash-for-android.append-system-dns` | Requires underlying-network DNS lookup and refresh on network changes. Prove egress without VPN recursion. |
+| `dns.ipv6` | Core uses top-level `ipv6`. Implement independent AAAA policy and prove both TUN routing and DNS behavior under each combination. |
+| `dns.nameserver`, `dns.default-nameserver` | Main DNS already has the transactional custom-primary path. Raw primary and bootstrap overrides need explicit inheritance and empty-list behavior plus wire proof of bootstrap selection. |
+| `dns.fallback`, `dns.fallback-filter.geoip`, `dns.fallback-filter.geoip-code`, `dns.fallback-filter.domain`, `dns.fallback-filter.ipcidr` | Validate the effective resolver, required fallback servers, MMDB status and filters as one candidate. Prove upstream selection and refusal of invalid or ineffective inputs. |
+| `dns.nameserver-policy` | Add ordered merge or replacement semantics and prove the first matching policy wins across inherited and overridden entries. |
+| `dns.fake-ip-filter`, `dns.fake-ip-filter-mode` | Validate filters through TUN DNS and test blacklist and whitelist behavior. Implement core rule mode before offering it. |
+| `find-process-mode: strict`, executable-path identity | A production core hook needs the Android flow's original tuple at rule demand. Prove the lookup only runs at a reached dependent predicate. Package-name and UID attribution cannot supply executable paths. |
+| `sniffer.enable`, `sniffer.sniff.HTTP.ports`, `sniffer.sniff.TLS.ports`, `sniffer.sniff.QUIC.ports`, `sniffer.parse-pure-ip`, `sniffer.override-destination`, `sniffer.force-domain`, `sniffer.skip-domain` | Android strips the sniffer block. Wire actual TUN sniffing and prove protocol, port, domain, literal-IP and destination behavior on captured flows. |
+| `sniffer.sniff.HTTP.override-destination`, `sniffer.sniff.TLS.override-destination`, `sniffer.sniff.QUIC.override-destination`, `sniffer.skip-src-address`, `sniffer.skip-dst-address`, `sniffer.force-dns-mapping` | Also need missing per-protocol and address handling in core and a defined effect for DNS mapping. Prove each option changes the intended flow decision. |
+| `geodata-mode`, GeoIP, GeoSite, Country and ASN imports | Define Android-owned data formats, storage and precedence, then prove lookups and routing use each accepted fixture. |
+| X25519 and hybrid age key helpers | These are actions. Define a supported key consumer and test a full key use cycle. |
+| `geox-url.geoip`, `geox-url.mmdb`, `geox-url.geosite` | Audit model fields with no visible official editor. Data update design would need source validation, atomic replacement and recovery. |
+
+## Verification boundary
+
+- Cached Kotlin and Compose compilation passed with generated AIDL. The scoped JVM run passed 194 tests, and the Lite navigation check passed independently. AAPT2 compiled the default catalog and all seven translations.
+- Cached Rust checks passed in both editions (34 Lite and 37 Full tests), including health probe behavior, TCP candidate scheduling, owner-rule outcomes, startup rejection and rollback, DNS and controller regressions, and the application UDP/443 gate for both address families. Host Clippy and Android arm64 FFI metadata checks passed. Lite metadata reported the existing unused functions in `protect.rs`.
+- The host JNI smoke passed scoped overlay, preview, reset, DNS rejection and controller publication checks. Android socket egress and device attribution remain outside the synthetic checks. The existing sandbox socket restrictions also exclude networked host suites.
+- Exact-core CI and the root release decision are required before APK packaging or publication.

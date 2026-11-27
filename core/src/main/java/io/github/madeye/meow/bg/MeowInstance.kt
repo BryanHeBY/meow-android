@@ -8,7 +8,9 @@ import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.database.ClashProfile
+import io.github.madeye.meow.preference.ConfigurationOverride
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
+import io.github.madeye.meow.preference.CoreBehaviorRuntime
 import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.DnsSettings
 import io.github.madeye.meow.preference.DnsSettingsStore
@@ -31,6 +33,7 @@ class MeowInstance(profile: ClashProfile) {
     val activeConfig = requireNotNull(ActiveConfig.of(this.profile))
     val profileName: String get() = profile.name
     @Volatile internal var appliedDns: DnsSettings? = null
+    @Volatile internal var appliedOverride: ConfigurationOverride? = null
 
     companion object {
         private val random by lazy { SecureRandom() }
@@ -113,7 +116,9 @@ class MeowInstance(profile: ClashProfile) {
         // Runtime-only stripping and DNS injection run in the core for both
         // the cached candidate check and the engine load.
         val yaml = activeConfig.yaml
-        val override = ConfigurationOverrideStore.default.effective(profile.id.takeIf { it > 0 })
+        // A DNS rollback restores the previous engine snapshot. A normal start
+        // reads the next-start overrides once, before applying any of them.
+        val override = appliedOverride ?: ConfigurationOverrideStore.default.effective(profile.id.takeIf { it > 0 })
         blockAppUdp443 = override.blocksAppUdp443
         val runtimeYaml = when (override.ipv6) {
             Ipv6Override.INHERIT -> yaml
@@ -132,7 +137,7 @@ class MeowInstance(profile: ClashProfile) {
             val selected = activeConfig.takeIf { it.profileId > 0 }
             val issue = DnsSettingsStore.default.activationIssue(dns, selected, MeowCore::nativeCheckCachedDns)
             if (issue != null) throw DnsActivationException(issue)
-            configFile.writeText(runtimeYaml)
+            configFile.writeText(CoreBehaviorRuntime.apply(runtimeYaml, override.coreBehavior))
             MeowCore.nativeSetHomeDir(configDir.absolutePath)
             val port = MeowCore.nativeStartEngine(
                 "127.0.0.1:9090", mintCredential(), routeMode, dns.encode(), activeConfig.profileId, capability,
@@ -143,6 +148,7 @@ class MeowInstance(profile: ClashProfile) {
                 throw RuntimeException("Failed to start engine: $error")
             }
             appliedDns = dns
+            appliedOverride = override
             controllerEndpoint = ControllerEndpoint(port, capability)
         }
         val meter = NetworkTrafficMeter(startedAt = System.currentTimeMillis())

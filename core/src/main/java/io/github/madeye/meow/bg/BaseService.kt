@@ -509,7 +509,10 @@ object BaseService {
             notification.setProfileName(starting.name)
 
             data.meowInstance = MeowInstance(starting).also {
-                if (superseded) it.appliedDns = reload?.previous?.appliedDns
+                if (superseded) {
+                    it.appliedDns = reload?.previous?.appliedDns
+                    it.appliedOverride = reload?.previous?.appliedOverride
+                }
             }
 
             if (!data.closeReceiverRegistered) {
@@ -535,7 +538,10 @@ object BaseService {
                         val previous = reload?.previous?.takeUnless { superseded } ?: throw exc
                         val previousDns = previous.appliedDns ?: throw exc
                         notification.setProfileName(previous.profileName)
-                        data.meowInstance = MeowInstance(previous.profile).also { it.appliedDns = previousDns }
+                        data.meowInstance = MeowInstance(previous.profile).also {
+                            it.appliedDns = previousDns
+                            it.appliedOverride = previous.appliedOverride
+                        }
                         startProcesses()
                         exc.issue
                     }

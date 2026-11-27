@@ -19,7 +19,8 @@
 //!     `GET /connections/{id}`.
 
 use anyhow::{Context, Result};
-use meow_config::{load_config, Config};
+use meow_common::ProcessLookupMode;
+use meow_config::{raw::RawConfig, Config};
 use meow_tunnel::Tunnel;
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,47 @@ pub fn tunnel() -> Option<Tunnel> {
 /// Match meow-app's per-load setting, including resetting a previous profile.
 pub(crate) fn apply_unified_delay(raw: &meow_config::raw::RawConfig) {
     meow_proxy::health::set_unified_delay(raw.unified_delay.unwrap_or(false));
+}
+
+/// Strict requires a rule-time Android owner lookup hook. Keep the existing
+/// eager TUN attribution for profiles that omit the key or request strict.
+pub(crate) fn android_process_lookup(mode: ProcessLookupMode) -> ProcessLookupMode {
+    match mode {
+        ProcessLookupMode::Off => ProcessLookupMode::Off,
+        ProcessLookupMode::Strict | ProcessLookupMode::Always => ProcessLookupMode::Always,
+    }
+}
+
+/// The TCP dial policy is process-wide and must be installed before the
+/// build fetches providers. Restore it if startup fails before publication.
+pub(crate) struct StartupTcpPolicy(Option<bool>);
+
+impl StartupTcpPolicy {
+    pub(crate) fn capture() -> Self {
+        Self(Some(meow_common::dial::tcp_concurrent()))
+    }
+
+    pub(crate) fn commit(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for StartupTcpPolicy {
+    fn drop(&mut self) {
+        if let Some(previous) = self.0 {
+            meow_common::dial::set_tcp_concurrent(previous);
+        }
+    }
+}
+
+pub(crate) async fn build_startup_config(
+    raw: RawConfig,
+    cache_dir: Option<&Path>,
+) -> Result<Config> {
+    meow_common::dial::set_tcp_concurrent(meow_config::effective_tcp_concurrent(
+        raw.tcp_concurrent,
+    ));
+    meow_config::build_config(raw, cache_dir).await
 }
 
 pub(crate) use crate::dns_override::DnsUpstreams;
@@ -221,8 +263,8 @@ impl Drop for TempFileGuard {
 }
 
 /// Read `config_path`, apply its runtime DNS settings, and hand a sibling
-/// `config.yaml.android-stripped.yaml` to `load_config`. The sibling
-/// placement is deliberate: `load_config` uses `path.parent()` as the
+/// `config.yaml.android-stripped.yaml` to the config loader. The sibling
+/// placement is deliberate: the loader uses the profile's directory as the
 /// rule-/proxy-provider `cache_dir`, so colocating with the original keeps
 /// rule-provider cache files in the home dir. Using `load_config_from_str`
 /// would silently disable that caching.
@@ -243,13 +285,16 @@ pub(crate) async fn load_stripped_config(
                 format!("writing stripped config to {}", stripped_path.display())
             })?;
             let _guard = TempFileGuard(stripped_path.clone());
-            load_config(stripped_path.to_str().expect("utf-8 path")).await
+            let path = stripped_path.to_str().expect("utf-8 path");
+            let raw = meow_config::load_raw_config(path).await?;
+            let cache_dir = meow_config::resource_cache_dir_for_config_path(path);
+            build_startup_config(raw, Some(&cache_dir)).await
         })
     };
     load_profile(&original, upstreams, load).await
 }
 
-/// The file [`load_stripped_config`] hands to `load_config`. A rebuild
+/// The file [`load_stripped_config`] hands to the config loader. A rebuild
 /// passes it on too: it picks the provider cache dir, and with it the
 /// fake-IP store file.
 pub fn sibling_stripped_path(config_path: &str) -> PathBuf {
@@ -257,10 +302,55 @@ pub fn sibling_stripped_path(config_path: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::dns_override::CN_NAMESERVERS;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub(crate) async fn check_tcp_candidate_scheduling(concurrent: bool) {
+        use std::io;
+        use std::net::SocketAddr;
+        use std::time::Duration;
+
+        let first: SocketAddr = "192.0.2.1:443".parse().unwrap();
+        let alternate: SocketAddr = "[2001:db8::1]:443".parse().unwrap();
+        let first_started = std::sync::atomic::AtomicBool::new(false);
+        let release_first = tokio::sync::Notify::new();
+        let selection = meow_common::connect_tcp_candidates(vec![first, alternate], |addr| {
+            let first_started = &first_started;
+            let release_first = &release_first;
+            async move {
+                if addr == first {
+                    first_started.store(true, Ordering::Relaxed);
+                    release_first.notified().await;
+                    Err(io::ErrorKind::ConnectionRefused.into())
+                } else {
+                    Ok(addr)
+                }
+            }
+        });
+        tokio::pin!(selection);
+        if concurrent {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(3), selection)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                alternate
+            );
+            assert!(first_started.load(Ordering::Relaxed));
+        } else {
+            assert!(futures::poll!(&mut selection).is_pending());
+            assert!(first_started.load(Ordering::Relaxed));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(400), &mut selection)
+                    .await
+                    .is_err()
+            );
+            release_first.notify_one();
+            assert_eq!(selection.await.unwrap(), alternate);
+        }
+    }
 
     #[test]
     fn dns_import_and_effective_activation_have_distinct_verdicts() {
@@ -273,8 +363,13 @@ mod tests {
         assert!(!meow_config::is_offline_validate());
     }
 
-    #[tokio::test]
-    async fn unified_delay_profile_controls_cold_and_warm_probes_and_resets() {
+    #[test]
+    fn unified_delay_profile_controls_cold_and_warm_probes_and_resets() {
+        let _serial = crate::test_support::SERIAL.lock();
+        crate::get_runtime().block_on(check_unified_delay());
+    }
+
+    async fn check_unified_delay() {
         use async_trait::async_trait;
         use meow_common::{
             AdapterType, Metadata, ProxyAdapter, ProxyConn, ProxyHealth, ProxyPacketConn,

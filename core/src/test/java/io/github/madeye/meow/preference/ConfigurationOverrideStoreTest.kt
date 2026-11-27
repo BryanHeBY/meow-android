@@ -3,6 +3,7 @@ package io.github.madeye.meow.preference
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -65,5 +66,48 @@ class ConfigurationOverrideStoreTest {
         assertEquals(Ipv6Override.FORCE_OFF, store.effective(profileId).ipv6)
         assertEquals(Ipv6Override.INHERIT, store.effective(profileId + 1).ipv6)
         assertEquals(refreshed, original.readText())
+    }
+
+    @Test
+    fun `legacy files migrate on save and core values merge independently at startup`() {
+        directory.mkdirs()
+        File(directory, "global").writeText("FORCE_OFF\nBLOCK_UDP_443\n")
+        assertEquals(ConfigurationOverride(Ipv6Override.FORCE_OFF, AppQuicOverride.BLOCK_UDP_443), store.load())
+        val global = store.load().copy(coreBehavior = CoreBehaviorOverride(true, true, FindProcessOverride.ALWAYS))
+        store.save(null, global)
+        assertTrue(File(directory, "global").readText().startsWith("{"))
+        val currentRun = store.effective(7L)
+
+        val local = ConfigurationOverride(appQuic = AppQuicOverride.DO_NOT_BLOCK)
+        val disabled = CoreBehaviorOverride(false, false, FindProcessOverride.OFF)
+        store.save(7L, local.copy(coreBehavior = disabled))
+        assertEquals(global, currentRun)
+        assertEquals(disabled, store.effective(7L).coreBehavior)
+        assertEquals(global.ipv6, store.effective(7L).ipv6)
+        assertFalse(store.effective(7L).blocksAppUdp443)
+
+        store.save(7L, local)
+        assertEquals(global.coreBehavior, store.effective(7L).coreBehavior)
+        assertEquals(local, store.load(7L))
+        assertEquals(global, store.effective(8L))
+        assertEquals(global, store.load())
+    }
+
+    @Test
+    fun `unknown version and malformed values cannot be silently overwritten`() {
+        directory.mkdirs()
+        val file = File(directory, "global")
+        for (text in listOf(
+            """{"version":2}""",
+            """{"version":"1"}""",
+            """{"version":1,"coreBehavior":{"tcpConcurrent":42}}""",
+            """{"version":1,"coreBehavior":{"findProcessMode":"STRICT"}}""",
+            """{"version":1,"future":true}""",
+            "[future format]",
+        )) {
+            file.writeText(text)
+            assertThrows(java.io.IOException::class.java) { store.save(null, ConfigurationOverride()) }
+            assertEquals(text, file.readText())
+        }
     }
 }

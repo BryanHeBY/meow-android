@@ -21,6 +21,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -38,6 +42,8 @@ import io.github.madeye.meow.ui.BackButton
 import io.github.madeye.meow.ui.components.GlassCard
 import io.github.madeye.meow.ui.components.MeowScaffold
 import io.github.madeye.meow.ui.components.SectionHeader
+import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverrideFields
+import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverridePage
 
 internal const val CONFIGURATION_OVERRIDE_TAG = "configuration_override"
 internal const val PROFILE_OVERRIDE_TAG = "profile_configuration_override"
@@ -50,6 +56,16 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
     val dnsStatus by viewModel.dnsStatus.collectAsStateWithLifecycle()
     val saving = form?.saving == true
     val global = viewModel.profileId == null
+    var advanced by rememberSaveable { mutableStateOf<AdvancedOverridePage?>(null) }
+    val goBack = {
+        if (!saving) {
+            when (advanced) {
+                null -> onBack()
+                AdvancedOverridePage.INDEX -> advanced = null
+                else -> advanced = AdvancedOverridePage.INDEX
+            }
+        }
+    }
 
     val saved = stringResource(R.string.override_saved)
     val dnsSaved = stringResource(R.string.override_dns_saved)
@@ -66,13 +82,14 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
             snackbarHost.showSnackbar(message)
         }
     }
-    BackHandler(enabled = saving) { }
+    BackHandler(enabled = saving || advanced != null, onBack = goBack)
     MeowScaffold(
-        title = stringResource(R.string.override_title),
-        navigationIcon = { BackButton { if (!saving) onBack() } },
+        title = stringResource(advanced?.title ?: R.string.override_title),
+        navigationIcon = { BackButton(goBack) },
     ) { padding ->
+        val scroll = key(advanced) { rememberScrollState() }
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            Modifier.fillMaxWidth().verticalScroll(scroll)
                 .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 24.dp)
                 .padding(horizontal = 16.dp)
                 .testTag("configuration_override_form"),
@@ -88,10 +105,22 @@ internal fun ConfigurationOverrideRoute(snackbarHost: SnackbarHostState, onBack:
             if (!global && profile == null && form != null) {
                 Text(stringResource(R.string.override_profile_unavailable))
             } else if (form != null) {
-                form.draftDns?.let {
-                    DnsOverrideFields(it, form, profile, dnsStatus, viewModel::editDns) { viewModel.saveDns(profile?.id) }
+                val page = advanced
+                if (page == null) {
+                    form.draftDns?.let {
+                        DnsOverrideFields(it, form, profile, dnsStatus, viewModel::editDns) { viewModel.saveDns(profile?.id) }
+                    }
+                    OverrideFields(form, profile, global, viewModel::edit) { viewModel.save(OverrideSection.MAIN) }
+                    TextButton(onClick = { advanced = AdvancedOverridePage.INDEX }, enabled = !saving) {
+                        Text(stringResource(R.string.advanced_title))
+                    }
+                } else {
+                    AdvancedOverrideFields(
+                        page, form, profile, global, { advanced = it },
+                        onEdit = { viewModel.edit(form.draft.copy(coreBehavior = it)) },
+                        onSave = { viewModel.save(OverrideSection.CORE) },
+                    )
                 }
-                OverrideFields(form, profile, global, viewModel::edit, viewModel::save)
             }
         }
     }
@@ -107,7 +136,11 @@ private fun OverrideFields(
     onSave: () -> Unit,
 ) {
     val draft = form.draft
-    val effective = if (global) profile?.override?.withInherited(draft) ?: draft else draft.withInherited(form.global)
+    val effective = when {
+        !global -> draft.withInherited(form.global)
+        profile == null -> draft
+        else -> profile.override?.withInherited(draft)
+    }
     val enabled = !form.saving
     val inherit = if (global) R.string.override_follow_profile else R.string.override_inherit_global
     Text(stringResource(R.string.override_next_connection), style = MaterialTheme.typography.bodySmall)
@@ -137,34 +170,37 @@ private fun OverrideFields(
     SectionHeader(stringResource(R.string.override_preview))
     GlassCard {
         if (global) profile?.let { Text(it.name, style = MaterialTheme.typography.titleSmall) }
-        val ipv6 = when (effective.ipv6) {
+        val ipv6 = when (effective?.ipv6) {
+            null -> R.string.override_failed
             Ipv6Override.FORCE_ON -> R.string.override_ipv6_on
             Ipv6Override.FORCE_OFF -> R.string.override_ipv6_off
-            Ipv6Override.INHERIT -> when (profile?.ipv6) {
-                1 -> R.string.override_ipv6_on
-                0 -> R.string.override_ipv6_off
-                -1 -> R.string.override_ipv6_default
-                -2 -> R.string.override_ipv6_unavailable
-                else -> R.string.override_follow_profile
+            Ipv6Override.INHERIT -> when {
+                profile == null -> R.string.override_follow_profile
+                profile.profileValues == null -> R.string.override_ipv6_unavailable
+                profile.profileValues.ipv6 == true -> R.string.override_ipv6_on
+                profile.profileValues.ipv6 == false -> R.string.override_ipv6_off
+                else -> R.string.override_ipv6_default
             }
         }
         Text(stringResource(ipv6), style = MaterialTheme.typography.bodySmall)
-        val quic = if (effective.blocksAppUdp443) R.string.override_quic_block else R.string.override_quic_allow
-        Text(stringResource(quic), style = MaterialTheme.typography.bodySmall)
+        effective?.let {
+            val quic = if (it.blocksAppUdp443) R.string.override_quic_block else R.string.override_quic_allow
+            Text(stringResource(quic), style = MaterialTheme.typography.bodySmall)
+        }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         TextButton(
-            onClick = { onEdit(ConfigurationOverride()) },
-            enabled = enabled && draft != ConfigurationOverride(),
+            onClick = { onEdit(draft.copy(ipv6 = Ipv6Override.INHERIT, appQuic = AppQuicOverride.INHERIT)) },
+            enabled = enabled && (draft.ipv6 != Ipv6Override.INHERIT || draft.appQuic != AppQuicOverride.INHERIT),
         ) { Text(stringResource(R.string.override_reset)) }
-        Button(onClick = onSave, enabled = form.canSave, modifier = Modifier.testTag("save_configuration_override")) {
+        Button(onClick = onSave, enabled = form.canSave(OverrideSection.MAIN), modifier = Modifier.testTag("save_configuration_override")) {
             Text(stringResource(R.string.common_save))
         }
     }
 }
 
 @Composable
-private fun Choice(
+internal fun Choice(
     label: Int,
     selected: Boolean,
     enabled: Boolean,

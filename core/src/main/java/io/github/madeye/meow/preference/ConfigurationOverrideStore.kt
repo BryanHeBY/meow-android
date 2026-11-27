@@ -2,40 +2,93 @@ package io.github.madeye.meow.preference
 
 import io.github.madeye.meow.Core
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 enum class Ipv6Override { INHERIT, FORCE_ON, FORCE_OFF }
 enum class AppQuicOverride { INHERIT, BLOCK_UDP_443, DO_NOT_BLOCK }
+enum class FindProcessOverride(val wire: String) { OFF("off"), ALWAYS("always") }
+
+/** Null means inherit; explicit false is distinct from an inherited value. */
+data class CoreBehaviorOverride(
+    val unifiedDelay: Boolean? = null,
+    val tcpConcurrent: Boolean? = null,
+    val findProcessMode: FindProcessOverride? = null,
+) {
+    fun withInherited(global: CoreBehaviorOverride) = CoreBehaviorOverride(
+        unifiedDelay ?: global.unifiedDelay,
+        tcpConcurrent ?: global.tcpConcurrent,
+        findProcessMode ?: global.findProcessMode,
+    )
+}
 
 data class ConfigurationOverride(
     val ipv6: Ipv6Override = Ipv6Override.INHERIT,
     val appQuic: AppQuicOverride = AppQuicOverride.INHERIT,
+    val coreBehavior: CoreBehaviorOverride = CoreBehaviorOverride(),
 ) {
     fun withInherited(global: ConfigurationOverride) = ConfigurationOverride(
         ipv6.takeUnless { it == Ipv6Override.INHERIT } ?: global.ipv6,
         appQuic.takeUnless { it == AppQuicOverride.INHERIT } ?: global.appQuic,
+        coreBehavior.withInherited(global.coreBehavior),
     )
 
     val blocksAppUdp443: Boolean get() = appQuic == AppQuicOverride.BLOCK_UDP_443
 }
 
-/**
- * A separate file for each scope, read fresh by :vpn at session start. Room IDs
- * survive subscription refreshes and renames. Neither read nor write touches YAML.
- */
+/** One file per scope, read fresh in the VPN process. Legacy files migrate on save. */
 class ConfigurationOverrideStore(private val directory: File) {
     private fun file(profileId: Long?) = File(directory, profileId?.let { "profile-$it" } ?: "global")
 
     fun load(profileId: Long? = null): ConfigurationOverride {
-        val lines = try {
-            file(profileId).readLines()
-        } catch (_: java.io.FileNotFoundException) {
-            emptyList()
+        val text = try {
+            file(profileId).readText()
+        } catch (_: FileNotFoundException) {
+            return ConfigurationOverride()
         }
-        return ConfigurationOverride(
-            Ipv6Override.entries.firstOrNull { it.name == lines.getOrNull(0) } ?: Ipv6Override.INHERIT,
-            AppQuicOverride.entries.firstOrNull { it.name == lines.getOrNull(1) } ?: AppQuicOverride.INHERIT,
-        )
+        try {
+            if (!text.trimStart().startsWith("{")) {
+                val lines = text.trimEnd().lines()
+                require(lines.size <= 2) { "unknown legacy override format" }
+                val ipv6 = lines[0].takeIf(String::isNotEmpty)?.let(Ipv6Override::valueOf)
+                val quic = lines.getOrNull(1)?.takeIf(String::isNotEmpty)?.let(AppQuicOverride::valueOf)
+                return ConfigurationOverride(ipv6 ?: Ipv6Override.INHERIT, quic ?: AppQuicOverride.INHERIT)
+            }
+            val root = Json.parseToJsonElement(text) as? JsonObject ?: error("expected object")
+            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior") }) { "unknown override field" }
+            val version = root["version"]?.jsonPrimitive
+            require(version?.isString == false && version.intOrNull == 1) { "unsupported override version" }
+            fun enumName(key: String) = root[key]?.jsonPrimitive?.let {
+                require(it.isString) { "invalid $key" }
+                it.content
+            }
+            val ipv6 = enumName("ipv6")?.let { Ipv6Override.valueOf(it) } ?: Ipv6Override.INHERIT
+            val quic = enumName("appQuic")?.let { AppQuicOverride.valueOf(it) } ?: AppQuicOverride.INHERIT
+            val core = (root["coreBehavior"] ?: JsonObject(emptyMap())) as? JsonObject
+                ?: error("invalid coreBehavior")
+            require(core.keys.all { it in setOf("unifiedDelay", "tcpConcurrent", "findProcessMode") }) { "unknown core field" }
+            fun boolean(key: String): Boolean? = core[key]?.jsonPrimitive?.let {
+                require(!it.isString) { "invalid $key" }
+                it.booleanOrNull ?: error("invalid $key")
+            }
+            val process = core["findProcessMode"]?.jsonPrimitive?.let {
+                require(it.isString) { "invalid findProcessMode" }
+                FindProcessOverride.valueOf(it.content)
+            }
+            return ConfigurationOverride(
+                ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process),
+            )
+        } catch (e: IllegalArgumentException) {
+            throw IOException("Cannot read configuration override", e)
+        } catch (e: IllegalStateException) {
+            throw IOException("Cannot read configuration override", e)
+        }
     }
 
     fun effective(profileId: Long?): ConfigurationOverride {
@@ -46,14 +99,27 @@ class ConfigurationOverrideStore(private val directory: File) {
     @Synchronized
     fun save(profileId: Long?, override: ConfigurationOverride) {
         val target = file(profileId)
+        // Do not replace an unknown or malformed format with a lossy older version.
+        if (target.exists()) load(profileId)
         if (override == ConfigurationOverride()) {
             if (!target.delete() && target.exists()) throw IOException("Cannot reset configuration override")
             return
         }
         if (!directory.mkdirs() && !directory.isDirectory) throw IOException("Cannot store configuration override")
+        val core = buildMap {
+            override.coreBehavior.unifiedDelay?.let { put("unifiedDelay", JsonPrimitive(it)) }
+            override.coreBehavior.tcpConcurrent?.let { put("tcpConcurrent", JsonPrimitive(it)) }
+            override.coreBehavior.findProcessMode?.let { put("findProcessMode", JsonPrimitive(it.name)) }
+        }
+        val root = JsonObject(buildMap {
+            put("version", JsonPrimitive(1))
+            put("ipv6", JsonPrimitive(override.ipv6.name))
+            put("appQuic", JsonPrimitive(override.appQuic.name))
+            if (core.isNotEmpty()) put("coreBehavior", JsonObject(core))
+        })
         val temp = File.createTempFile("override-", ".tmp", directory)
         try {
-            temp.writeText("${override.ipv6.name}\n${override.appQuic.name}\n")
+            temp.writeText(root.toString() + "\n")
             if (!temp.renameTo(target)) throw IOException("Cannot save configuration override")
         } finally {
             temp.delete()

@@ -273,6 +273,7 @@ async fn start_engine_async(
     profile_id: i64,
 ) -> Result<(EngineState, u16), anyhow::Error> {
     install_tracing_subscriber();
+    let tcp_policy = engine::StartupTcpPolicy::capture();
 
     // Resolve config path + set XDG_CONFIG_HOME (meow-config looks for
     // $XDG_CONFIG_HOME/meow/Country.mmdb). Our dir is .../no_backup/meow,
@@ -332,7 +333,10 @@ async fn start_engine_async(
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
             let loaded = engine::load_profile(MINIMAL_CONFIG, &dns, |stripped| {
-                Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+                Box::pin(async move {
+                    let raw = meow_config::parse_raw_yaml(&stripped)?;
+                    engine::build_startup_config(raw, None).await
+                })
             })
             .await
             .map_err(load_error)?;
@@ -426,6 +430,9 @@ async fn start_engine_async(
     tunnel.set_dialer_registry(config.provider_dialer_registry.clone());
     tunnel.set_mode(config.general.mode);
     tunnel.set_connection_notes(config.general.connection_notes);
+    tunnel.set_process_lookup_mode(engine::android_process_lookup(
+        config.general.find_process_mode,
+    ));
     // The health mode is process-wide in meow-proxy. Apply it on every
     // engine start, including the default, before any health checks start.
     engine::apply_unified_delay(&config.raw);
@@ -548,7 +555,7 @@ async fn start_engine_async(
     // ignored on Android.
 
     logging::bridge_log("start_engine_async: all tasks spawned");
-    // Last: a start that fails from here on is recorded as a failed stop.
+    tcp_policy.commit();
     meow_common::logbook::engine_started(&config_source);
     Ok((
         EngineState {
@@ -1053,6 +1060,78 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeVersion(
 #[cfg(test)]
 mod tests {
     use super::ENGINE_VERSION;
+
+    #[test]
+    fn advanced_policy_only_changes_on_successful_engine_start() {
+        use super::*;
+        use meow_common::{dial::tcp_concurrent, ProcessLookupMode};
+        use meow_proxy::health::unified_delay;
+
+        let _serial = test_support::SERIAL.lock();
+        let root = std::env::temp_dir().join(format!("meow-advanced-start-{}", std::process::id()));
+        let home = root.join("meow");
+        std::fs::create_dir_all(&home).unwrap();
+        *HOME_DIR.lock() = Some(home.to_str().unwrap().into());
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                stop_engine();
+                *HOME_DIR.lock() = None;
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root);
+        let config = home.join("config.yaml");
+        let start = |controller| start_engine(controller, None, engine::DnsUpstreams::Builtin, 41);
+        let write_settings = |settings: &str| {
+            std::fs::write(&config, format!("logbook: {{enable: false}}\n{settings}")).unwrap();
+        };
+        write_settings("unified-delay: true\ntcp-concurrent: false\nfind-process-mode: off\n");
+        assert_eq!(start(None), 0, "{}", get_error());
+        let current = engine::tunnel().unwrap();
+        assert_eq!(current.process_lookup_mode(), ProcessLookupMode::Off);
+        assert!(unified_delay());
+        assert!(!tcp_concurrent());
+        get_runtime().block_on(engine::tests::check_tcp_candidate_scheduling(false));
+
+        write_settings("unified-delay: false\ntcp-concurrent: true\nfind-process-mode: always\n");
+        assert_eq!(start(None), -1, "a second start must be rejected");
+        assert_eq!(current.process_lookup_mode(), ProcessLookupMode::Off);
+        assert!(unified_delay());
+        assert!(!tcp_concurrent());
+        stop_engine();
+
+        let invalid = ControllerConfig {
+            dashboard_addr: "0.0.0.0:0".into(),
+            dashboard_secret: "synthetic".into(),
+            capability: "ab".repeat(32),
+        };
+        assert_eq!(start(Some(invalid)), -1);
+        assert_eq!(get_error(), "controller must bind to loopback");
+        assert!(engine::tunnel().is_none());
+        assert!(DNS_RESOLVER.read().is_none());
+        assert!(unified_delay());
+        assert!(!tcp_concurrent());
+
+        assert_eq!(start(None), 0, "{}", get_error());
+        assert_eq!(
+            engine::tunnel().unwrap().process_lookup_mode(),
+            ProcessLookupMode::Always
+        );
+        assert!(!unified_delay());
+        assert!(tcp_concurrent());
+        get_runtime().block_on(engine::tests::check_tcp_candidate_scheduling(true));
+        stop_engine();
+
+        write_settings("find-process-mode: strict\n");
+        assert_eq!(start(None), 0, "{}", get_error());
+        assert_eq!(
+            engine::tunnel().unwrap().process_lookup_mode(),
+            ProcessLookupMode::Always
+        );
+        assert!(!unified_delay());
+        assert!(tcp_concurrent());
+    }
 
     #[test]
     fn the_engine_version_identifies_the_pinned_fork() {

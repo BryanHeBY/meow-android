@@ -2,13 +2,14 @@ package io.github.madeye.meow.ui.screens.overrideconfig
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.preference.DnsPreference
 import io.github.madeye.meow.preference.DnsMode
 import io.github.madeye.meow.preference.DnsSettings
 import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.ConfigurationOverride
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
+import io.github.madeye.meow.preference.CoreBehaviorRuntime
+import io.github.madeye.meow.preference.ProfileOverrideValues
 import io.github.madeye.meow.repo.ProfileRepository
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +35,8 @@ internal data class OverrideProfilePreview(
     val id: Long,
     val name: String,
     val subscription: Boolean,
-    val ipv6: Int,
-    val override: ConfigurationOverride,
+    val profileValues: ProfileOverrideValues?,
+    val override: ConfigurationOverride?,
 )
 
 internal data class OverrideForm(
@@ -48,11 +49,18 @@ internal data class OverrideForm(
     val invalidDnsPreference: Boolean = false,
     val saving: Boolean = false,
 ) {
-    val canSave get() = !saving && saved != draft
+    fun draftFor(section: OverrideSection): ConfigurationOverride = when (section) {
+        OverrideSection.MAIN -> saved.copy(ipv6 = draft.ipv6, appQuic = draft.appQuic)
+        OverrideSection.CORE -> saved.copy(coreBehavior = draft.coreBehavior)
+    }
+
+    fun canSave(section: OverrideSection) = !saving && saved != draftFor(section)
     val canSaveDns get() = !saving && draftDns?.complete == true && draftDns.mode != DnsMode.SPLIT &&
         (invalidDnsPreference || savedDns != draftDns.normalized() ||
             (draftDns.requiresProfile && draftDns.profileId != dnsSelectedId))
 }
+
+internal enum class OverrideSection { MAIN, CORE }
 
 internal sealed interface OverrideEvent {
     data object Saved : OverrideEvent
@@ -83,8 +91,8 @@ internal class ConfigurationOverrideViewModel(
                     it.id,
                     it.name,
                     it.subscription,
-                    MeowCore.nativeProfileIpv6(it.yaml),
-                    if (profileId == null) store.load(it.id) else ConfigurationOverride(),
+                    CoreBehaviorRuntime.preview(it.yaml),
+                    if (profileId == null) readProfileOverride(it.id) else ConfigurationOverride(),
                 )
             }
         }
@@ -140,13 +148,14 @@ internal class ConfigurationOverrideViewModel(
         if (!current.saving) form.value = current.copy(draftDns = settings)
     }
 
-    fun save() {
-        val current = form.value?.takeIf { it.canSave } ?: return
+    fun save(section: OverrideSection) {
+        val current = form.value?.takeIf { it.canSave(section) } ?: return
+        val candidate = current.draftFor(section)
         form.value = current.copy(saving = true)
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { store.save(profileId, current.draft) }
-                form.update { it?.copy(saved = current.draft, saving = false) }
+                withContext(Dispatchers.IO) { store.save(profileId, candidate) }
+                form.update { it?.copy(saved = candidate, saving = false) }
                 _events.send(OverrideEvent.Saved)
             } catch (e: IOException) {
                 Timber.w(e, "Saving configuration override failed")
@@ -154,6 +163,13 @@ internal class ConfigurationOverrideViewModel(
                 _events.send(OverrideEvent.SaveFailed)
             }
         }
+    }
+
+    private fun readProfileOverride(id: Long): ConfigurationOverride? = try {
+        store.load(id)
+    } catch (e: IOException) {
+        Timber.w(e, "Reading selected profile overrides failed")
+        null
     }
 
     fun saveDns(displayedProfileId: Long?) {

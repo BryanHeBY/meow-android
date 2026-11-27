@@ -1099,10 +1099,10 @@ async fn dispatch_tcp(stream: lwip::TcpStream, src_addr: SocketAddr, dst_addr: S
         dst_port: dst_addr.port(),
         ..Default::default()
     };
-    apply_owner(
-        &mut metadata,
-        owner::lookup(owner::IPPROTO_TCP, src_addr, dst_addr).await,
-    );
+    apply_flow_owner(tunnel.process_lookup_mode(), &mut metadata, || {
+        owner::lookup(owner::IPPROTO_TCP, src_addr, dst_addr)
+    })
+    .await;
 
     let proxy_conn: Box<dyn ProxyConn> = Box::new(NetstackConn(stream));
     let inner = tunnel.inner().clone();
@@ -1112,13 +1112,28 @@ async fn dispatch_tcp(stream: lwip::TcpStream, src_addr: SocketAddr, dst_addr: S
 
 /// Tag a flow with the app that opened it (see [`owner`]): the uid feeds
 /// UID rules, the package name PROCESS-NAME rules and the connections list.
+async fn apply_flow_owner<F>(
+    mode: meow_common::ProcessLookupMode,
+    metadata: &mut Metadata,
+    lookup: impl FnOnce() -> F,
+) where
+    F: std::future::Future<Output = Option<owner::Owner>>,
+{
+    if engine::android_process_lookup(mode) != meow_common::ProcessLookupMode::Off {
+        apply_owner(metadata, lookup().await);
+    }
+}
+
 fn apply_owner(metadata: &mut Metadata, owner: Option<owner::Owner>) {
     let Some(owner) = owner else {
+        metadata.flow_lookup.record_process(None);
         return;
     };
     metadata.uid = Some(owner.uid);
     if let Some(package) = owner.package {
         metadata.process = (&*package).into();
+    } else {
+        metadata.flow_lookup.record_process(None);
     }
 }
 
@@ -1202,10 +1217,10 @@ async fn dispatch_udp(
     // Rules run once per flow, on the packet that opens its session; the
     // packets after it skip the owner lookup's binder round trip.
     if !inner.nat_table.contains_key(&key) {
-        apply_owner(
-            &mut metadata,
-            owner::lookup(owner::IPPROTO_UDP, src, dst).await,
-        );
+        apply_flow_owner(tunnel.process_lookup_mode(), &mut metadata, || {
+            owner::lookup(owner::IPPROTO_UDP, src, dst)
+        })
+        .await;
     }
 
     meow_tunnel::udp::handle_udp(inner, &payload, src, metadata).await;
@@ -1997,6 +2012,56 @@ mod tests {
         );
         assert_eq!(metadata.uid, Some(10_123));
         assert_eq!(metadata.process, "com.example.app");
+    }
+
+    #[tokio::test]
+    async fn process_mode_controls_owner_lookup_and_rule_results() {
+        use meow_common::ProcessLookupMode::{Always, Off};
+
+        let yaml = "mode: rule\nrules: ['PROCESS-NAME,com.example.app,REJECT', 'UID,10123,REJECT', 'MATCH,DIRECT']\n";
+        let stripped = engine::strip_and_inject(yaml, engine::DnsUpstreams::Builtin).unwrap();
+        let config = meow_config::load_config_from_str(&stripped).await.unwrap();
+        let tunnel = meow_tunnel::Tunnel::new(config.dns.resolver);
+        tunnel.set_mode(config.general.mode);
+        tunnel.update_routing(
+            config.proxies,
+            config.rules,
+            config.sub_rules,
+            config.dialer_registry,
+        );
+
+        for network in [Network::Tcp, Network::Udp] {
+            for (mode, owner, expected) in [
+                (Off, Some((10_123, Some("com.example.app"))), "DIRECT"),
+                (Always, Some((10_124, Some("com.example.app"))), "REJECT"),
+                (Always, Some((10_123, None)), "REJECT"),
+                (Always, None, "DIRECT"),
+            ] {
+                tunnel.set_process_lookup_mode(mode);
+                let mut metadata = Metadata {
+                    network,
+                    dst_ip: Some("192.0.2.53".parse().unwrap()),
+                    dst_port: 443,
+                    ..Default::default()
+                };
+                let mut calls = 0;
+                apply_flow_owner(tunnel.process_lookup_mode(), &mut metadata, || {
+                    calls += 1;
+                    std::future::ready(owner.map(|(uid, package)| owner::Owner {
+                        uid,
+                        package: package.map(Into::into),
+                    }))
+                })
+                .await;
+                let selected = tunnel
+                    .inner()
+                    .resolve_proxy_flow(&mut metadata)
+                    .await
+                    .unwrap();
+                assert_eq!(selected.adapter.name(), expected);
+                assert_eq!(calls, usize::from(mode == Always));
+            }
+        }
     }
 
     #[test]

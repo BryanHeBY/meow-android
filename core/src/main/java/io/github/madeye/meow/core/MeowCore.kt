@@ -43,6 +43,12 @@ object MeowCore {
     /** Overrides the top-level IPv6 key in a runtime copy of the profile. */
     external fun nativeOverrideIpv6(yaml: String, enabled: Boolean): String
 
+    /** Applies the typed core behavior choices to the runtime copy. */
+    external fun nativeOverrideCoreBehavior(yaml: String, options: String): String
+
+    /** Startup values from the profile, without using the network. */
+    external fun nativePreviewProfileOverrides(yaml: String): String?
+
     /** Profile IPv6 for the preview: 0 off, 1 on, -1 unset, -2 unreadable. */
     external fun nativeProfileIpv6(yaml: String): Int
 
