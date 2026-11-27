@@ -136,7 +136,30 @@ class ProxyGroupsReadinessTest {
         assertTrue(selectedEvents.isEmpty())
     }
 
-    private fun show(selectionCode: () -> Int, failFirstConfig: Boolean = false, emptyGroups: Boolean = false) {
+    @Test
+    fun `dialer labels use the running profile rather than the selection`() = runBlocking {
+        val queried = CopyOnWriteArrayList<Long>()
+        show(selectionCode = { 204 }, loadProfileYaml = { id ->
+            queried += id
+            "proxies:\n  - { name: a, type: socks5, dialer-proxy: Relay-$id }\n" +
+                "  - { name: b, type: socks5, dialer-proxy: Not-B }\n" +
+                "  - { name: c, type: socks5, dialer-proxy: Not-C }"
+        })
+        lifecycle.value = running("first")
+        val groups = awaitGroups().groups
+        assertEquals(listOf(9L), queried.toList())
+        val nodes = groups.single().nodes.associateBy { it.name }
+        assertEquals("Relay-9", nodes.getValue("a").dialer)
+        assertEquals(null, nodes.getValue("b").dialer) // same-name provider leaf
+        assertEquals(null, nodes.getValue("c").dialer) // legacy/unknown source
+    }
+
+    private fun show(
+        selectionCode: () -> Int,
+        failFirstConfig: Boolean = false,
+        emptyGroups: Boolean = false,
+        loadProfileYaml: suspend (Long) -> String? = { null },
+    ) {
         val api = MeowApi.SessionFactory(
             baseClient = OkHttpClient.Builder().addInterceptor { chain ->
                 val request = chain.request()
@@ -152,7 +175,12 @@ class ProxyGroupsReadinessTest {
                     request.url.encodedPath == "/providers/proxies" -> 200 to """{"providers":{}}"""
                     request.url.encodedPath == "/api/proxy-groups" -> 200 to "[]"
                     emptyGroups -> 200 to """{"proxies":{}}"""
-                    else -> 200 to """{"proxies":{"Proxy":{"type":"Selector","all":["a","b"],"now":"a"}}}"""
+                    else -> 200 to (
+                        """{"proxies":{"Proxy":{"type":"Selector","all":["a","b","c"],"now":"a"},""" +
+                            """"a":{"type":"Socks5","provider-name":""},""" +
+                            """"b":{"type":"Socks5","provider-name":"airport"},""" +
+                            """"c":{"type":"Socks5"}}}"""
+                    )
                 }
                 Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code)
                     .message("test").body(body.toResponseBody()).build()
@@ -161,6 +189,7 @@ class ProxyGroupsReadinessTest {
         viewModel = ProxyGroupsViewModel(
             ControllerAccess(lifecycle), selected, api::forSession, {}, { selectedEvents += it },
             { id, node, isCurrent -> if (isCurrent()) saved += id to node },
+            loadProfileYaml = loadProfileYaml,
         )
         viewModel.viewModelScope.launch { viewModel.uiState.collect {} }
     }

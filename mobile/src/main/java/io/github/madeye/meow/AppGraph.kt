@@ -170,6 +170,7 @@ object AppGraph {
                     ProxyGroupsViewModel(
                         controller, profiles.observeSelected(), api::forSession, routeChanges::notifyChanged,
                         analytics::proxyNodeSelect, profiles::saveSelectedProxy,
+                        loadProfileYaml = { id -> profiles.getById(id)?.yamlContent },
                     )
 
                 ProxyServersViewModel::class.java -> ProxyServersViewModel(controller, api::forSession, profiles)
