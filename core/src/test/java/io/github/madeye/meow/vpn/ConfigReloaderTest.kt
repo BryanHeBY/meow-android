@@ -31,17 +31,19 @@ class ConfigReloaderTest {
 
     /** What the engine says about any YAML; null accepts it. */
     private var engineError: String? = null
+    private var dnsCheck = false
     private var validatorFails = false
     private var validateMs = 0L
     private val validated = mutableListOf<String>()
 
     private fun TestScope.reloader() = ConfigReloader(
         selected = { if (readsFail) throw IllegalStateException("database closed") else selected },
-        validate = { yaml ->
-            validated += yaml
+        validate = { candidate ->
+            validated += candidate.yaml
             delay(validateMs)
             if (validatorFails) throw UnsatisfiedLinkError("libmeow_core.so not loaded")
-            engineError
+            engineError?.let { ConfigReloader.Outcome.Rejected(it) }
+                ?: if (dnsCheck) ConfigReloader.Outcome.CheckDns else ConfigReloader.Outcome.Reload
         },
         sendReload = { sent++ },
         scope = this,
@@ -255,6 +257,33 @@ class ConfigReloaderTest {
 
         assertEquals(listOf(b.yaml, c.yaml), validated)
         assertEquals(1, sent)
+    }
+
+    @Test
+    fun `a stale validation never reloads a newer selection`() = runTest {
+        val reloader = reloader()
+        validateMs = SETTLE
+        reloader.applying { selected = b }
+        advanceTimeBy(SETTLE + SETTLE / 2)
+        selected = c
+        advanceUntilIdle()
+
+        assertEquals(listOf(b.yaml), validated)
+        assertEquals(0, sent)
+    }
+
+    @Test
+    fun `a DNS rejection check is sent without announcing a reconnect`() = runTest {
+        val reloader = reloader()
+        val announced = mutableListOf<Unit>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { reloader.reloads.toList(announced) }
+        dnsCheck = true
+
+        reloader.applying { selected = b }
+        advanceUntilIdle()
+
+        assertEquals(1, sent)
+        assertTrue(announced.isEmpty())
     }
 
     @Test

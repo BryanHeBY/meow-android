@@ -6,6 +6,8 @@ import io.github.madeye.meow.bg.ActiveConfig
 import io.github.madeye.meow.bg.MeowInstance
 import io.github.madeye.meow.bg.ReloadPolicy
 import io.github.madeye.meow.database.PrivateDatabase
+import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.repo.ConfigValidator
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.CancellationException
@@ -53,8 +55,7 @@ import timber.log.Timber
  */
 class ConfigReloader(
     private val selected: () -> ActiveConfig?,
-    /** Null when the engine accepts the YAML, else the engine's error. */
-    private val validate: suspend (String) -> String?,
+    private val validate: suspend (ActiveConfig) -> Outcome,
     private val sendReload: () -> Unit,
     private val scope: CoroutineScope,
     private val settleMs: Long = SETTLE_MS,
@@ -131,6 +132,7 @@ class ConfigReloader(
                         sendReload()
                         _reloads.tryEmit(Unit)
                     }
+                    Outcome.CheckDns -> sendReload()
                     is Outcome.Rejected -> {
                         Timber.w("ConfigReloader: update rejected, keeping the running config: ${outcome.error}")
                         _rejected.tryEmit(outcome.error)
@@ -141,9 +143,12 @@ class ConfigReloader(
         }
     }
 
-    private sealed interface Outcome {
+    sealed interface Outcome {
         data object Keep : Outcome
         data object Reload : Outcome
+        // Let the running service report the typed rejection if the checked
+        // selection and DNS preference still require it.
+        data object CheckDns : Outcome
         class Rejected(val error: String) : Outcome
     }
 
@@ -151,8 +156,8 @@ class ConfigReloader(
         // Compared against the burst's start rather than per write, so
         // A -> B -> A within the window is no change at all.
         if (now == null || !ReloadPolicy.needsReload(from, now)) return Outcome.Keep
-        val error = try {
-            validate(now.yaml)
+        val outcome = try {
+            validate(now)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -161,7 +166,8 @@ class ConfigReloader(
             Timber.w(e, "ConfigReloader: validating the updated profile failed")
             return Outcome.Keep
         }
-        return if (error == null) Outcome.Reload else Outcome.Rejected(error)
+        if (readSelected() != now) return Outcome.Keep
+        return outcome
     }
 
     /** A failed read means "unknown", which must not restart anything. */
@@ -180,12 +186,22 @@ class ConfigReloader(
         val default: ConfigReloader by lazy {
             ConfigReloader(
                 selected = { ActiveConfig.of(PrivateDatabase.profileDao.getSelected()) },
-                validate = { yaml ->
+                validate = { candidate ->
                     // Only MainActivity prepares the engine home. A background
                     // refresh can run without it, and GeoIP rules would then
                     // fail validation. Idempotent.
-                    withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
-                    ConfigValidator().validate(yaml)
+                    val store = DnsSettingsStore.default
+                    val settings = store.load().settings
+                    if (store.activationIssue(settings, candidate, MeowCore::nativeCheckCachedDns) != null) {
+                        // Let the VPN process report the typed DNS rejection
+                        // against the selection and the session it still runs.
+                        val error = ConfigValidator().validateStructure(candidate.yaml)
+                        if (error == null) Outcome.CheckDns else Outcome.Rejected(error)
+                    } else {
+                        withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
+                        val error = ConfigValidator().validate(candidate.yaml, settings)
+                        if (error == null) Outcome.Reload else Outcome.Rejected(error)
+                    }
                 },
                 sendReload = {
                     // The receiver lives in :vpn and is RECEIVER_NOT_EXPORTED,

@@ -11,6 +11,7 @@ import io.github.madeye.meow.bg.ForwardingControl
 import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
 import io.github.madeye.meow.diagnostics.FaultProcess
+import io.github.madeye.meow.preference.DnsIssue
 import java.io.IOException
 import timber.log.Timber
 
@@ -22,6 +23,7 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
         fun trafficUpdated(profileId: Long, stats: TrafficStats)
         fun trafficPersisted(profileId: Long)
         fun forwardingChanged(flags: Int)
+        fun dnsActivationRejected(issue: DnsIssue)
     }
 
     private var callback: Callback? = null
@@ -133,14 +135,20 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
         }
     }
 
-    /** Saves the DNS preference and applies it to any running VPN. */
-    fun setBuiltinDns(enabled: Boolean): String? {
+    /** Saves the DNS preference and applies it to a matching running session. */
+    fun setDnsSettings(settings: String, selectedId: Long): String? {
         val service = service ?: throw IOException("The VPN service is unavailable")
         return try {
-            service.setBuiltinDns(enabled)
+            service.setDnsSettings(settings, selectedId)
         } catch (e: RemoteException) {
             throw IOException("Could not confirm the DNS change", e)
         }
+    }
+
+    fun dnsStatus(): String? = try {
+        service?.dnsStatus
+    } catch (_: RemoteException) {
+        null
     }
 
     fun applyZeroTier(): Int = callForwarding { applyZeroTier() }
@@ -156,6 +164,10 @@ class MeowConnection(private var listenForBandwidth: Boolean = false) : ServiceC
 
     override fun forwardingChanged(flags: Int) {
         callback?.forwardingChanged(flags)
+    }
+
+    override fun dnsActivationRejected(issue: String) {
+        callback?.dnsActivationRejected(DnsIssue.fromWire(issue))
     }
 
     /** The running session's stats; null when no VPN runs or `:vpn` is not bound. */

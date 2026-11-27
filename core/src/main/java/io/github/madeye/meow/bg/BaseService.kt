@@ -16,13 +16,18 @@ import io.github.madeye.meow.aidl.IMeowServiceCallback
 import io.github.madeye.meow.aidl.SessionStats
 import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
-import io.github.madeye.meow.preference.BuiltinDnsStore
+import io.github.madeye.meow.preference.DnsApplicability
+import io.github.madeye.meow.preference.DnsIssue
+import io.github.madeye.meow.preference.DnsStatus
+import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.database.ClashProfile
+import io.github.madeye.meow.database.PrivateDatabase
 import io.github.madeye.meow.utils.Action
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.Json
 import timber.log.Timber
 
 object BaseService {
@@ -47,6 +52,10 @@ object BaseService {
 
     interface ExpectedException
 
+    internal class Reload(val profile: ClashProfile, val previous: MeowInstance)
+
+    internal class DnsRejection(val selection: ActiveConfig?, val issue: DnsIssue)
+
     class Data internal constructor(private val service: Interface) {
         @Volatile var state = State.Stopped
             set(value) {
@@ -66,6 +75,10 @@ object BaseService {
             binder.forwardingChanged(flags)
         }
         var connectingJob: Job? = null
+        internal var reload: Reload? = null
+        internal var reloadCheck: Job? = null
+        @Volatile internal var dnsRejection: DnsRejection? = null
+        @Volatile internal var dnsSaveRejection: DnsRejection? = null
 
         /**
          * A reload arrived mid-start; [Interface.reloadIfChanged] runs again
@@ -183,25 +196,69 @@ object BaseService {
 
         override fun cancelProxyProbe(id: Long) = MeowCore.nativeCancelProxyProbe(id)
 
-        // The same lock covers the DNS preference read and native startup.
-        // On a failed live rebuild the old preference and resolver stay in place.
-        override fun setBuiltinDns(enabled: Boolean): String? =
-            BuiltinDnsStore.default.commit(
-                enabled,
-                applied = {
-                    when (if (data?.meowInstance == null) -1 else MeowCore.nativeAppliedBuiltinDns()) {
-                        0 -> false
-                        1 -> true
-                        else -> null
+        override fun setDnsSettings(settings: String, selectedId: Long): String? {
+            val serviceData = data ?: return DnsIssue.SERVICE_UNAVAILABLE.name
+            val state = serviceData.state
+            val running = serviceData.meowInstance
+            if (state == State.Connecting || state == State.Stopping) return DnsIssue.PROFILE_CHANGED.name
+            val expected = selectedId.takeIf { it > 0 }
+            val request = ActiveConfig.of(Core.currentProfile)
+            val issue = DnsSettingsStore.default.commit(
+                settings, expected, { ActiveConfig.of(Core.currentProfile) },
+                MeowCore::nativeCheckCachedDns,
+            ) { selected, scoped, staged, target ->
+                PrivateDatabase.withProfileTransaction {
+                    if (ActiveConfig.of(Core.currentProfile) != selected || serviceData.state != state ||
+                        serviceData.meowInstance !== running || data !== serviceData
+                    ) {
+                        DnsIssue.PROFILE_CHANGED
+                    } else {
+                        // A rejected reload can leave an older profile running. Save for
+                        // the selection without rebuilding that older session's resolver.
+                        val applyLive = state == State.Connected &&
+                            (running?.activeConfig == selected || (selected == null && running?.activeConfig?.profileId == 0L))
+                        val error = MeowCore.nativeCommitDns(
+                            scoped.encode(), staged.absolutePath, target.absolutePath, selectedId, applyLive,
+                        )?.let(DnsIssue::fromWire)
+                        if (error == null && applyLive) running?.appliedDns = scoped
+                        error
                     }
-                },
-            ) {
-                when {
-                    data?.meowInstance == null -> null
-                    MeowCore.nativeSetBuiltinDns(it) == 0 -> null
-                    else -> MeowCore.nativeGetLastError().ifEmpty { "The resolver rejected the change" }
                 }
             }
+            serviceData.dnsSaveRejection = issue?.takeIf { request?.profileId == expected }
+                ?.let { DnsRejection(request, it) }
+            if (issue == null) launch {
+                val rejected = serviceData.dnsRejection?.takeIf { it.selection == request }
+                if (rejected != null) serviceData.dnsRejection = null
+                if (rejected != null && serviceData.state == State.Connected) service.reloadIfChanged()
+            }
+            return issue?.name
+        }
+
+        override fun getDnsStatus(): String {
+            val selected = ActiveConfig.of(Core.currentProfile)
+            val store = DnsSettingsStore.default
+            val saved = store.load()
+            val native = MeowCore.nativeDnsStatus()?.let { Json.decodeFromString(DnsStatus.serializer(), it) }
+                ?: DnsStatus()
+            val rejection = data?.dnsRejection?.takeIf { it.selection == selected }?.issue
+            val issue = rejection ?: store.activationIssue(saved.settings, selected, MeowCore::nativeCheckCachedDns)
+            val lastSave = data?.dnsSaveRejection?.takeIf { it.selection == selected }?.issue
+            val scope = saved.settings.applicability(selected?.profileId)
+            val applicability = when {
+                issue == DnsIssue.SPLIT_UNAVAILABLE -> DnsApplicability.UNAVAILABLE
+                scope != DnsApplicability.AVAILABLE -> scope
+                issue != null -> DnsApplicability.UNAVAILABLE
+                native.runningProfileId != selected?.profileId || data?.meowInstance?.activeConfig != selected ->
+                    DnsApplicability.PENDING
+                else -> DnsApplicability.AVAILABLE
+            }
+            return Json.encodeToString(DnsStatus.serializer(), native.copy(
+                selectedProfileId = selected?.profileId,
+                applicability = applicability,
+                issue = issue ?: lastSave ?: DnsIssue.INVALID_SETTINGS.takeIf { saved.invalid },
+            ))
+        }
 
         // On the binder thread: two counter reads, nothing that blocks.
         override fun getSessionStats(): SessionStats? = data?.meowInstance?.sessionStats()
@@ -220,6 +277,10 @@ object BaseService {
 
         fun forwardingChanged(flags: Int) = launch {
             broadcast { it.forwardingChanged(flags) }
+        }
+
+        fun dnsActivationRejected(issue: DnsIssue) = launch {
+            broadcast { it.dnsActivationRejected(issue.name) }
         }
 
         fun stateChanged(s: State, msg: String?) = launch {
@@ -259,21 +320,54 @@ object BaseService {
          * with, so duplicate or cancelled-out requests cost nothing.
          *
          * The restart is [stopRunner]'s: the TUN goes down and comes back,
-         * [onStartCommand] reads the selected profile from Room afresh,
+         * [onStartCommand] uses the checked selection snapshot,
          * [MeowInstance.start] replays the route mode from `RouteModeStore`,
          * and the engine restores selector picks from its own cache file
          * (`selector-cache.json` in the engine home dir, keyed by group name).
          */
         fun reloadIfChanged() {
             val data = data
-            val running = ActiveConfig.of(data.meowInstance?.profile)
-            when (ReloadPolicy.onRequest(data.state, running) { ActiveConfig.of(Core.currentProfile) }) {
-                ReloadPolicy.Decision.Restart -> {
-                    Timber.i("Reloading: the selected profile changed")
-                    stopRunner(true)
+            val running = data.meowInstance
+            var selected: ClashProfile? = null
+            when (ReloadPolicy.onRequest(data.state, running?.activeConfig) {
+                selected = Core.currentProfile
+                ActiveConfig.of(selected)
+            }) {
+                ReloadPolicy.Decision.Defer -> {
+                    data.reloadPending = true
+                    return
                 }
-                ReloadPolicy.Decision.Defer -> data.reloadPending = true
-                ReloadPolicy.Decision.Ignore -> {}
+                ReloadPolicy.Decision.Ignore -> {
+                    data.reloadCheck?.cancel()
+                    return
+                }
+                ReloadPolicy.Decision.Restart -> Unit
+            }
+            data.reloadCheck?.cancel()
+            val profile = selected ?: return
+            if (running == null) return
+            val candidate = ActiveConfig.of(profile)
+            data.reloadCheck = data.binder.launch {
+                val store = DnsSettingsStore.default
+                while (data.state == State.Connected && data.meowInstance === running) {
+                    val settings = store.load().settings
+                    val issue = withContext(Dispatchers.IO) {
+                        store.activationIssue(settings, candidate, MeowCore::nativeCheckCachedDns)
+                    }
+                    if (data.state != State.Connected || data.meowInstance !== running) return@launch
+                    if (ActiveConfig.of(Core.currentProfile) != candidate) return@launch
+                    if (store.load().settings != settings) continue
+                    if (issue != null) {
+                        data.dnsRejection = DnsRejection(candidate, issue)
+                        data.binder.dnsActivationRejected(issue)
+                    } else {
+                        data.dnsRejection = null
+                        data.reload = Reload(profile, running)
+                        Timber.i("Reloading: the selected profile changed")
+                        stopRunner(true)
+                    }
+                    return@launch
+                }
             }
         }
 
@@ -309,6 +403,7 @@ object BaseService {
 
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
             if (data.state == State.Stopping) return
+            if (!restart) data.reload = null
             data.changeState(State.Stopping)
             if (restart) data.notification?.showConnecting()
             GlobalScope.launch(Dispatchers.Main.immediate) {
@@ -370,7 +465,11 @@ object BaseService {
                 return Service.START_NOT_STICKY
             }
 
-            val profile = Core.currentProfile ?: if (BuildConfig.ZEROTIER && OverlayPlatform.hasActiveNetwork()) {
+            val reload = data.reload.also { data.reload = null }
+            val selected = Core.currentProfile
+            val superseded = reload != null && ActiveConfig.of(selected) != ActiveConfig.of(reload.profile)
+            val profile = if (superseded) requireNotNull(reload).previous.profile else reload?.profile ?: selected
+            val starting = profile ?: if (BuildConfig.ZEROTIER && OverlayPlatform.hasActiveNetwork()) {
                 // Joining without an imported Clash profile is a legitimate
                 // ZeroTier-only use. Non-overlay traffic stays direct.
                 ClashProfile(
@@ -380,13 +479,15 @@ object BaseService {
                 )
             } else null
             this as Context
-            if (profile == null) {
+            if (starting == null) {
                 stopRunner(false, "No profile selected")
                 return Service.START_NOT_STICKY
             }
-            notification.setProfileName(profile.name)
+            notification.setProfileName(starting.name)
 
-            data.meowInstance = MeowInstance(profile)
+            data.meowInstance = MeowInstance(starting).also {
+                if (superseded) it.appliedDns = reload?.previous?.appliedDns
+            }
 
             if (!data.closeReceiverRegistered) {
                 ContextCompat.registerReceiver(this, data.closeReceiver, IntentFilter().apply {
@@ -401,13 +502,31 @@ object BaseService {
             data.connectingJob = GlobalScope.launch(Dispatchers.Main.immediate) {
                 try {
                     preInit()
-                    startProcesses()
+                    val attempted = ActiveConfig.of(starting)
+                    val restored = try {
+                        startProcesses()
+                        data.dnsRejection = null
+                        null
+                    } catch (exc: DnsActivationException) {
+                        data.dnsRejection = DnsRejection(attempted, exc.issue)
+                        val previous = reload?.previous?.takeUnless { superseded } ?: throw exc
+                        val previousDns = previous.appliedDns ?: throw exc
+                        notification.setProfileName(previous.profileName)
+                        data.meowInstance = MeowInstance(previous.profile).also { it.appliedDns = previousDns }
+                        startProcesses()
+                        exc.issue
+                    }
                     data.changeState(State.Connected)
-                    if (data.reloadPending) {
-                        data.reloadPending = false
+                    if (restored != null) data.binder.dnsActivationRejected(restored)
+                    val queued = data.reloadPending
+                    data.reloadPending = false
+                    if ((queued && restored == null) || (reload != null && ActiveConfig.of(Core.currentProfile) != attempted)) {
                         reloadIfChanged()
                     }
                 } catch (_: CancellationException) {
+                } catch (exc: DnsActivationException) {
+                    data.binder.dnsActivationRejected(exc.issue)
+                    stopRunner(false)
                 } catch (exc: Throwable) {
                     Timber.w(exc)
                     stopRunner(false, "Service failed: ${exc.localizedMessage}")

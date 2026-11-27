@@ -8,7 +8,9 @@ import io.github.madeye.meow.aidl.TrafficStats
 import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.preference.ApiSecretStore
-import io.github.madeye.meow.preference.BuiltinDnsStore
+import io.github.madeye.meow.preference.DnsIssue
+import io.github.madeye.meow.preference.DnsSettings
+import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.Ipv6Override
 import io.github.madeye.meow.preference.RouteModeStore
@@ -20,8 +22,13 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 
-class MeowInstance(val profile: ClashProfile) {
+internal class DnsActivationException(val issue: DnsIssue) : RuntimeException(issue.message)
+
+class MeowInstance(profile: ClashProfile) {
+    val profile = profile.copy()
+    val activeConfig = requireNotNull(ActiveConfig.of(this.profile))
     val profileName: String get() = profile.name
+    @Volatile internal var appliedDns: DnsSettings? = null
 
     companion object {
         /// The engine home dir (`.../no_backup/meow`). meow-rs resolves
@@ -94,11 +101,9 @@ class MeowInstance(val profile: ClashProfile) {
         // this start() path share copyGeoxAssets via the companion object.
 
         val configFile = File(configDir, "config.yaml")
-        // Only strip the app-managed `subscriptions:` block. Listener ports
-        // and `sniffer:` are stripped, and `dns:` pinned to in-process
-        // fake-IP, on the Rust side by `engine::strip_and_inject`.
-        val yaml = profile.yamlContent
-            .replace(Regex("(?m)^subscriptions:.*?(?=^[a-z]|\\Z)", RegexOption.DOT_MATCHES_ALL), "")
+        // Runtime-only stripping and DNS injection run in the core for both
+        // the cached candidate check and the engine load.
+        val yaml = activeConfig.yaml
         val override = ConfigurationOverrideStore.default.effective(profile.id.takeIf { it > 0 })
         blockAppUdp443 = override.blocksAppUdp443
         val runtimeYaml = when (override.ipv6) {
@@ -106,8 +111,6 @@ class MeowInstance(val profile: ClashProfile) {
             Ipv6Override.FORCE_ON -> MeowCore.nativeOverrideIpv6(yaml, true)
             Ipv6Override.FORCE_OFF -> MeowCore.nativeOverrideIpv6(yaml, false)
         }
-        configFile.writeText(runtimeYaml)
-        MeowCore.nativeSetHomeDir(configDir.absolutePath)
         // The Home route-mode pick overrides the profile's `mode:`; empty
         // means the user never picked one.
         val routeMode = RouteModeStore.default.load()?.wire.orEmpty()
@@ -116,11 +119,21 @@ class MeowInstance(val profile: ClashProfile) {
         // Before the start, so the traffic ledger counts days in the
         // device's zone from its first flush.
         pushTimeZone()
-        BuiltinDnsStore.default.withSavedValue { builtinDns ->
-            val result = MeowCore.nativeStartEngine("127.0.0.1:9090", ApiSecretStore.mint(), routeMode, builtinDns)
+        DnsSettingsStore.default.withSavedValue { saved ->
+            val dns = appliedDns ?: saved
+            val selected = activeConfig.takeIf { it.profileId > 0 }
+            val issue = DnsSettingsStore.default.activationIssue(dns, selected, MeowCore::nativeCheckCachedDns)
+            if (issue != null) throw DnsActivationException(issue)
+            configFile.writeText(runtimeYaml)
+            MeowCore.nativeSetHomeDir(configDir.absolutePath)
+            val result = MeowCore.nativeStartEngine(
+                "127.0.0.1:9090", ApiSecretStore.mint(), routeMode, dns.encode(), activeConfig.profileId,
+            )
             if (result != 0) {
+                if (dns.requiresProfile) throw DnsActivationException(DnsIssue.fromWire(MeowCore.nativeGetLastError()))
                 throw RuntimeException("Failed to start engine: ${MeowCore.nativeGetLastError()}")
             }
+            appliedDns = dns
         }
         val meter = NetworkTrafficMeter(startedAt = System.currentTimeMillis())
         var outbound: Network? = null

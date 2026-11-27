@@ -19,7 +19,7 @@ class ConfigurationOverrideStoreTest {
         existingDns.writeText("profile")
         assertEquals(ConfigurationOverride(), store.effective(7L))
         assertEquals(ConfigurationOverride(), store.effective(null))
-        assertFalse(BuiltinDnsStore(existingDns).load())
+        assertEquals(DnsMode.LEGACY_PROFILE, DnsSettingsStore(existingDns).load().settings.mode)
         assertEquals("profile", existingDns.readText())
         assertFalse(directory.exists())
     }

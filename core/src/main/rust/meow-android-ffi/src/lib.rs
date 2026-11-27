@@ -8,8 +8,8 @@
 //! in-process via `meow_tunnel::tcp::handle_tcp` — no SOCKS5 loopback
 //! hop. DNS is delegated to meow's resolver, pinned to fake-IP mode
 //! (28.0.0.0/8) by `engine::strip_and_inject` but on the profile's own
-//! upstreams (the built-in CN-side pool when it names none, or when Settings'
-//! "Built-in DNS" switch is on; `live_dns` applies a flip without a restart);
+//! upstreams or an explicit override. `live_dns` changes the resolver
+//! without restarting the tunnel.
 //! the tun2socks UDP/53 intercept hands every in-TUN DNS datagram straight to
 //! `meow_dns::DnsServer::handle_query`.
 
@@ -17,6 +17,7 @@ mod configuration_override;
 mod diagnostics;
 #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 mod direct_exit;
+mod dns_override;
 mod engine;
 mod ip_info;
 mod live_dns;
@@ -101,7 +102,7 @@ pub(crate) struct EngineState {
     api_secret: String,
     /// Whether the VPN routes IPv6 into the TUN (see `engine::tun_ipv6`).
     tun_ipv6: bool,
-    /// What Settings' "Built-in DNS" switch rebuilds the resolver from.
+    /// The profile and published state for live DNS settings.
     pub(crate) live_dns: Arc<live_dns::LiveDns>,
     /// The API's providers: a network switch resets the sessions of their
     /// proxies too, as no group may reach them (`outbound`).
@@ -113,7 +114,7 @@ pub(crate) static ENGINE: Mutex<Option<EngineState>> = Mutex::new(None);
 pub(crate) static HOME_DIR: Mutex<Option<String>> = Mutex::new(None);
 // Overwritten on every engine start (and cleared on stop) so tun2socks' DNS
 // intercept always queries the current session's resolver, not the first one.
-pub(crate) static DNS_RESOLVER: RwLock<Option<Arc<meow_dns::Resolver>>> = RwLock::new(None);
+pub(crate) static DNS_RESOLVER: RwLock<Option<meow_dns::ResolverSlot>> = RwLock::new(None);
 
 // ---------------------------------------------------------------------------
 // Thread-local error message
@@ -223,11 +224,22 @@ fn drain_log_buffer() -> Vec<String> {
 // Engine lifecycle
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 fn start_engine(
     external_controller: Option<String>,
     secret: Option<String>,
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
+) -> i32 {
+    start_engine_for_profile(external_controller, secret, mode, dns, 0)
+}
+
+fn start_engine_for_profile(
+    external_controller: Option<String>,
+    secret: Option<String>,
+    mode: Option<TunnelMode>,
+    dns: engine::DnsUpstreams,
+    profile_id: i64,
 ) -> i32 {
     logging::bridge_log("start_engine: acquiring ENGINE lock");
     let mut engine = ENGINE.lock();
@@ -237,18 +249,33 @@ fn start_engine(
     }
 
     let rt = get_runtime();
-    match rt.block_on(async { start_engine_async(external_controller, secret, mode, dns).await }) {
+    let scoped = dns.requires_profile();
+    match rt.block_on(start_engine_async(
+        external_controller,
+        secret,
+        mode,
+        dns,
+        profile_id,
+    )) {
         Ok(state) => {
             logging::bridge_log("start_engine: engine started successfully");
             *engine = Some(state);
             0
         }
         Err(e) => {
+            let e = if scoped {
+                anyhow::Error::from(
+                    e.downcast::<dns_override::DnsIssue>()
+                        .unwrap_or(dns_override::DnsIssue::ResolverRejected),
+                )
+            } else {
+                e
+            };
             logging::bridge_log(&format!("start_engine: ERROR: {}", e));
             meow_common::logbook::engine_stopped(meow_common::logbook::Stop::Failed(&format!(
                 "{e:#}"
             )));
-            set_error(format!("start proxy: {}", e));
+            set_error(e.to_string());
             -1
         }
     }
@@ -259,6 +286,7 @@ async fn start_engine_async(
     secret: Option<String>,
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
+    profile_id: i64,
 ) -> Result<EngineState, anyhow::Error> {
     install_tracing_subscriber();
 
@@ -285,14 +313,13 @@ async fn start_engine_async(
     // load_config, so no pre-VPN network fetch is needed here. See
     // `core/build.gradle.kts` (downloadGeoxAssets) for the bundling path.
 
-    // Load via engine::load_stripped_config: strips listener/sniffer blocks
-    // and pins the profile's DNS to in-process fake-IP, on the upstreams
-    // `dns` picks. Falls back to the minimal config (also passed through
-    // strip_and_inject) when no home dir is set or the file is unreadable.
+    // Apply DNS in a runtime copy. The minimal profile is used only when
+    // there is no configuration file.
     let (loaded, loaded_from) = match config_path.as_deref() {
         Some(path) if std::path::Path::new(path).exists() => {
             logging::bridge_log(&format!(
-                "start_engine_async: loading config from {path}, DNS upstreams: {dns:?}"
+                "start_engine_async: loading config from {path}, DNS mode: {}",
+                dns.mode()
             ));
             // The logbook opens under the engine home (`XDG_CONFIG_HOME`,
             // set above) before the load, so the load's own events — a
@@ -303,7 +330,7 @@ async fn start_engine_async(
             meow_common::traffic_ledger::apply(ledger, ledger_options);
             let stripped_path = engine::sibling_stripped_path(path);
             (
-                engine::load_stripped_config(path, dns).await?,
+                engine::load_stripped_config(path, &dns).await?,
                 stripped_path.to_str().map(str::to_string),
             )
         }
@@ -311,12 +338,10 @@ async fn start_engine_async(
             logging::bridge_log("start_engine_async: using minimal config");
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
-            let stripped = engine::strip_and_inject(MINIMAL_CONFIG, engine::DnsUpstreams::Builtin)?;
-            let loaded = engine::Loaded {
-                config: meow_config::load_config_from_str(&stripped).await?,
-                profile_dns: None,
-                upstreams: engine::DnsUpstreams::Builtin,
-            };
+            let loaded = engine::load_profile(MINIMAL_CONFIG, &dns, |stripped| {
+                Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+            })
+            .await?;
             (loaded, None)
         }
     };
@@ -328,8 +353,9 @@ async fn start_engine_async(
     let engine::Loaded {
         mut config,
         profile_dns,
-        upstreams,
     } = loaded;
+    dns.check_targets(|name| config.proxies.get(name).map(Arc::as_ref))?;
+    dns.check_resolver(&config.dns.resolver)?;
     logging::bridge_log(&format!(
         "start_engine_async: config loaded, proxies={}, rules={}",
         config.proxies.len(),
@@ -367,7 +393,7 @@ async fn start_engine_async(
         ),
     ));
 
-    *DNS_RESOLVER.write() = Some(config.dns.resolver.clone());
+    *DNS_RESOLVER.write() = Some(Arc::clone(&config.dns.resolver_slot));
 
     // Same startup order as meow-app's `run`: share the config's resolver
     // slot, install the provider dialer registry before the first
@@ -375,6 +401,7 @@ async fn start_engine_async(
     // then publish the routing table in one step.
     let raw_config = Arc::new(RwLock::new(config.raw.clone()));
     let tunnel = Tunnel::new_with_slot(Arc::clone(&config.dns.resolver_slot));
+    tunnel.set_dns_outbound_cell(config.provider_dns_cell.clone());
     tunnel.set_dialer_registry(config.provider_dialer_registry.clone());
     tunnel.set_mode(config.general.mode);
     tunnel.set_connection_notes(config.general.connection_notes);
@@ -408,9 +435,11 @@ async fn start_engine_async(
     // No DNS listener: tun2socks answers in-TUN queries in-process.
     let dns_server = Arc::new(RwLock::new(None));
     let live_dns = Arc::new(live_dns::LiveDns::new(
+        profile_id,
         profile_dns,
         loaded_from,
-        upstreams,
+        dns,
+        &config.dns.resolver,
         Arc::clone(&raw_config),
         Arc::clone(&rule_providers),
         Arc::clone(&dns_server),
@@ -420,8 +449,7 @@ async fn start_engine_async(
     let rule_provider_refresh =
         Arc::new(meow_config::rule_provider_refresh::RefreshSupervisor::default());
     rule_provider_refresh.reconcile(&rule_providers);
-    // The providers the load left out, recorded once now that it is the
-    // running config: a DNS fallback loads the profile twice.
+    // Record the providers the load left out now that it is running.
     config.dropped_providers.record();
     let proxy_provider_refresh =
         Arc::new(meow_config::proxy_provider_refresh::ProxyProviderRefreshSupervisor::default());
@@ -558,7 +586,8 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
     addr: JString,
     secret: JString,
     mode: JString,
-    builtin_dns: jboolean,
+    dns: JString,
+    profile_id: jlong,
 ) -> jint {
     let addr_str: String = env.get_string(&addr).map(|s| s.into()).unwrap_or_default();
     let secret_str: String = env
@@ -566,37 +595,24 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
         .map(|s| s.into())
         .unwrap_or_default();
     let mode_str: String = env.get_string(&mode).map(|s| s.into()).unwrap_or_default();
-    start_engine(
-        Some(addr_str),
-        Some(secret_str),
-        parse_mode_override(&mode_str),
-        dns_upstreams(builtin_dns),
-    )
-}
-
-/// Settings' "Built-in DNS" switch: on ignores the profile's upstreams.
-fn dns_upstreams(builtin_dns: jboolean) -> engine::DnsUpstreams {
-    if builtin_dns == JNI_FALSE {
-        engine::DnsUpstreams::Profile
-    } else {
-        engine::DnsUpstreams::Builtin
-    }
-}
-
-/// Applies Settings' "Built-in DNS" switch to the running engine, keeping
-/// the VPN up (see `live_dns`). Returns 0 when it is applied or nothing is
-/// running, -1 with `nativeGetLastError` set when the engine keeps its DNS.
-#[no_mangle]
-pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeSetBuiltinDns(
-    _env: JNIEnv,
-    _class: JClass,
-    builtin_dns: jboolean,
-) -> jint {
-    match live_dns::switch(dns_upstreams(builtin_dns)) {
-        Ok(()) => 0,
-        Err(e) => {
-            logging::bridge_log(&format!("nativeSetBuiltinDns: ERROR: {e:#}"));
-            set_error(format!("{e:#}"));
+    let dns: String = env.get_string(&dns).map(|s| s.into()).unwrap_or_default();
+    let settings = engine::DnsUpstreams::decode_scoped(&dns)
+        .map_err(|_| anyhow::Error::from(dns_override::DnsIssue::InvalidSettings))
+        .and_then(|(settings, owner)| {
+            settings.check_android_support()?;
+            settings.require_scope(owner, profile_id)?;
+            Ok(settings)
+        });
+    match settings {
+        Ok(settings) => start_engine_for_profile(
+            Some(addr_str),
+            Some(secret_str),
+            parse_mode_override(&mode_str),
+            settings,
+            profile_id,
+        ),
+        Err(error) => {
+            set_error(error.to_string());
             -1
         }
     }
@@ -874,25 +890,63 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeGetDownloa
     }
 }
 
+fn validate_effective_config(yaml: &str, mode: &engine::DnsUpstreams) -> anyhow::Result<()> {
+    mode.check_android_support()?;
+    // The core's offline flag is process-wide. Validation runs in the
+    // app process; holding ENGINE also prevents a same-process caller
+    // from starting a serving resolver under this flag.
+    let engine = ENGINE.lock();
+    anyhow::ensure!(
+        engine.is_none(),
+        "Cannot validate while the engine is running in this process"
+    );
+    struct Offline;
+    impl Drop for Offline {
+        fn drop(&mut self) {
+            meow_config::set_offline_validate(false);
+        }
+    }
+    meow_config::set_offline_validate(true);
+    let _offline = Offline;
+    let load = engine::load_profile(yaml, mode, |stripped| {
+        Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
+    });
+    let loaded = get_runtime().block_on(load)?;
+    mode.check_targets(|name| loaded.config.proxies.get(name).map(Arc::as_ref))?;
+    mode.check_resolver(&loaded.config.dns.resolver)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeValidateConfig(
     mut env: JNIEnv,
     _class: JClass,
     yaml: JString,
+    dns: JString,
 ) -> jint {
-    let yaml_str: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
-    // Validate what the engine will actually load: the started engine runs
-    // the config through strip_and_inject (drops listener ports, sniffer,
-    // external-controller, pins DNS to fake-IP, …) and falls back to the
-    // built-in DNS when the profile's cannot be set up, so validating the
-    // raw YAML rejects configs that would run fine — e.g. mihomo's
-    // `external-controller: :9090` shorthand, stripped at start but fatal
-    // to a raw parse.
-    // Boxed for the same reason as in `engine::load_stripped_config`.
-    let load = crate::engine::load_with_dns_fallback(&yaml_str, |stripped| {
-        Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
-    });
-    match get_runtime().block_on(load) {
+    let yaml: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
+    let dns: String = env.get_string(&dns).map(|s| s.into()).unwrap_or_default();
+    let validate = || {
+        let (mode, _) = engine::DnsUpstreams::decode_scoped(&dns)
+            .map_err(|_| dns_override::DnsIssue::InvalidSettings)?;
+        validate_effective_config(&yaml, &mode)
+    };
+    match validate() {
+        Ok(()) => 0,
+        Err(e) => {
+            set_error(format!("validate config: {}", e));
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeValidateProfileStructure(
+    mut env: JNIEnv,
+    _class: JClass,
+    yaml: JString,
+) -> jint {
+    let yaml: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
+    match engine::validate_profile_structure(&yaml) {
         Ok(_) => 0,
         Err(e) => {
             set_error(format!("validate config: {}", e));

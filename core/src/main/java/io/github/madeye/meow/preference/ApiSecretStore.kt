@@ -15,7 +15,7 @@ import java.util.Locale
  * sets one (an on-device dashboard keeps the credential its user chose),
  * else one minted by [mint] for that start. The UI process reads it on every
  * request, so a restart's new secret applies from the next call. A one-line
- * file in no-backup storage, like [BuiltinDnsStore], because
+ * file in no-backup storage, like [DnsSettingsStore], because
  * SharedPreferences would be read only once per process.
  */
 class ApiSecretStore(private val file: File) {

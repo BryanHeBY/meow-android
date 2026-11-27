@@ -3,26 +3,35 @@ package io.github.madeye.meow.ui.screens.overrideconfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.madeye.meow.core.MeowCore
-import io.github.madeye.meow.preference.BuiltinDnsPreference
+import io.github.madeye.meow.preference.DnsPreference
+import io.github.madeye.meow.preference.DnsMode
+import io.github.madeye.meow.preference.DnsSettings
+import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.ConfigurationOverride
 import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.repo.ProfileRepository
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 internal data class OverrideProfilePreview(
+    val id: Long,
     val name: String,
     val subscription: Boolean,
     val ipv6: Int,
@@ -33,25 +42,29 @@ internal data class OverrideForm(
     val saved: ConfigurationOverride,
     val draft: ConfigurationOverride = saved,
     val global: ConfigurationOverride,
-    val savedDns: Boolean?,
-    val draftDns: Boolean? = savedDns,
+    val savedDns: DnsSettings?,
+    val draftDns: DnsSettings? = savedDns,
+    val dnsSelectedId: Long? = null,
+    val invalidDnsPreference: Boolean = false,
     val saving: Boolean = false,
 ) {
     val canSave get() = !saving && saved != draft
-    val canSaveDns get() = !saving && savedDns != draftDns
+    val canSaveDns get() = !saving && draftDns?.complete == true && draftDns.mode != DnsMode.SPLIT &&
+        (invalidDnsPreference || savedDns != draftDns.normalized() ||
+            (draftDns.requiresProfile && draftDns.profileId != dnsSelectedId))
 }
 
 internal sealed interface OverrideEvent {
     data object Saved : OverrideEvent
     data object DnsSaved : OverrideEvent
     data object SaveFailed : OverrideEvent
-    data class DnsFailed(val reason: String) : OverrideEvent
+    data class DnsFailed(val issue: DnsIssue) : OverrideEvent
 }
 
 internal class ConfigurationOverrideViewModel(
     val profileId: Long?,
     private val store: ConfigurationOverrideStore,
-    private val dns: BuiltinDnsPreference,
+    private val dns: DnsPreference,
     profiles: ProfileRepository,
 ) : ViewModel() {
     private val form = MutableStateFlow<OverrideForm?>(null)
@@ -67,6 +80,7 @@ internal class ConfigurationOverrideViewModel(
         .map { profile ->
             profile?.let {
                 OverrideProfilePreview(
+                    it.id,
                     it.name,
                     it.subscription,
                     MeowCore.nativeProfileIpv6(it.yaml),
@@ -79,13 +93,36 @@ internal class ConfigurationOverrideViewModel(
     val uiState = combine(form, preview, ::Pair)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null to null)
 
+    private val dnsGeneration = MutableStateFlow(0)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dnsStatus = dnsGeneration.flatMapLatest {
+        flow {
+            if (profileId == null) {
+                while (true) {
+                    emit(dns.status())
+                    delay(2_000)
+                }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+
     init {
         viewModelScope.launch {
             try {
                 val (saved, global) = withContext(Dispatchers.IO) {
                     store.load(profileId) to if (profileId == null) ConfigurationOverride() else store.load()
                 }
-                form.value = OverrideForm(saved, global = global, savedDns = if (profileId == null) dns.load() else null)
+                val dnsSaved = if (profileId == null) dns.load() else null
+                form.value = OverrideForm(
+                    saved, global = global, savedDns = dnsSaved?.settings,
+                    invalidDnsPreference = dnsSaved?.invalid == true,
+                )
+                if (profileId == null) selected.map { it?.id }.distinctUntilChanged().collect { id ->
+                    form.update { current ->
+                        current?.let { if (it.dnsSelectedId == id) it else it.copy(dnsSelectedId = id, draftDns = it.savedDns) }
+                    }
+                }
             } catch (e: IOException) {
                 Timber.w(e, "Reading configuration overrides failed")
                 _events.send(OverrideEvent.SaveFailed)
@@ -98,9 +135,9 @@ internal class ConfigurationOverrideViewModel(
         if (!current.saving) form.value = current.copy(draft = value)
     }
 
-    fun editDns(enabled: Boolean) {
+    fun editDns(settings: DnsSettings) {
         val current = form.value ?: return
-        if (!current.saving) form.value = current.copy(draftDns = enabled)
+        if (!current.saving) form.value = current.copy(draftDns = settings)
     }
 
     fun save() {
@@ -109,32 +146,34 @@ internal class ConfigurationOverrideViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { store.save(profileId, current.draft) }
-                form.value = current.copy(saved = current.draft)
+                form.update { it?.copy(saved = current.draft, saving = false) }
                 _events.send(OverrideEvent.Saved)
             } catch (e: IOException) {
                 Timber.w(e, "Saving configuration override failed")
-                form.value = current
+                form.update { it?.copy(saving = false) }
                 _events.send(OverrideEvent.SaveFailed)
             }
         }
     }
 
-    fun saveDns() {
-        val current = form.value?.takeIf { it.canSaveDns } ?: return
-        val draft = current.draftDns ?: return
+    fun saveDns(displayedProfileId: Long?) {
+        val current = form.value?.takeIf { it.canSaveDns && it.dnsSelectedId == displayedProfileId } ?: return
+        val draft = current.draftDns?.normalized() ?: return
         form.value = current.copy(saving = true)
         viewModelScope.launch {
             val error = try {
-                dns.save(draft)
+                dns.save(draft, current.dnsSelectedId)
             } catch (e: IOException) {
                 Timber.w(e, "Saving the DNS preference could not be confirmed")
-                e.message ?: e.javaClass.simpleName
+                DnsIssue.SERVICE_UNAVAILABLE
             }
+            dnsGeneration.value += 1
             if (error != null) {
-                form.value = current
+                form.update { it?.copy(saving = false) }
                 _events.send(OverrideEvent.DnsFailed(error))
             } else {
-                form.value = current.copy(savedDns = draft)
+                val saved = draft.copy(profileId = current.dnsSelectedId.takeIf { draft.requiresProfile })
+                form.update { it?.copy(savedDns = saved, draftDns = saved, invalidDnsPreference = false, saving = false) }
                 _events.send(OverrideEvent.DnsSaved)
             }
         }
