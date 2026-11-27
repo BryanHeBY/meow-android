@@ -66,7 +66,7 @@ object BaseService {
         val fallbackTransition: Long,
     ) {
         fun discard() {
-            if (fallbackTransition > 0) MeowCore.nativeDiscardFallbackGeoIpTransition(fallbackTransition)
+            if (fallbackTransition > 0) MeowCore.discardFallbackGeoIpTransition(fallbackTransition)
         }
     }
 
@@ -411,7 +411,7 @@ object BaseService {
             val profile = selected ?: return
             if (running == null) return
             val candidate = ActiveConfig.of(profile)
-            val token = MeowCore.nativeBeginFallbackGeoIpTransition()
+            val token = MeowCore.beginFallbackGeoIpTransition()
             data.reloadCheck = data.binder.launch {
                 var handedOff = false
                 try {
@@ -426,7 +426,7 @@ object BaseService {
                             val policy = override.dnsWireOverride
                             val previousNeedsReader = previousOverride?.dnsWireOverride?.usesFallbackGeoIp == true
                             if (policy.usesFallbackGeoIp || previousNeedsReader) {
-                                staged = MeowCore.nativeStageFallbackGeoIpTransition(
+                                staged = MeowCore.stageFallbackGeoIpTransition(
                                     token, running.activeConfig.profileId, previousNeedsReader,
                                     profile.id, settings.encode(), policy.wire(),
                                 )
@@ -464,7 +464,7 @@ object BaseService {
                     data.dnsRejection = DnsRejection(candidate, DnsIssue.INVALID_SETTINGS)
                     data.binder.dnsActivationRejected(DnsIssue.INVALID_SETTINGS)
                 } finally {
-                    if (!handedOff) MeowCore.nativeDiscardFallbackGeoIpTransition(token)
+                    if (!handedOff) MeowCore.discardFallbackGeoIpTransition(token)
                 }
             }
         }

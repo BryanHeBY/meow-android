@@ -42,12 +42,21 @@ object MeowCore {
         fallbackTransition: Long = 0L, fallbackRecovery: Boolean = false,
     ): String?
     external fun nativeCheckFallbackGeoIp(): Boolean
-    internal external fun nativeBeginFallbackGeoIpTransition(): Long
-    internal external fun nativeStageFallbackGeoIpTransition(
+    private external fun nativeBeginFallbackGeoIpTransition(): Long
+    private external fun nativeStageFallbackGeoIpTransition(
         token: Long, previousProfileId: Long, previousNeedsReader: Boolean,
         candidateProfileId: Long, settings: String, nameserverPolicy: String,
     ): Long
-    internal external fun nativeDiscardFallbackGeoIpTransition(token: Long)
+    private external fun nativeDiscardFallbackGeoIpTransition(token: Long)
+
+    internal fun beginFallbackGeoIpTransition(): Long = nativeBeginFallbackGeoIpTransition()
+    internal fun stageFallbackGeoIpTransition(
+        token: Long, previousProfileId: Long, previousNeedsReader: Boolean,
+        candidateProfileId: Long, settings: String, nameserverPolicy: String,
+    ): Long = nativeStageFallbackGeoIpTransition(
+        token, previousProfileId, previousNeedsReader, candidateProfileId, settings, nameserverPolicy,
+    )
+    internal fun discardFallbackGeoIpTransition(token: Long) = nativeDiscardFallbackGeoIpTransition(token)
 
     /** Applied DNS status with redacted endpoint details. */
     external fun nativeDnsStatus(): String?

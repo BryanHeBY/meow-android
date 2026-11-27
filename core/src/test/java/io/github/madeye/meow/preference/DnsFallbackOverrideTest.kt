@@ -36,6 +36,18 @@ class DnsFallbackOverrideTest {
     }
 
     @Test
+    fun `fallback JNI entry names and descriptors stay unmangled`() {
+        val native = Class.forName("io.github.madeye.meow.core.MeowCore", false, javaClass.classLoader)
+            .declaredMethods.filter { java.lang.reflect.Modifier.isNative(it.modifiers) }
+            .associate { it.name to it.parameterCount }
+        for ((name, args) in mapOf(
+            "nativeStartEngine" to 10, "nativeCheckCachedDnsForProfile" to 6,
+            "nativeCheckFallbackGeoIp" to 0, "nativeBeginFallbackGeoIpTransition" to 0,
+            "nativeStageFallbackGeoIpTransition" to 6, "nativeDiscardFallbackGeoIpTransition" to 1,
+        )) assertEquals(name, args, native[name])
+    }
+
+    @Test
     fun `country filter is explicit and can be cleared independently of geodata`() {
         val upstream = "udp://127.0.0.1:53"
         val clear = requireNotNull(DnsFallbackOverride.parse(upstream, "", ""))
