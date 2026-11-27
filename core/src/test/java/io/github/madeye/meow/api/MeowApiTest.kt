@@ -1,5 +1,6 @@
 package io.github.madeye.meow.api
 
+import java.util.concurrent.TimeUnit
 import io.github.madeye.meow.aidl.ByteTotals
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -48,8 +49,8 @@ class MeowApiTest {
      * Answers `/proxies` and `/api/proxy-groups` by path, so a test holds
      * whichever order [MeowApi.proxies] fetches them in.
      */
-    private fun serveProxies(proxies: String, proxyGroups: MockResponse) {
-        server.dispatcher = object : Dispatcher() {
+    private fun serveProxies(proxies: String, proxyGroups: MockResponse, fixture: MockWebServer = server) {
+        fixture.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 when (request.requestUrl?.encodedPath) {
                     "/proxies" -> MockResponse().setBody(proxies)
@@ -198,12 +199,19 @@ class MeowApiTest {
                 .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY),
         )
         for ((label, failure) in failures) {
-            serveProxies(GROUPED_PROXIES, failure)
+            // A disconnect policy can make this server unusable for subsequent cases.
+            // Keep each failure isolated so /proxies itself always has a live server.
+            MockWebServer().use { fixture ->
+                serveProxies(GROUPED_PROXIES, failure, fixture)
+                fixture.start()
 
-            val result = api.proxies()
+                val result = MeowApi(baseUrl = fixture.url("/")).proxies()
 
-            assertEquals(label, listOf("Auto", "Proxy", "Streaming"), result.selectableGroups.map { it.name })
-            assertEquals(label, setOf("HK 01", "SG 02", "DIRECT"), result.proxies.keys)
+                assertEquals(label, listOf("Auto", "Proxy", "Streaming"), result.selectableGroups.map { it.name })
+                assertEquals(label, setOf("HK 01", "SG 02", "DIRECT"), result.proxies.keys)
+                assertEquals(label, "/proxies", fixture.takeRequest(1, TimeUnit.SECONDS)?.path)
+                assertEquals(label, "/api/proxy-groups", fixture.takeRequest(1, TimeUnit.SECONDS)?.path)
+            }
         }
     }
 
