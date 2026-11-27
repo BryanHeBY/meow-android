@@ -329,7 +329,7 @@
     <string name="advanced_routing">Routing and logging</string>
     <string name="advanced_sniffer">Traffic sniffing</string>
     <string name="advanced_data">Data and tools</string>
-    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback are unavailable here.</string>
+    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. HTTP/3 DNS, system DNS overrides, and a separate DNS listener are unavailable.</string>
     <string name="advanced_listeners_unavailable">The Android VPN starts no HTTP, SOCKS, mixed, or transparent proxy listeners. Listener ports, authentication, and LAN binding are unavailable.</string>
     <string name="advanced_controller_unavailable">Meow manages the authenticated loopback controller. Custom controller addresses, TLS, CORS, and credentials are unavailable as Android overrides.</string>
     <string name="advanced_routing_unavailable">The Home screen owns routing mode. Android has no profile-scoped log-level control.</string>
@@ -550,8 +550,13 @@
     <string name="advanced_fake_ip_filter_replace">Replace patterns</string>
     <string name="advanced_fake_ip_filter_format">One domain or +.example.test suffix per line. Empty means no filtering in either mode.</string>
     <string name="advanced_fake_ip_filter_invalid">Enter unique domains or +. suffixes. Rule entries are not supported.</string>
+    <string name="advanced_dns_bootstrap">Bootstrap DNS</string>
+    <string name="advanced_dns_bootstrap_detail">Resolves hostnames of DNS upstreams that initialize locally. It does not replace ordinary DNS, the node resolver, or DNS handled remotely by a proxy.</string>
+    <string name="advanced_dns_bootstrap_next_connection">Saved bootstrap DNS changes apply the next time the VPN connects.</string>
+    <string name="advanced_dns_bootstrap_endpoints">Numeric UDP/TCP servers (udp://IP:port, one per line)</string>
+    <string name="advanced_dns_bootstrap_invalid">Enter 1–8 distinct numeric UDP or TCP servers.</string>
     <string name="advanced_dns_fallback">Fallback DNS</string>
-    <string name="advanced_dns_fallback_inherit">Use DNS mode default</string>
+    <string name="advanced_dns_mode_default">Use DNS mode default</string>
     <string name="advanced_dns_fallback_next_connection">Saved fallback DNS changes apply the next time the VPN connects.</string>
     <string name="advanced_dns_fallback_detail">Replaces both the fallback servers and filters. Domain matches query fallback first; CIDR matches reject ordinary address answers. Fallback can also be tried when primary DNS fails. Replace does not use GeoIP.</string>
     <string name="advanced_dns_fallback_upstreams">Numeric UDP/TCP servers (udp://IP:port, one per line)</string>

@@ -319,7 +319,7 @@
     <string name="advanced_routing">مسیریابی و گزارش‌ها</string>
     <string name="advanced_sniffer">بررسی ترافیک</string>
     <string name="advanced_data">داده‌ها و ابزارها</string>
-    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. تنظیم جداگانهٔ IPv6 برای DNS، DNS روی HTTP/3، DNS سیستم، شنونده‌های DNS، سرورهای جایگزین در اینجا در دسترس نیست.</string>
+    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. DNS روی HTTP/3، بازنویسی DNS سیستم و شنوندهٔ جداگانهٔ DNS در دسترس نیستند.</string>
     <string name="advanced_listeners_unavailable">هیچ شنوندهٔ پراکسی HTTP، SOCKS، ترکیبی یا شفاف در VPN اندروید راه‌اندازی نمی‌شود. درگاه‌ها، احراز هویت و اتصال به شبکهٔ محلی در دسترس نیستند.</string>
     <string name="advanced_controller_unavailable">مِیو کنترل‌گر محلی دارای احراز هویت را مدیریت می‌کند. آدرس کنترل‌گر، TLS، CORS و اطلاعات ورود قابل بازنویسی نیستند.</string>
     <string name="advanced_routing_unavailable">حالت مسیریابی در صفحهٔ اصلی مدیریت می‌شود. در Android نمی‌توان سطح گزارش را برای هر پروفایل تنظیم کرد.</string>
@@ -547,8 +547,13 @@
     <string name="advanced_fake_ip_filter_replace">جایگزینی الگوها</string>
     <string name="advanced_fake_ip_filter_format">در هر خط یک دامنه یا پسوند مانند +.example.test وارد کنید. فهرست خالی در هر دو حالت یعنی بدون فیلتر.</string>
     <string name="advanced_fake_ip_filter_invalid">دامنه‌ها یا پسوندهای +. یکتا وارد کنید. قواعد پشتیبانی نمی‌شوند.</string>
+    <string name="advanced_dns_bootstrap">سرورهای DNS راه‌اندازی</string>
+    <string name="advanced_dns_bootstrap_detail">نام میزبان سرورهای DNS بالادستی را که محلی راه‌اندازی می‌شوند حل می‌کند. جایگزین DNS عادی، حل‌کنندهٔ گره یا DNS راه‌دورِ پراکسی نیست.</string>
+    <string name="advanced_dns_bootstrap_next_connection">تغییرات ذخیره‌شدهٔ DNS راه‌اندازی در اتصال بعدی VPN اعمال می‌شوند.</string>
+    <string name="advanced_dns_bootstrap_endpoints">سرورهای عددی UDP/TCP (udp://IP:port، یک مورد در هر خط)</string>
+    <string name="advanced_dns_bootstrap_invalid">۱ تا ۸ سرور متمایز UDP یا TCP با نشانی عددی وارد کنید.</string>
     <string name="advanced_dns_fallback">سرورهای جایگزین DNS</string>
-    <string name="advanced_dns_fallback_inherit">استفاده از پیش‌فرض حالت DNS</string>
+    <string name="advanced_dns_mode_default">استفاده از پیش‌فرض حالت DNS</string>
     <string name="advanced_dns_fallback_next_connection">تغییرات ذخیره‌شدهٔ DNS جایگزین در اتصال بعدی VPN اعمال می‌شوند.</string>
     <string name="advanced_dns_fallback_detail">سرورها و فیلترهای جایگزین با هم عوض می‌شوند. در صورت تطبیق دامنه، ابتدا از سرور جایگزین پرس‌وجو می‌شود. تطبیق CIDR پاسخ عادی را رد می‌کند. هنگام خرابی DNS اصلی نیز ممکن است از جایگزین استفاده شود. حالت جایگزینی از GeoIP استفاده نمی‌کند.</string>
     <string name="advanced_dns_fallback_upstreams">سرورهای عددی UDP/TCP (udp://IP:port، یک مورد در هر خط)</string>

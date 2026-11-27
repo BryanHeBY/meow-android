@@ -303,7 +303,7 @@
     <string name="advanced_routing">Định tuyến và nhật ký</string>
     <string name="advanced_sniffer">Nhận diện lưu lượng</string>
     <string name="advanced_data">Dữ liệu và công cụ</string>
-    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có tùy chọn riêng cho IPv6 của DNS, DNS qua HTTP/3, DNS hệ thống, trình lắng nghe DNS, máy chủ dự phòng.</string>
+    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có DNS qua HTTP/3, ghi đè DNS hệ thống hoặc trình lắng nghe DNS riêng.</string>
     <string name="advanced_listeners_unavailable">VPN Android không khởi chạy trình lắng nghe proxy HTTP, SOCKS, kết hợp hoặc trong suốt. Không có tùy chọn cổng, xác thực và liên kết mạng LAN.</string>
     <string name="advanced_controller_unavailable">Meow quản lý bộ điều khiển cục bộ có xác thực. Không thể ghi đè địa chỉ bộ điều khiển, TLS, CORS và thông tin xác thực trên Android.</string>
     <string name="advanced_routing_unavailable">Chế độ định tuyến được quản lý ở màn hình chính. Android không có mức nhật ký theo hồ sơ.</string>
@@ -529,8 +529,13 @@
     <string name="advanced_fake_ip_filter_replace">Thay thế mẫu tên miền</string>
     <string name="advanced_fake_ip_filter_format">Mỗi dòng nhập một tên miền hoặc hậu tố như +.example.test. Danh sách trống không lọc ở cả hai chế độ.</string>
     <string name="advanced_fake_ip_filter_invalid">Nhập tên miền hoặc hậu tố +. không trùng nhau. Không hỗ trợ mục dạng quy tắc.</string>
+    <string name="advanced_dns_bootstrap">DNS khởi tạo</string>
+    <string name="advanced_dns_bootstrap_detail">Phân giải tên máy chủ DNS thượng nguồn được khởi tạo cục bộ. Không thay thế DNS thông thường, trình phân giải nút hoặc DNS do proxy từ xa xử lý.</string>
+    <string name="advanced_dns_bootstrap_next_connection">Các thay đổi DNS khởi tạo đã lưu sẽ áp dụng khi VPN kết nối lần sau.</string>
+    <string name="advanced_dns_bootstrap_endpoints">Máy chủ UDP/TCP dạng số (udp://IP:cổng, mỗi dòng một mục)</string>
+    <string name="advanced_dns_bootstrap_invalid">Nhập 1–8 máy chủ UDP hoặc TCP dạng số khác nhau.</string>
     <string name="advanced_dns_fallback">DNS dự phòng</string>
-    <string name="advanced_dns_fallback_inherit">Dùng mặc định của chế độ DNS</string>
+    <string name="advanced_dns_mode_default">Dùng mặc định của chế độ DNS</string>
     <string name="advanced_dns_fallback_next_connection">Các thay đổi DNS dự phòng đã lưu sẽ áp dụng khi VPN kết nối lần sau.</string>
     <string name="advanced_dns_fallback_detail">Thay thế cả máy chủ dự phòng lẫn bộ lọc. Nếu khớp tên miền, truy vấn máy chủ dự phòng trước; nếu khớp CIDR, từ chối câu trả lời địa chỉ thông thường. Có thể dùng máy chủ dự phòng khi DNS chính lỗi. Chế độ thay thế không dùng GeoIP.</string>
     <string name="advanced_dns_fallback_upstreams">Máy chủ UDP/TCP dạng số (udp://IP:cổng, mỗi dòng một mục)</string>

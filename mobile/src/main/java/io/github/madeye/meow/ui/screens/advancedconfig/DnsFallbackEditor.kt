@@ -59,7 +59,7 @@ internal fun DnsFallbackEditor(
     Text(stringResource(R.string.advanced_dns_fallback_detail), style = MaterialTheme.typography.bodySmall)
     GlassCard {
         Column(Modifier.selectableGroup()) {
-            val inherit = if (global) R.string.advanced_dns_fallback_inherit else R.string.override_inherit_global
+            val inherit = if (global) R.string.advanced_dns_mode_default else R.string.override_inherit_global
             for ((item, title) in listOf(
                 FallbackChoice.INHERIT to inherit,
                 FallbackChoice.DISABLED to R.string.advanced_off,

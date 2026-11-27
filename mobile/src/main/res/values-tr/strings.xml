@@ -311,7 +311,7 @@
     <string name="advanced_routing">Yönlendirme ve günlükler</string>
     <string name="advanced_sniffer">Trafik inceleme</string>
     <string name="advanced_data">Veri ve araçlar</string>
-    <string name="advanced_dns_unavailable">Android, VPN içinde Fake-IP DNS gerektirir. DNS IPv6, HTTP/3 üzerinden DNS, sistem DNS, DNS dinleyicileri, yedek sunucular burada ayrı ayrı ayarlanamaz.</string>
+    <string name="advanced_dns_unavailable">Android, VPN içinde Fake-IP DNS gerektirir. HTTP/3 DNS, sistem DNS geçersiz kılma ve ayrı DNS dinleyicisi kullanılamaz.</string>
     <string name="advanced_listeners_unavailable">Android VPN HTTP, SOCKS, karma veya şeffaf proxy dinleyicileri başlatmaz. Dinleme portları, kimlik doğrulama ve yerel ağ bağlaması kullanılamaz.</string>
     <string name="advanced_controller_unavailable">Meow, kimlik doğrulamalı yerel denetleyiciyi yönetir. Android geçersiz kılmalarında denetleyici adresi, TLS, CORS ve kimlik bilgileri değiştirilemez.</string>
     <string name="advanced_routing_unavailable">Yönlendirme modu ana ekrandan yönetilir. Android profillere özel günlük düzeyi sunmaz.</string>
@@ -539,8 +539,13 @@
     <string name="advanced_fake_ip_filter_replace">Kalıpları değiştir</string>
     <string name="advanced_fake_ip_filter_format">Her satıra bir alan adı veya +.example.test gibi bir son ek girin. Boş liste iki modda da filtreleme yapmaz.</string>
     <string name="advanced_fake_ip_filter_invalid">Benzersiz alan adları veya +. son ekleri girin. Kurallar desteklenmez.</string>
+    <string name="advanced_dns_bootstrap">Başlangıç DNS sunucuları</string>
+    <string name="advanced_dns_bootstrap_detail">Yerelde başlatılan üst DNS sunucularının ana makine adlarını çözer. Normal DNS, düğüm çözümleyicisi veya uzak proxy tarafından işlenen DNS yerine geçmez.</string>
+    <string name="advanced_dns_bootstrap_next_connection">Kaydedilen başlangıç DNS değişiklikleri VPN bir sonraki kez bağlandığında uygulanır.</string>
+    <string name="advanced_dns_bootstrap_endpoints">Sayısal UDP/TCP sunucuları (udp://IP:port, her satıra bir tane)</string>
+    <string name="advanced_dns_bootstrap_invalid">1–8 farklı sayısal UDP veya TCP sunucusu girin.</string>
     <string name="advanced_dns_fallback">Yedek DNS</string>
-    <string name="advanced_dns_fallback_inherit">DNS modunun varsayılanını kullan</string>
+    <string name="advanced_dns_mode_default">DNS modunun varsayılanını kullan</string>
     <string name="advanced_dns_fallback_next_connection">Kaydedilen yedek DNS değişiklikleri VPN bir sonraki kez bağlandığında uygulanır.</string>
     <string name="advanced_dns_fallback_detail">Yedek sunucuları ve filtreleri birlikte değiştirir. Alan adı eşleşirse önce yedek sunucu sorgulanır; CIDR eşleşmesi normal adres yanıtlarını reddeder. Birincil DNS başarısız olduğunda da yedek denenebilir. Değiştirme modu GeoIP kullanmaz.</string>
     <string name="advanced_dns_fallback_upstreams">Sayısal UDP/TCP sunucuları (udp://IP:port, her satıra bir tane)</string>

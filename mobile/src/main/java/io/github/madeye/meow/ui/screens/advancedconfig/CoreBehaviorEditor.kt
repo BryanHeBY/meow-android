@@ -33,6 +33,7 @@ internal enum class AdvancedOverridePage(val title: Int, val unavailableReason: 
     NAMESERVER_POLICY(R.string.advanced_nameserver_policy),
     DNS_IPV6(R.string.advanced_dns_ipv6),
     DNS_FALLBACK(R.string.advanced_dns_fallback),
+    DNS_BOOTSTRAP(R.string.advanced_dns_bootstrap),
     DNS(R.string.override_dns, R.string.advanced_dns_unavailable),
     LISTENERS(R.string.advanced_listeners, R.string.advanced_listeners_unavailable),
     CONTROLLER(R.string.advanced_controller, R.string.advanced_controller_unavailable),

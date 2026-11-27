@@ -310,7 +310,7 @@
     <string name="advanced_routing">路由和日志</string>
     <string name="advanced_sniffer">流量嗅探</string>
     <string name="advanced_data">数据和工具</string>
-    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。此处无法单独设置 DNS IPv6、HTTP/3 DNS、系统 DNS、DNS 监听、回退。</string>
+    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。HTTP/3 DNS、系统 DNS 覆写和独立 DNS 监听不可用。</string>
     <string name="advanced_listeners_unavailable">Android VPN 不会启动 HTTP、SOCKS、混合或透明代理监听。监听端口、认证和局域网绑定不可用。</string>
     <string name="advanced_controller_unavailable">Meow 管理经过认证的环回控制器。Android 覆写不支持自定义控制器地址、TLS、CORS 或凭据。</string>
     <string name="advanced_routing_unavailable">路由模式由首页管理。Android 不支持按配置设置日志级别。</string>
@@ -529,8 +529,13 @@
     <string name="advanced_fake_ip_filter_replace">替换域名模式</string>
     <string name="advanced_fake_ip_filter_format">每行一个域名或 +.example.test 后缀。两种模式下，空列表均表示不过滤。</string>
     <string name="advanced_fake_ip_filter_invalid">请输入不重复的域名或 +. 后缀。不支持规则条目。</string>
+    <string name="advanced_dns_bootstrap">引导 DNS</string>
+    <string name="advanced_dns_bootstrap_detail">仅用于解析在本地初始化的 DNS 上游服务器域名。不替代普通 DNS、节点解析器或由代理远端处理的 DNS。</string>
+    <string name="advanced_dns_bootstrap_next_connection">保存的引导 DNS 设置将在下次连接 VPN 时生效。</string>
+    <string name="advanced_dns_bootstrap_endpoints">UDP/TCP 数字地址（udp://IP:端口，每行一个）</string>
+    <string name="advanced_dns_bootstrap_invalid">请输入 1–8 个互不重复的 UDP 或 TCP 数字地址。</string>
     <string name="advanced_dns_fallback">备用 DNS</string>
-    <string name="advanced_dns_fallback_inherit">使用当前 DNS 模式的默认行为</string>
+    <string name="advanced_dns_mode_default">使用当前 DNS 模式的默认行为</string>
     <string name="advanced_dns_fallback_next_connection">保存的备用 DNS 设置将在下次连接 VPN 时生效。</string>
     <string name="advanced_dns_fallback_detail">同时替换备用服务器和过滤条件。域名命中时优先查询备用服务器；地址命中 CIDR 时拒绝普通应答。主 DNS 失败时也可能查询备用服务器。替换模式不使用 GeoIP。</string>
     <string name="advanced_dns_fallback_upstreams">UDP/TCP 数字地址（udp://IP:端口，每行一个）</string>

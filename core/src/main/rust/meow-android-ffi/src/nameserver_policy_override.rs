@@ -12,6 +12,7 @@ pub(crate) struct NameserverPolicyOverride {
     rows: Option<Vec<(String, String)>>,
     dns_ipv6: Option<bool>,
     fallback: Option<Fallback>,
+    bootstrap: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -22,6 +23,8 @@ struct Snapshot {
     ipv6: Option<bool>,
     #[serde(default, deserialize_with = "present_fallback")]
     fallback: Option<RawFallback>,
+    #[serde(default, deserialize_with = "present_bootstrap")]
+    bootstrap: Option<Vec<Endpoint>>,
 }
 
 fn present_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
@@ -32,6 +35,12 @@ fn present_fallback<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<RawFallback>, D::Error> {
     map_only::<RawFallback, _>(d).map(Some)
+}
+
+fn present_bootstrap<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<Endpoint>>, D::Error> {
+    Vec::<Endpoint>::deserialize(d).map(Some)
 }
 
 fn map_only<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(d: D) -> Result<T, D::Error> {
@@ -103,23 +112,10 @@ impl RawFallback {
             return Ok(Fallback::Disabled);
         };
         ensure!(
-            (1..=8).contains(&endpoints.len()),
-            "invalid DNS fallback upstream count"
-        );
-        ensure!(
             domains.len() <= 8 && cidrs.len() <= 16,
             "too many DNS fallback filters"
         );
-        let mut seen = HashSet::new();
-        let mut upstreams = Vec::with_capacity(endpoints.len());
-        for endpoint in endpoints {
-            let upstream = numeric_upstream(endpoint.transport, &endpoint.endpoint)?;
-            ensure!(
-                seen.insert(upstream.clone()),
-                "duplicate DNS fallback upstream"
-            );
-            upstreams.push(upstream);
-        }
+        let upstreams = validate_numeric_pool(endpoints)?;
         let mut seen = HashSet::new();
         for domain in &domains {
             ensure!(
@@ -141,6 +137,21 @@ impl RawFallback {
             cidrs,
         })
     }
+}
+
+fn validate_numeric_pool(endpoints: Vec<Endpoint>) -> Result<Vec<String>> {
+    ensure!(
+        (1..=8).contains(&endpoints.len()),
+        "invalid DNS upstream count"
+    );
+    let mut seen = HashSet::new();
+    let mut upstreams = Vec::with_capacity(endpoints.len());
+    for endpoint in endpoints {
+        let upstream = numeric_upstream(endpoint.transport, &endpoint.endpoint)?;
+        ensure!(seen.insert(upstream.clone()), "duplicate DNS upstream");
+        upstreams.push(upstream);
+    }
+    Ok(upstreams)
 }
 
 fn cidr_identity(text: &str) -> Option<(IpAddr, u32)> {
@@ -183,17 +194,24 @@ impl NameserverPolicyOverride {
         // Keep the formats disjoint. Struct deserializers can accept a
         // positional sequence; only a JSON object may carry DNS IPv6.
         // Deserialize directly so duplicate object fields are not collapsed.
-        let (rows, dns_ipv6, fallback) = if wire.trim_start().starts_with('{') {
+        let (rows, dns_ipv6, fallback, bootstrap) = if wire.trim_start().starts_with('{') {
             let snapshot: Snapshot = serde_json::from_str(wire).context("invalid DNS snapshot")?;
             let fallback = snapshot.fallback.map(RawFallback::validate).transpose()?;
+            let bootstrap = snapshot.bootstrap.map(validate_numeric_pool).transpose()?;
             ensure!(
-                snapshot.ipv6.is_some() || fallback.is_some(),
+                snapshot.ipv6.is_some() || fallback.is_some() || bootstrap.is_some(),
                 "empty DNS snapshot object"
             );
-            (snapshot.nameserver_policy, snapshot.ipv6, fallback)
+            (
+                snapshot.nameserver_policy,
+                snapshot.ipv6,
+                fallback,
+                bootstrap,
+            )
         } else {
             (
                 serde_json::from_str::<Option<Vec<Row>>>(wire).context("invalid DNS policy")?,
+                None,
                 None,
                 None,
             )
@@ -203,6 +221,7 @@ impl NameserverPolicyOverride {
                 rows: None,
                 dns_ipv6,
                 fallback,
+                bootstrap,
             });
         };
         ensure!(rows.len() <= 32, "DNS policy exceeds row limit");
@@ -220,6 +239,7 @@ impl NameserverPolicyOverride {
             rows: Some(validated),
             dns_ipv6,
             fallback,
+            bootstrap,
         })
     }
 
@@ -249,6 +269,12 @@ impl NameserverPolicyOverride {
     }
 
     pub(crate) fn apply(&self, dns: &mut Mapping) {
+        if let Some(bootstrap) = &self.bootstrap {
+            dns.insert(
+                "default-nameserver".into(),
+                Value::Sequence(bootstrap.iter().cloned().map(Value::String).collect()),
+            );
+        }
         if let Some(ipv6) = self.dns_ipv6 {
             dns.insert("ipv6".into(), Value::Bool(ipv6));
         }
@@ -433,6 +459,56 @@ mod tests {
             r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","transport":"TCP","endpoint":"127.0.0.1:53"}],"domains":[],"cidrs":[]}}"#,
         ] {
             assert!(NameserverPolicyOverride::decode(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn dns_bootstrap_touches_only_default_pool_and_rejects_aliases() {
+        let source = serde_yaml::from_str::<Value>(
+            "nameserver: ['rcode://refused']\ndefault-nameserver: ['https://192.0.2.2/dns-query']\nproxy-server-nameserver: ['udp://127.0.0.1:5353']\nfallback: ['udp://127.0.0.1:5354']\n",
+        ).unwrap();
+        let replace = NameserverPolicyOverride::decode(
+            r#"{"bootstrap":[{"transport":"UDP","endpoint":"127.0.0.1:5355"}]}"#,
+        )
+        .unwrap();
+        for mode in [
+            DnsUpstreams::Builtin,
+            DnsUpstreams::Profile,
+            DnsUpstreams::Cn,
+        ] {
+            let inherit = engine_dns_block(
+                Some(source.clone()),
+                &mode,
+                &NameserverPolicyOverride::default(),
+            )
+            .unwrap();
+            let replaced = engine_dns_block(Some(source.clone()), &mode, &replace).unwrap();
+            for (key, value) in &inherit {
+                if key.as_str() != Some("default-nameserver") {
+                    assert_eq!(replaced.get(key), Some(value));
+                }
+            }
+            assert_eq!(
+                replaced["default-nameserver"][0].as_str(),
+                Some("udp://127.0.0.1:5355")
+            );
+        }
+        assert_eq!(
+            source["default-nameserver"][0].as_str(),
+            Some("https://192.0.2.2/dns-query")
+        );
+        for malformed in [
+            r#"{"bootstrap":[]}"#,
+            r#"{"bootstrap":null}"#,
+            r#"{"bootstrap":[["UDP","127.0.0.1:53"]]}"#,
+            r#"{"bootstrap":[{"transport":"UDP","endpoint":"host.test:53"}]}"#,
+            r#"{"bootstrap":[{"transport":"UDP","endpoint":"127.0.0.1:53#Node"}]}"#,
+            r#"{"bootstrap":[{"transport":"UDP","endpoint":"[2001:db8::53]:53"},{"transport":"UDP","endpoint":"[2001:0db8:0:0:0:0:0:53]:53"}]}"#,
+        ] {
+            assert!(
+                NameserverPolicyOverride::decode(malformed).is_err(),
+                "{malformed}"
+            );
         }
     }
 

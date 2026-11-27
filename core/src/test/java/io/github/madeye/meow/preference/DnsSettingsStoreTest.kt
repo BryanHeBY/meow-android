@@ -144,6 +144,23 @@ class DnsSettingsStoreTest {
     }
 
     @Test
+    fun `named DNS cache distinguishes bootstrap startup snapshots`() {
+        val scoped = named.copy(profileId = first.profileId)
+        val seen = mutableListOf<String>()
+        val validate: (String, String, String) -> String? = { _, _, snapshot ->
+            seen.add(snapshot)
+            null
+        }
+        val roots = NumericDnsEndpoints.parse("udp://127.0.0.1:53")!!
+        val defaults = DnsWireOverride()
+        val chosen = DnsWireOverride(bootstrap = roots)
+        for (snapshot in listOf(defaults, chosen, chosen, defaults)) {
+            assertNull(store.activationIssue(scoped, first, { snapshot }, validate))
+        }
+        assertEquals(listOf("null", chosen.wire(), "null"), seen)
+    }
+
+    @Test
     fun `a switch while a named save checks cached YAML leaves the old choice in place`() {
         target.writeText("profile")
         val selection = AtomicReference(first)

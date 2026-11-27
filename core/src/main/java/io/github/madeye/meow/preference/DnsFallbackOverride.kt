@@ -8,18 +8,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 @Serializable
-data class DnsFallbackEndpoint(val transport: NameserverPolicyTransport, val endpoint: String) {
-    fun display() = "${transport.name.lowercase()}://$endpoint"
-}
-
-@Serializable
 sealed class DnsFallbackOverride {
     @Serializable @SerialName("disabled")
     data object Disabled : DnsFallbackOverride()
 
     @Serializable @SerialName("replace")
     data class Replace(
-        val endpoints: List<DnsFallbackEndpoint>,
+        val endpoints: List<NumericDnsEndpoint>,
         val domains: List<String>,
         val cidrs: List<String>,
     ) : DnsFallbackOverride()
@@ -44,36 +39,13 @@ sealed class DnsFallbackOverride {
 
         fun parse(upstreams: String, domains: String, cidrs: String): Replace? {
             if (upstreams.length > 512 || domains.length > 2048 || cidrs.length > 896) return null
-            val endpointRows = lines(upstreams)
+            val endpoints = NumericDnsEndpoints.parse(upstreams) ?: return null
             val domainRows = FakeIpFilterRuntime.parsePatterns(domains) ?: return null
             val cidrRows = lines(cidrs).map { it.lowercase() }
-            if (endpointRows.size !in 1..8 || domainRows.size > 8 || cidrRows.size > 16) return null
-            val endpoints = endpointRows.map {
-                val transport = when (it.substringBefore("://").lowercase()) {
-                    "udp" -> NameserverPolicyTransport.UDP
-                    "tcp" -> NameserverPolicyTransport.TCP
-                    else -> return null
-                }
-                val endpoint = it.substringAfter("://", "").lowercase()
-                if (!NameserverPolicyOverride.numericEndpoint(endpoint)) return null
-                DnsFallbackEndpoint(transport, endpoint)
-            }
+            if (domainRows.size > 8 || cidrRows.size > 16) return null
             val cidrIdentities = cidrRows.map { cidrIdentity(it) ?: return null }
-            if (endpoints.map(::endpointIdentity).toSet().size != endpoints.size ||
-                cidrIdentities.toSet().size != cidrIdentities.size
-            ) return null
+            if (cidrIdentities.toSet().size != cidrIdentities.size) return null
             return Replace(endpoints, domainRows, cidrRows)
-        }
-
-        private fun endpointIdentity(row: DnsFallbackEndpoint): Pair<NameserverPolicyTransport, String> {
-            val endpoint = row.endpoint
-            val host = endpoint.substringBeforeLast(':')
-            val port = endpoint.substringAfterLast(':')
-            // The typed endpoint has already passed the numeric-only gate.
-            val normalized = if (host.startsWith('[')) {
-                InetAddress.getByName(host.removeSurrounding("[", "]")).hostAddress
-            } else host
-            return row.transport to "$normalized:$port"
         }
 
         private fun lines(text: String) = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()

@@ -355,7 +355,7 @@
     <string name="advanced_routing">التوجيه والسجلات</string>
     <string name="advanced_sniffer">فحص حركة البيانات</string>
     <string name="advanced_data">البيانات والأدوات</string>
-    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر هنا خيارات مستقلة لـ IPv6 في DNS أو DNS عبر HTTP/3 أو DNS النظام أو منافذ استقبال DNS أو الخوادم الاحتياطية.</string>
+    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر خيارات DNS عبر HTTP/3 أو تجاوز DNS النظام أو منفذ استقبال DNS منفصل.</string>
     <string name="advanced_listeners_unavailable">لا يشغّل VPN في Android منافذ استقبال لوكلاء HTTP أو SOCKS أو الوكلاء المختلطين أو الشفافين. لا تتوفر خيارات المنافذ أو المصادقة أو الربط بالشبكة المحلية.</string>
     <string name="advanced_controller_unavailable">يدير Meow وحدة التحكم المحلية المحمية بالمصادقة. لا تتوفر تجاوزات Android لعناوين وحدة التحكم أو TLS أو CORS أو بيانات الاعتماد.</string>
     <string name="advanced_routing_unavailable">تدير الشاشة الرئيسية وضع التوجيه. لا يوفر Android مستوى سجل خاصًا بكل ملف.</string>
@@ -591,8 +591,13 @@
     <string name="advanced_fake_ip_filter_replace">استبدال الأنماط</string>
     <string name="advanced_fake_ip_filter_format">نطاق واحد أو لاحقة مثل +.example.test في كل سطر. القائمة الفارغة تعني عدم الترشيح في كلا الوضعين.</string>
     <string name="advanced_fake_ip_filter_invalid">أدخل نطاقات أو لواحق +. فريدة. لا تُدعم القواعد.</string>
+    <string name="advanced_dns_bootstrap">خوادم DNS للتهيئة</string>
+    <string name="advanced_dns_bootstrap_detail">تُستخدم لحل أسماء خوادم DNS التي تُهيَّأ محليًا. ولا تستبدل DNS العادي أو محلل عناوين العقد أو DNS الذي يعالجه وكيل بعيد.</string>
+    <string name="advanced_dns_bootstrap_next_connection">تُطبَّق تغييرات خوادم DNS للتهيئة عند اتصال VPN التالي.</string>
+    <string name="advanced_dns_bootstrap_endpoints">خوادم UDP/TCP بعناوين رقمية (udp://IP:port، واحد لكل سطر)</string>
+    <string name="advanced_dns_bootstrap_invalid">أدخل من 1 إلى 8 خوادم UDP أو TCP مختلفة بعناوين رقمية.</string>
     <string name="advanced_dns_fallback">خوادم DNS الاحتياطية</string>
-    <string name="advanced_dns_fallback_inherit">استخدام الإعداد الافتراضي لوضع DNS</string>
+    <string name="advanced_dns_mode_default">استخدام الإعداد الافتراضي لوضع DNS</string>
     <string name="advanced_dns_fallback_next_connection">تُطبّق تغييرات خوادم DNS الاحتياطية المحفوظة عند اتصال VPN التالي.</string>
     <string name="advanced_dns_fallback_detail">استبدال الخوادم الاحتياطية ومرشحاتها معًا. تُستعلم الخوادم الاحتياطية أولًا عند تطابق النطاق، وتُرفض الإجابات العادية عند تطابق CIDR. قد يُستخدم الاحتياطي عند فشل DNS الأساسي. لا يستخدم وضع الاستبدال GeoIP.</string>
     <string name="advanced_dns_fallback_upstreams">خوادم UDP/TCP بعناوين رقمية (udp://IP:port، واحد لكل سطر)</string>

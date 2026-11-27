@@ -327,7 +327,7 @@
     <string name="advanced_routing">Маршрутизация и журналы</string>
     <string name="advanced_sniffer">Анализ трафика</string>
     <string name="advanced_data">Данные и инструменты</string>
-    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов.</string>
+    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. DNS через HTTP/3, переопределение системного DNS и отдельный DNS-слушатель недоступны.</string>
     <string name="advanced_listeners_unavailable">VPN Android не запускает HTTP-, SOCKS-, смешанные и прозрачные прокси-слушатели. Порты, аутентификация и привязка к локальной сети недоступны.</string>
     <string name="advanced_controller_unavailable">Meow управляет локальным контроллером с аутентификацией. Адреса контроллера, TLS, CORS и учётные данные недоступны для переопределения в Android.</string>
     <string name="advanced_routing_unavailable">Режим маршрутизации задаётся на главном экране. Android не поддерживает уровень журнала для отдельных профилей.</string>
@@ -559,8 +559,13 @@
     <string name="advanced_fake_ip_filter_replace">Заменить шаблоны</string>
     <string name="advanced_fake_ip_filter_format">Один домен или суффикс вида +.example.test на строку. Пустой список отключает фильтрацию в обоих режимах.</string>
     <string name="advanced_fake_ip_filter_invalid">Укажите уникальные домены или суффиксы +. Правила не поддерживаются.</string>
+    <string name="advanced_dns_bootstrap">Начальный DNS</string>
+    <string name="advanced_dns_bootstrap_detail">Разрешает имена вышестоящих DNS-серверов, которые инициализируются локально. Не заменяет обычный DNS, резолвер узлов или DNS на стороне прокси.</string>
+    <string name="advanced_dns_bootstrap_next_connection">Сохранённые изменения начального DNS вступят в силу при следующем подключении VPN.</string>
+    <string name="advanced_dns_bootstrap_endpoints">Числовые адреса UDP/TCP (udp://IP:порт, один на строку)</string>
+    <string name="advanced_dns_bootstrap_invalid">Введите от 1 до 8 различных числовых адресов UDP или TCP.</string>
     <string name="advanced_dns_fallback">Резервный DNS</string>
-    <string name="advanced_dns_fallback_inherit">По умолчанию для режима DNS</string>
+    <string name="advanced_dns_mode_default">По умолчанию для режима DNS</string>
     <string name="advanced_dns_fallback_next_connection">Сохранённые изменения резервного DNS вступят в силу при следующем подключении VPN.</string>
     <string name="advanced_dns_fallback_detail">Заменяет резервные серверы и их фильтры. При совпадении домена сначала опрашивается резервный сервер; совпадение CIDR отклоняет обычный ответ с адресом. Резервный сервер также может использоваться при сбое основного DNS. Режим замены не использует GeoIP.</string>
     <string name="advanced_dns_fallback_upstreams">Числовые адреса UDP/TCP (udp://IP:порт, один на строку)</string>

@@ -620,6 +620,133 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_override_resolves_actual_local_upstream_and_stays_frozen_live() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        fn answer(query: &[u8], ip: [u8; 4]) -> Vec<u8> {
+            let mut end = 12;
+            while query[end] != 0 {
+                end += 1 + usize::from(query[end]);
+            }
+            end += 5;
+            let found = query[end - 4..end - 2] == [0, 1];
+            let mut reply = query[..end].to_vec();
+            reply[2..4].copy_from_slice(&[0x81, 0x80]);
+            reply[6..12].copy_from_slice(&[0, u8::from(found), 0, 0, 0, 0]);
+            if found {
+                reply.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+                reply.extend_from_slice(&ip);
+            }
+            reply
+        }
+
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let (authored, chosen, upstream) = rt.block_on(async {
+            (
+                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+            )
+        });
+        let authored_addr = authored.local_addr().unwrap();
+        let chosen_addr = chosen.local_addr().unwrap();
+        let upstream_port = upstream.local_addr().unwrap().port();
+        let authored_hits = Arc::new(AtomicUsize::new(0));
+        let chosen_hits = Arc::new(AtomicUsize::new(0));
+        let a_hits = authored_hits.clone();
+        let c_hits = chosen_hits.clone();
+        let authored_task = rt.spawn(async move {
+            loop {
+                let (mut conn, _) = authored.accept().await.unwrap();
+                let len = usize::from(conn.read_u16().await.unwrap());
+                let mut query = vec![0; len];
+                conn.read_exact(&mut query).await.unwrap();
+                assert_eq!(&query[13..25], b"fixture-root");
+                a_hits.fetch_add(1, Ordering::Relaxed);
+                let reply = answer(&query, [127, 0, 0, 1]);
+                conn.write_u16(reply.len() as u16).await.unwrap();
+                conn.write_all(&reply).await.unwrap();
+            }
+        });
+        let chosen_task = rt.spawn(async move {
+            let mut buf = [0; 1536];
+            loop {
+                let (len, peer) = chosen.recv_from(&mut buf).await.unwrap();
+                assert!([b"fixture-root", b"fixture-live"]
+                    .iter()
+                    .any(|name| &buf[13..25] == name.as_slice()));
+                c_hits.fetch_add(1, Ordering::Relaxed);
+                chosen
+                    .send_to(&answer(&buf[..len], [127, 0, 0, 1]), peer)
+                    .await
+                    .unwrap();
+            }
+        });
+        let upstream_task = rt.spawn(async move {
+            let mut buf = [0; 1536];
+            loop {
+                let (len, peer) = upstream.recv_from(&mut buf).await.unwrap();
+                upstream
+                    .send_to(&answer(&buf[..len], [192, 0, 2, 84]), peer)
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let profile = format!("ipv6: false\ndns:\n  nameserver: ['udp://fixture-root.invalid:{upstream_port}']\n  default-nameserver: ['tcp://{authored_addr}']\n  fake-ip-filter: ['+.test']\nrules: ['MATCH,DIRECT']\n");
+        let snapshot = NameserverPolicyOverride::decode(
+            &serde_json::json!({
+                "bootstrap":[{"transport":"UDP", "endpoint":chosen_addr.to_string()}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let ask = |name| {
+            let query = dns_query(name, 1);
+            let reply = rt
+                .block_on(meow_dns::DnsServer::handle_query(&query, &resolver()))
+                .unwrap();
+            assert_eq!(&reply[6..8], &[0, 1]);
+            assert_eq!(&reply[reply.len() - 4..], &[192, 0, 2, 84]);
+        };
+        let running = start_with_policy(
+            Some(&profile),
+            DnsUpstreams::Profile,
+            "bootstrap-chosen",
+            false,
+            snapshot,
+        );
+        let boot_hits = chosen_hits.load(Ordering::Relaxed);
+        assert!(boot_hits > 0);
+        assert_eq!(authored_hits.load(Ordering::Relaxed), 0);
+        ask("startup.test");
+        let custom = DnsUpstreams::decode(&serde_json::json!({
+            "version":1, "mode":"custom",
+            "upstreams":[{"transport":"udp","endpoint":format!("fixture-live.invalid:{upstream_port}"),"egress":"direct"}],
+        }).to_string()).unwrap();
+        apply(custom).unwrap();
+        ask("live.test");
+        assert!(chosen_hits.load(Ordering::Relaxed) > boot_hits);
+        assert_eq!(authored_hits.load(Ordering::Relaxed), 0);
+        drop(running);
+
+        let _cold = start_with_policy(
+            Some(&profile),
+            DnsUpstreams::Profile,
+            "bootstrap-inherited",
+            false,
+            NameserverPolicyOverride::default(),
+        );
+        ask("cold.test");
+        assert!(authored_hits.load(Ordering::Relaxed) > 0);
+        authored_task.abort();
+        chosen_task.abort();
+        upstream_task.abort();
+    }
+
+    #[test]
     fn fallback_override_queries_real_domain_and_cidr_gates_and_stays_frozen_live() {
         async fn serve(socket: tokio::net::UdpSocket, fallback: bool) {
             let mut buf = [0; 1536];
