@@ -303,7 +303,7 @@
     <string name="advanced_routing">Định tuyến và nhật ký</string>
     <string name="advanced_sniffer">Nhận diện lưu lượng</string>
     <string name="advanced_data">Dữ liệu và công cụ</string>
-    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có tùy chọn riêng cho IPv6 của DNS, DNS qua HTTP/3, DNS hệ thống, trình lắng nghe DNS, máy chủ dự phòng, chính sách.</string>
+    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có tùy chọn riêng cho IPv6 của DNS, DNS qua HTTP/3, DNS hệ thống, trình lắng nghe DNS, máy chủ dự phòng.</string>
     <string name="advanced_listeners_unavailable">VPN Android không khởi chạy trình lắng nghe proxy HTTP, SOCKS, kết hợp hoặc trong suốt. Không có tùy chọn cổng, xác thực và liên kết mạng LAN.</string>
     <string name="advanced_controller_unavailable">Meow quản lý bộ điều khiển cục bộ có xác thực. Không thể ghi đè địa chỉ bộ điều khiển, TLS, CORS và thông tin xác thực trên Android.</string>
     <string name="advanced_routing_unavailable">Chế độ định tuyến được quản lý ở màn hình chính. Android không có mức nhật ký theo hồ sơ.</string>
@@ -529,4 +529,12 @@
     <string name="advanced_fake_ip_filter_replace">Thay thế mẫu tên miền</string>
     <string name="advanced_fake_ip_filter_format">Mỗi dòng nhập một tên miền hoặc hậu tố như +.example.test. Danh sách trống không lọc ở cả hai chế độ.</string>
     <string name="advanced_fake_ip_filter_invalid">Nhập tên miền hoặc hậu tố +. không trùng nhau. Không hỗ trợ mục dạng quy tắc.</string>
+    <string name="advanced_nameserver_policy">Chính sách máy chủ DNS</string>
+    <string name="advanced_nameserver_policy_detail">Định tuyến truy vấn được gửi đến máy chủ thượng nguồn. Câu trả lời Fake-IP tạo cục bộ không dùng các quy tắc này.</string>
+    <string name="advanced_nameserver_policy_rows">Quy tắc theo thứ tự</string>
+    <string name="advanced_nameserver_policy_replace">Thay danh sách quy tắc</string>
+    <string name="advanced_nameserver_policy_format">Mỗi dòng nhập một tên miền hoặc +.example.test và IP dạng số kèm cổng theo udp:// hoặc tcp://. Danh sách trống xóa quy tắc kế thừa.</string>
+    <string name="advanced_nameserver_policy_invalid">Nhập mẫu tên miền không trùng và địa chỉ UDP hoặc TCP dạng số kèm cổng.</string>
+    <string name="advanced_nameserver_policy_clear">Xóa quy tắc</string>
+    <string name="advanced_nameserver_policy_routing_note">Máy chủ dự phòng vẫn có thể trả lời nếu cấu hình không dùng chính sách độc quyền. Bộ phân giải DIRECT riêng chỉ theo các quy tắc này nếu cấu hình bật tùy chọn đó.</string>
 </resources>

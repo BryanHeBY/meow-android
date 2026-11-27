@@ -329,7 +329,7 @@
     <string name="advanced_routing">Routing and logging</string>
     <string name="advanced_sniffer">Traffic sniffing</string>
     <string name="advanced_data">Data and tools</string>
-    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback, policies are unavailable here.</string>
+    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback are unavailable here.</string>
     <string name="advanced_listeners_unavailable">The Android VPN starts no HTTP, SOCKS, mixed, or transparent proxy listeners. Listener ports, authentication, and LAN binding are unavailable.</string>
     <string name="advanced_controller_unavailable">Meow manages the authenticated loopback controller. Custom controller addresses, TLS, CORS, and credentials are unavailable as Android overrides.</string>
     <string name="advanced_routing_unavailable">The Home screen owns routing mode. Android has no profile-scoped log-level control.</string>
@@ -550,4 +550,12 @@
     <string name="advanced_fake_ip_filter_replace">Replace patterns</string>
     <string name="advanced_fake_ip_filter_format">One domain or +.example.test suffix per line. Empty means no filtering in either mode.</string>
     <string name="advanced_fake_ip_filter_invalid">Enter unique domains or +. suffixes. Rule entries are not supported.</string>
+    <string name="advanced_nameserver_policy">DNS nameserver policy</string>
+    <string name="advanced_nameserver_policy_detail">Routes queries that reach an upstream. Fake-IP answers generated locally do not use these rules.</string>
+    <string name="advanced_nameserver_policy_rows">Ordered rules</string>
+    <string name="advanced_nameserver_policy_replace">Replace rule list</string>
+    <string name="advanced_nameserver_policy_format">Enter one domain or +.example.test and one udp:// or tcp:// numeric IP with port per line. Empty clears inherited rules.</string>
+    <string name="advanced_nameserver_policy_invalid">Enter distinct domain patterns and numeric UDP or TCP endpoints with ports.</string>
+    <string name="advanced_nameserver_policy_clear">Clear rules</string>
+    <string name="advanced_nameserver_policy_routing_note">Fallback can still answer unless the profile uses exclusive policy. A separate DIRECT resolver follows these rules only if the profile enables it.</string>
 </resources>

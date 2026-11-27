@@ -27,12 +27,13 @@ object MeowCore {
         profileId: Long,
         capability: String,
         sourceDnsRequiresBuiltin: Boolean = false,
+        nameserverPolicy: String = "null",
     ): Int
 
     /** Commits a staged preference and, when requested, installs its live resolver. Returns a DNS issue code on failure. */
     external fun nativeCommitDns(dns: String, staged: String, target: String, selectedId: Long, applyLive: Boolean): String?
 
-    external fun nativeCheckCachedDns(yaml: String, settings: String): String?
+    external fun nativeCheckCachedDns(yaml: String, settings: String, nameserverPolicy: String = "null"): String?
 
     /** Applied DNS status with redacted endpoint details. */
     external fun nativeDnsStatus(): String?
@@ -72,7 +73,7 @@ object MeowCore {
     external fun nativeIsRunning(): Boolean
     external fun nativeGetUploadTraffic(): Long
     external fun nativeGetDownloadTraffic(): Long
-    external fun nativeValidateConfig(yaml: String, dns: String): Int
+    external fun nativeValidateConfig(yaml: String, dns: String, nameserverPolicy: String = "null"): Int
     external fun nativeValidateProfileStructure(yaml: String): Int
     external fun nativeGetLastError(): String
     external fun nativeVersion(): String

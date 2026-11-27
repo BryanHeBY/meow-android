@@ -48,12 +48,21 @@ internal data class OverrideForm(
     val dnsSelectedId: Long? = null,
     val invalidDnsPreference: Boolean = false,
     val saving: Boolean = false,
+    val expected: ConfigurationOverride = saved,
 ) {
-    fun draftFor(section: OverrideSection): ConfigurationOverride = when (section) {
-        OverrideSection.MAIN -> saved.copy(ipv6 = draft.ipv6, appQuic = draft.appQuic)
-        OverrideSection.CORE -> saved.copy(coreBehavior = draft.coreBehavior)
-        OverrideSection.HOSTS -> saved.copy(dnsHosts = draft.dnsHosts)
-        OverrideSection.FAKE_IP -> saved.copy(fakeIpFilter = draft.fakeIpFilter)
+    fun draftFor(section: OverrideSection): ConfigurationOverride = section.patch(saved, draft)
+
+    fun afterSectionSave(section: OverrideSection, persisted: ConfigurationOverride): OverrideForm {
+        // A dirty section keeps both its draft and its original comparison
+        // value. Refreshing it to the latest saved value would let a later
+        // save overwrite a competing edit without detecting the conflict.
+        val dirty = OverrideSection.entries.filter { it != section && !it.matches(draft, saved) }
+        return copy(
+            saved = persisted,
+            draft = dirty.fold(persisted) { state, item -> item.patch(state, draft) },
+            expected = dirty.fold(persisted) { state, item -> item.patch(state, expected) },
+            saving = false,
+        )
     }
 
     fun canSave(section: OverrideSection) = !saving && saved != draftFor(section)
@@ -62,7 +71,7 @@ internal data class OverrideForm(
             (draftDns.requiresProfile && draftDns.profileId != dnsSelectedId))
 }
 
-internal enum class OverrideSection { MAIN, CORE, HOSTS, FAKE_IP }
+internal typealias OverrideSection = io.github.madeye.meow.preference.OverrideSection
 
 internal sealed interface OverrideEvent {
     data object Saved : OverrideEvent
@@ -156,8 +165,10 @@ internal class ConfigurationOverrideViewModel(
         form.value = current.copy(saving = true)
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { store.save(profileId, candidate) }
-                form.update { it?.copy(saved = candidate, saving = false) }
+                val persisted = withContext(Dispatchers.IO) {
+                    store.saveSection(profileId, section, current.expected, candidate)
+                }
+                form.update { it?.afterSectionSave(section, persisted) }
                 _events.send(OverrideEvent.Saved)
             } catch (e: IOException) {
                 Timber.w(e, "Saving configuration override failed")

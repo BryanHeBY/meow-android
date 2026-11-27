@@ -319,7 +319,7 @@
     <string name="advanced_routing">مسیریابی و گزارش‌ها</string>
     <string name="advanced_sniffer">بررسی ترافیک</string>
     <string name="advanced_data">داده‌ها و ابزارها</string>
-    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. تنظیم جداگانهٔ IPv6 برای DNS، DNS روی HTTP/3، DNS سیستم، شنونده‌های DNS، سرورهای جایگزین، سیاست‌ها در اینجا در دسترس نیست.</string>
+    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. تنظیم جداگانهٔ IPv6 برای DNS، DNS روی HTTP/3، DNS سیستم، شنونده‌های DNS، سرورهای جایگزین در اینجا در دسترس نیست.</string>
     <string name="advanced_listeners_unavailable">هیچ شنوندهٔ پراکسی HTTP، SOCKS، ترکیبی یا شفاف در VPN اندروید راه‌اندازی نمی‌شود. درگاه‌ها، احراز هویت و اتصال به شبکهٔ محلی در دسترس نیستند.</string>
     <string name="advanced_controller_unavailable">مِیو کنترل‌گر محلی دارای احراز هویت را مدیریت می‌کند. آدرس کنترل‌گر، TLS، CORS و اطلاعات ورود قابل بازنویسی نیستند.</string>
     <string name="advanced_routing_unavailable">حالت مسیریابی در صفحهٔ اصلی مدیریت می‌شود. در Android نمی‌توان سطح گزارش را برای هر پروفایل تنظیم کرد.</string>
@@ -547,4 +547,12 @@
     <string name="advanced_fake_ip_filter_replace">جایگزینی الگوها</string>
     <string name="advanced_fake_ip_filter_format">در هر خط یک دامنه یا پسوند مانند +.example.test وارد کنید. فهرست خالی در هر دو حالت یعنی بدون فیلتر.</string>
     <string name="advanced_fake_ip_filter_invalid">دامنه‌ها یا پسوندهای +. یکتا وارد کنید. قواعد پشتیبانی نمی‌شوند.</string>
+    <string name="advanced_nameserver_policy">سیاست سرورهای DNS</string>
+    <string name="advanced_nameserver_policy_detail">درخواست‌هایی را که به بالادست می‌رسند مسیریابی می‌کند. پاسخ‌های محلی Fake-IP از این قواعد استفاده نمی‌کنند.</string>
+    <string name="advanced_nameserver_policy_rows">قواعد مرتب</string>
+    <string name="advanced_nameserver_policy_replace">جایگزینی فهرست قواعد</string>
+    <string name="advanced_nameserver_policy_format">در هر خط یک دامنه یا +.example.test و یک نشانی عددی IP با پورت از نوع udp:// یا tcp:// وارد کنید. فهرست خالی قواعد ارثی را پاک می‌کند.</string>
+    <string name="advanced_nameserver_policy_invalid">الگوهای دامنهٔ یکتا و نشانی‌های عددی UDP یا TCP با پورت وارد کنید.</string>
+    <string name="advanced_nameserver_policy_clear">پاک کردن قواعد</string>
+    <string name="advanced_nameserver_policy_routing_note">اگر پروفایل سیاست انحصاری نداشته باشد، سرور جایگزین همچنان می‌تواند پاسخ دهد. حل‌کنندهٔ جداگانهٔ DIRECT تنها با فعال‌سازی در پروفایل از این قواعد پیروی می‌کند.</string>
 </resources>

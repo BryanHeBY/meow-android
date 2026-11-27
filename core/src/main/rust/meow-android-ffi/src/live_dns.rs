@@ -4,6 +4,7 @@
 
 use crate::dns_override::{engine_dns_block, safe_endpoint, DnsIssue, DnsUpstreams};
 use crate::engine;
+use crate::nameserver_policy_override::NameserverPolicyOverride;
 use anyhow::{anyhow, bail, Result};
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jlong, jstring};
@@ -30,6 +31,7 @@ pub(crate) struct LiveDns {
     // Runtime overlays may synthesize a mapping for Built-in while the
     // original DNS block remains invalid in every profile-preserving mode.
     source_dns_requires_builtin: bool,
+    nameserver_policy: NameserverPolicyOverride,
     config_path: Option<String>,
     applied: Mutex<Applied>,
     raw_config: Arc<RwLock<RawConfig>>,
@@ -46,6 +48,7 @@ impl LiveDns {
         profile_id: i64,
         profile_dns: Option<serde_yaml::Value>,
         source_dns_requires_builtin: bool,
+        nameserver_policy: NameserverPolicyOverride,
         config_path: Option<String>,
         mode: DnsUpstreams,
         resolver: &Arc<Resolver>,
@@ -57,6 +60,7 @@ impl LiveDns {
             profile_id,
             profile_dns,
             source_dns_requires_builtin,
+            nameserver_policy,
             config_path,
             applied: Mutex::new(Applied {
                 mode,
@@ -77,7 +81,7 @@ impl LiveDns {
             return Ok(None);
         }
         drop(applied);
-        let block = engine_dns_block(self.profile_dns.clone(), mode)
+        let block = engine_dns_block(self.profile_dns.clone(), mode, &self.nameserver_policy)
             .map_err(|_| DnsIssue::ResolverRejected)?;
         let mut dns: RawDns = serde_yaml::from_value(serde_yaml::Value::Mapping(block))
             .map_err(|_| DnsIssue::ResolverRejected)?;
@@ -285,6 +289,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
     _class: JClass,
     yaml: JString,
     settings: JString,
+    nameserver_policy: JString,
 ) -> jstring {
     let result = (|| {
         let yaml: String = env
@@ -297,8 +302,14 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeCheckCache
             .into();
         let (mode, _) =
             DnsUpstreams::decode_scoped(&settings).map_err(|_| DnsIssue::InvalidSettings)?;
+        let policy_wire: String = env
+            .get_string(&nameserver_policy)
+            .map_err(|_| DnsIssue::InvalidSettings)?
+            .into();
+        let policy = NameserverPolicyOverride::decode(&policy_wire)
+            .map_err(|_| DnsIssue::InvalidSettings)?;
         mode.check_android_support()?;
-        mode.check_cached_profile(&yaml)
+        mode.check_cached_profile(&yaml, &policy)
     })();
     dns_result(&env, result)
 }
@@ -356,6 +367,22 @@ mod tests {
         name: &str,
         source_requires_builtin: bool,
     ) -> impl Drop {
+        start_with_policy(
+            profile,
+            upstreams,
+            name,
+            source_requires_builtin,
+            Default::default(),
+        )
+    }
+
+    fn start_with_policy(
+        profile: Option<&str>,
+        upstreams: DnsUpstreams,
+        name: &str,
+        source_requires_builtin: bool,
+        policy: NameserverPolicyOverride,
+    ) -> impl Drop {
         struct Running(std::path::PathBuf);
         impl Drop for Running {
             fn drop(&mut self) {
@@ -375,7 +402,14 @@ mod tests {
         *crate::HOME_DIR.lock() = Some(home.to_str().unwrap().to_string());
         let running = Running(dir);
         assert_eq!(
-            crate::start_engine(None, None, upstreams, 41, source_requires_builtin),
+            crate::start_engine_with_policy(
+                None,
+                None,
+                upstreams,
+                41,
+                source_requires_builtin,
+                policy
+            ),
             0,
             "{}",
             crate::get_error()
@@ -478,6 +512,178 @@ mod tests {
 
         apply(DnsUpstreams::Builtin).unwrap();
         assert!(Arc::ptr_eq(&resolver(), &before));
+    }
+
+    #[test]
+    fn ordered_nameserver_policy_snapshot_routes_real_dns_and_survives_live_changes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        fn txt_response(query: &[u8], mark: u8) -> Vec<u8> {
+            let mut end = 12;
+            while query[end] != 0 {
+                end += 1 + usize::from(query[end]);
+            }
+            end += 5;
+            let mut reply = query[..end].to_vec();
+            reply[2..4].copy_from_slice(&[0x81, 0x80]);
+            reply[6..12].copy_from_slice(&[0, 1, 0, 0, 0, 0]);
+            reply.extend_from_slice(&[0xc0, 0x0c, 0, 16, 0, 1, 0, 0, 0, 60, 0, 2, 1, mark]);
+            reply
+        }
+
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let (udp, tcp) = rt.block_on(async {
+            (
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+            )
+        });
+        let udp_row = serde_json::json!({
+            "pattern": "example.test", "transport": "UDP", "endpoint": udp.local_addr().unwrap().to_string()
+        });
+        let tcp_row = serde_json::json!({
+            "pattern": "+.example.test", "transport": "TCP", "endpoint": tcp.local_addr().unwrap().to_string()
+        });
+        let uni = rt.spawn(async move {
+            let mut buf = [0u8; 1536];
+            loop {
+                let (n, peer) = udp.recv_from(&mut buf).await.unwrap();
+                udp.send_to(&txt_response(&buf[..n], b'U'), peer)
+                    .await
+                    .unwrap();
+            }
+        });
+        let tni = rt.spawn(async move {
+            loop {
+                let (mut stream, _) = tcp.accept().await.unwrap();
+                tokio::spawn(async move {
+                    // Respond on an existing pooled TCP socket, not just at connect.
+                    while let Ok(n) = stream.read_u16().await {
+                        let mut query = vec![0u8; usize::from(n)];
+                        if stream.read_exact(&mut query).await.is_err() {
+                            break;
+                        }
+                        let reply = txt_response(&query, b'T');
+                        if stream.write_u16(reply.len() as u16).await.is_err()
+                            || stream.write_all(&reply).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let first = NameserverPolicyOverride::decode(
+            &serde_json::json!([udp_row.clone(), tcp_row.clone()]).to_string(),
+        )
+        .unwrap();
+        let reversed =
+            NameserverPolicyOverride::decode(&serde_json::json!([tcp_row, udp_row]).to_string())
+                .unwrap();
+        let profile = "dns:\n  nameserver: ['rcode://refused']\n  nameserver-policy: {'authored.test': 'rcode://refused'}\nrules: ['MATCH,DIRECT']\n";
+        let ask = |dns: &meow_dns::Resolver, name| {
+            let query = dns_query(name, 16);
+            let reply = rt
+                .block_on(meow_dns::DnsServer::handle_query(&query, dns))
+                .unwrap();
+            assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), 1, "{name}");
+            *reply.last().unwrap()
+        };
+
+        // Exercise the Builtin startup path, replacing the unrelated
+        // default resolvers with synthetic REFUSED pools before packet tests.
+        // Even a broken policy can never send a test query off device.
+        let builtin_fixture = rt
+            .block_on(engine::load_profile_with_policy(
+                profile,
+                &DnsUpstreams::Builtin,
+                &first,
+                |stripped| async move {
+                    let mut raw = meow_config::parse_raw_yaml(&stripped)?;
+                    let dns = raw.dns.as_mut().unwrap();
+                    dns.nameserver = Some(vec!["rcode://refused".into()]);
+                    dns.default_nameserver = dns.nameserver.clone();
+                    dns.proxy_server_nameserver = dns.nameserver.clone();
+                    engine::build_startup_config(raw, None).await
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            ask(&builtin_fixture.config.dns.resolver, "example.test"),
+            b'T'
+        );
+        assert_eq!(
+            ask(&builtin_fixture.config.dns.resolver, "sub.example.test"),
+            b'T'
+        );
+
+        let first_engine = start_with_policy(
+            Some(profile),
+            DnsUpstreams::Builtin,
+            "ordered-policy-first",
+            false,
+            first,
+        );
+        assert_eq!(status().policy_entries, 2);
+        // Exact and +. share the apex slot; document-last wins that slot.
+        apply(DnsUpstreams::Profile).unwrap();
+        assert_eq!(status().policy_entries, 2);
+        assert_eq!(ask(&resolver(), "example.test"), b'T');
+        assert_eq!(ask(&resolver(), "sub.example.test"), b'T');
+        {
+            let engine = crate::ENGINE.lock();
+            let original = engine
+                .as_ref()
+                .unwrap()
+                .live_dns
+                .profile_dns
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                original["nameserver-policy"]["authored.test"],
+                "rcode://refused"
+            );
+            assert!(original["nameserver-policy"].get("example.test").is_none());
+        }
+        drop(first_engine);
+        let second_engine = start_with_policy(
+            Some(profile),
+            DnsUpstreams::Profile,
+            "ordered-policy-second",
+            false,
+            reversed.clone(),
+        );
+        assert_eq!(ask(&resolver(), "example.test"), b'U');
+        assert_eq!(ask(&resolver(), "sub.example.test"), b'T');
+        drop(second_engine);
+
+        let scalar = "dns: legacy-scalar\nrules: ['MATCH,DIRECT']\n";
+        let invalid = start_with_policy(
+            Some(scalar),
+            DnsUpstreams::Builtin,
+            "ordered-policy-invalid",
+            true,
+            reversed,
+        );
+        let before = resolver();
+        let mut persisted = false;
+        let error = commit(DnsUpstreams::Inherit, Some(41), || {
+            persisted = true;
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.downcast::<DnsIssue>().unwrap(),
+            DnsIssue::ResolverRejected
+        );
+        assert!(!persisted);
+        assert!(Arc::ptr_eq(&before, &resolver()));
+        assert_eq!(status().mode, Some("builtin"));
+        assert_eq!(status().policy_entries, 2);
+        drop(invalid);
+        uni.abort();
+        tni.abort();
     }
 
     #[test]

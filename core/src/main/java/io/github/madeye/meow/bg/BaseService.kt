@@ -20,6 +20,7 @@ import io.github.madeye.meow.core.MeowCore
 import io.github.madeye.meow.preference.DnsApplicability
 import io.github.madeye.meow.preference.DnsIssue
 import io.github.madeye.meow.preference.DnsStatus
+import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.database.ClashProfile
 import io.github.madeye.meow.database.PrivateDatabase
@@ -221,6 +222,13 @@ object BaseService {
             val issue = DnsSettingsStore.default.commit(
                 settings, expected, { ActiveConfig.of(Core.currentProfile) },
                 MeowCore::nativeCheckCachedDns,
+                policyFor = { profile ->
+                    if (state == State.Connected && running?.activeConfig == profile) {
+                        running?.appliedOverride?.nameserverPolicy
+                    } else {
+                        ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                    }
+                },
             ) { selected, scoped, staged, target ->
                 PrivateDatabase.withProfileTransaction {
                     if (ActiveConfig.of(Core.currentProfile) != selected || serviceData.state != state ||
@@ -257,7 +265,14 @@ object BaseService {
             val native = MeowCore.nativeDnsStatus()?.let { Json.decodeFromString(DnsStatus.serializer(), it) }
                 ?: DnsStatus()
             val rejection = data?.dnsRejection?.takeIf { it.selection == selected }?.issue
-            val issue = rejection ?: store.activationIssue(saved.settings, selected, MeowCore::nativeCheckCachedDns)
+            val running = data?.meowInstance
+            val issue = rejection ?: store.activationIssue(saved.settings, selected, policyFor = { profile ->
+                if (data?.state == State.Connected && running?.activeConfig == profile) {
+                    running?.appliedOverride?.nameserverPolicy
+                } else {
+                    ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                }
+            }, validate = MeowCore::nativeCheckCachedDns)
             val lastSave = data?.dnsSaveRejection?.takeIf { it.selection == selected }?.issue
             val scope = saved.settings.applicability(selected?.profileId)
             val applicability = when {
@@ -366,7 +381,9 @@ object BaseService {
                 while (data.state == State.Connected && data.meowInstance === running) {
                     val settings = store.load().settings
                     val issue = withContext(Dispatchers.IO) {
-                        store.activationIssue(settings, candidate, MeowCore::nativeCheckCachedDns)
+                        store.activationIssue(settings, candidate, policyFor = { profile ->
+                            ConfigurationOverrideStore.default.effective(profile.profileId).nameserverPolicy
+                        }, validate = MeowCore::nativeCheckCachedDns)
                     }
                     if (data.state != State.Connected || data.meowInstance !== running) return@launch
                     if (ActiveConfig.of(Core.currentProfile) != candidate) return@launch

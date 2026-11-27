@@ -327,7 +327,7 @@
     <string name="advanced_routing">Маршрутизация и журналы</string>
     <string name="advanced_sniffer">Анализ трафика</string>
     <string name="advanced_data">Данные и инструменты</string>
-    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов, политик.</string>
+    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов.</string>
     <string name="advanced_listeners_unavailable">VPN Android не запускает HTTP-, SOCKS-, смешанные и прозрачные прокси-слушатели. Порты, аутентификация и привязка к локальной сети недоступны.</string>
     <string name="advanced_controller_unavailable">Meow управляет локальным контроллером с аутентификацией. Адреса контроллера, TLS, CORS и учётные данные недоступны для переопределения в Android.</string>
     <string name="advanced_routing_unavailable">Режим маршрутизации задаётся на главном экране. Android не поддерживает уровень журнала для отдельных профилей.</string>
@@ -559,4 +559,12 @@
     <string name="advanced_fake_ip_filter_replace">Заменить шаблоны</string>
     <string name="advanced_fake_ip_filter_format">Один домен или суффикс вида +.example.test на строку. Пустой список отключает фильтрацию в обоих режимах.</string>
     <string name="advanced_fake_ip_filter_invalid">Укажите уникальные домены или суффиксы +. Правила не поддерживаются.</string>
+    <string name="advanced_nameserver_policy">Политика DNS-серверов</string>
+    <string name="advanced_nameserver_policy_detail">Действует для запросов к вышестоящим серверам. Локальные ответы Fake-IP эти правила не используют.</string>
+    <string name="advanced_nameserver_policy_rows">Правила по порядку</string>
+    <string name="advanced_nameserver_policy_replace">Заменить список правил</string>
+    <string name="advanced_nameserver_policy_format">Укажите в каждой строке домен или +.example.test и числовой IP с портом по схеме udp:// или tcp://. Пустой список удаляет унаследованные правила.</string>
+    <string name="advanced_nameserver_policy_invalid">Укажите разные шаблоны доменов и числовые адреса UDP или TCP с портом.</string>
+    <string name="advanced_nameserver_policy_clear">Очистить правила</string>
+    <string name="advanced_nameserver_policy_routing_note">Резервный сервер всё ещё может ответить, если профиль не требует исключительной политики. Отдельный резолвер DIRECT следует этим правилам только при включении в профиле.</string>
 </resources>

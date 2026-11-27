@@ -220,13 +220,18 @@ impl DnsUpstreams {
 
     /// Only inspect cached YAML and construct the named inline adapters.
     /// The VPN load and live commit check the actual published proxy registry.
-    pub(crate) fn check_cached_profile(&self, yaml: &str) -> Result<()> {
+    pub(crate) fn check_cached_profile(
+        &self,
+        yaml: &str,
+        policy: &crate::nameserver_policy_override::NameserverPolicyOverride,
+    ) -> Result<()> {
         if !self.requires_profile() {
             return Ok(());
         }
         let mode = self.clone();
+        let policy = policy.clone();
         let prepared = meow_common::yaml::run_on_parse_stack(yaml, move |yaml| {
-            crate::engine::strip_and_inject(yaml, mode)
+            crate::engine::strip_and_inject_with_policy(yaml, mode, &policy)
         })
         .map_err(|_| DnsIssue::ResolverRejected)?
         .map_err(|_| DnsIssue::ResolverRejected)?;
@@ -427,7 +432,11 @@ fn inherited_fake_ip_pattern_valid(value: &Value) -> bool {
     })
 }
 
-pub(crate) fn engine_dns_block(profile: Option<Value>, mode: &DnsUpstreams) -> Result<Mapping> {
+pub(crate) fn engine_dns_block(
+    profile: Option<Value>,
+    mode: &DnsUpstreams,
+    policy: &crate::nameserver_policy_override::NameserverPolicyOverride,
+) -> Result<Mapping> {
     let mut dns = match (mode, profile) {
         // Built-in changes upstreams, not local DNS record/synthesis policy.
         // Do not carry any authored upstream or sockets into this branch.
@@ -557,6 +566,7 @@ pub(crate) fn engine_dns_block(profile: Option<Value>, mode: &DnsUpstreams) -> R
             NEUTRAL_NAMESERVERS.iter().copied(),
         );
     }
+    policy.apply(&mut dns);
     // An override that uses a node must never change that node's own lookup
     // into a lookup routed through itself. Reject tagged node pools/policies
     // before any bootstrap lookup. Subscription mode keeps its own policy.
@@ -655,21 +665,64 @@ proxy-providers: {Remote: {type: http, url: 'https://must-not-fetch.invalid/priv
 rules: [MATCH,DIRECT]
 ";
         let tcp = custom("tcp", "192.0.2.53", Some("Node")).unwrap();
-        tcp.check_cached_profile(profile).unwrap();
+        tcp.check_cached_profile(profile, &Default::default())
+            .unwrap();
         for mode in [
             custom("tcp", "192.0.2.53", Some("Group")).unwrap(),
             custom("tcp", "192.0.2.53", Some("Unknown")).unwrap(),
             custom("udp", "192.0.2.53", Some("Node")).unwrap(),
         ] {
-            let issue = mode.check_cached_profile(profile).unwrap_err();
+            let issue = mode
+                .check_cached_profile(profile, &Default::default())
+                .unwrap_err();
             assert_eq!(
                 issue.downcast::<DnsIssue>().unwrap(),
                 DnsIssue::ProxyUnavailable
             );
         }
         assert!(tcp
-            .check_cached_profile(&profile.replace("port: 8080", "port: 8080, dialer-proxy: Group"))
+            .check_cached_profile(
+                &profile.replace("port: 8080", "port: 8080, dialer-proxy: Group"),
+                &Default::default(),
+            )
             .is_err());
+    }
+
+    #[test]
+    fn named_custom_preflight_applies_policy_snapshot_without_bypassing_shape_or_node_checks() {
+        use crate::nameserver_policy_override::NameserverPolicyOverride;
+        let profile = "dns: {nameserver-policy: broken-map}\nproxies: [{name: Node, type: http, server: 192.0.2.8, port: 8080}]\nrules: [MATCH,DIRECT]\n";
+        let mode = custom("tcp", "192.0.2.53", Some("Node")).unwrap();
+        let empty = NameserverPolicyOverride::decode("[]").unwrap();
+        let row = NameserverPolicyOverride::decode(
+            r#"[{"pattern":"only.test","transport":"TCP","endpoint":"127.0.0.1:5353"}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            mode.check_cached_profile(profile, &NameserverPolicyOverride::default())
+                .unwrap_err()
+                .downcast::<DnsIssue>()
+                .unwrap(),
+            DnsIssue::ResolverRejected
+        );
+        mode.check_cached_profile(profile, &empty).unwrap();
+        mode.check_cached_profile(profile, &row).unwrap();
+        let no_node = profile.replace("name: Node", "name: Other");
+        assert_eq!(
+            mode.check_cached_profile(&no_node, &empty)
+                .unwrap_err()
+                .downcast::<DnsIssue>()
+                .unwrap(),
+            DnsIssue::ProxyUnavailable
+        );
+        let scalar = profile.replace("{nameserver-policy: broken-map}", "scalar");
+        assert_eq!(
+            mode.check_cached_profile(&scalar, &row)
+                .unwrap_err()
+                .downcast::<DnsIssue>()
+                .unwrap(),
+            DnsIssue::ResolverRejected
+        );
     }
 
     #[test]

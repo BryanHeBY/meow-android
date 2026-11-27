@@ -10,9 +10,14 @@ import java.io.IOException
 class DnsSettingsStore(private val file: File) {
     data class Saved(val settings: DnsSettings = DnsSettings(), val invalid: Boolean = false)
 
-    private data class Check(val profile: ActiveConfig, val settings: DnsSettings, val issue: DnsIssue?)
+    private data class Check(
+        val profile: ActiveConfig,
+        val settings: DnsSettings,
+        val nameserverPolicy: List<NameserverPolicyRow>?,
+        val issue: DnsIssue?,
+    )
 
-    // The selected row ID and exact cached YAML are both part of the verdict.
+    // Exact profile, settings, and ordered policy (including null vs empty) identify the verdict.
     @Volatile private var checked: Check? = null
 
     fun load(): Saved = try {
@@ -36,25 +41,30 @@ class DnsSettingsStore(private val file: File) {
     internal fun activationIssue(
         settings: DnsSettings,
         profile: ActiveConfig?,
-        validate: (String, String) -> String?,
+        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>? = { null },
+        validate: (String, String, String) -> String?,
     ): DnsIssue? {
         if (settings.mode == DnsMode.SPLIT) return DnsIssue.SPLIT_UNAVAILABLE
         return when (settings.applicability(profile?.profileId)) {
             DnsApplicability.GLOBAL -> null
             DnsApplicability.PENDING -> DnsIssue.PENDING
             DnsApplicability.UNAVAILABLE -> DnsIssue.PROFILE_UNAVAILABLE
-            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, validate)
+            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, policyFor, validate)
         }
     }
 
     private fun checkNamed(
         profile: ActiveConfig,
         settings: DnsSettings,
-        validate: (String, String) -> String?,
+        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>?,
+        validate: (String, String, String) -> String?,
     ): DnsIssue? {
-        checked?.let { if (it.profile == profile && it.settings == settings) return it.issue }
-        val issue = validate(profile.yaml, settings.encode())?.let(DnsIssue::fromWire)
-        checked = Check(profile, settings, issue)
+        val policy = try { policyFor(profile)?.toList() } catch (_: IOException) { return DnsIssue.INVALID_SETTINGS }
+        checked?.let {
+            if (it.profile == profile && it.settings == settings && it.nameserverPolicy == policy) return it.issue
+        }
+        val issue = validate(profile.yaml, settings.encode(), NameserverPolicyOverride.wire(policy))?.let(DnsIssue::fromWire)
+        checked = Check(profile, settings, policy, issue)
         return issue
     }
 
@@ -64,7 +74,8 @@ class DnsSettingsStore(private val file: File) {
         wire: String,
         expectedProfileId: Long?,
         selected: () -> ActiveConfig?,
-        validate: (String, String) -> String?,
+        validate: (String, String, String) -> String?,
+        policyFor: (ActiveConfig) -> List<NameserverPolicyRow>? = { null },
         publish: (ActiveConfig?, DnsSettings, File, File) -> DnsIssue?,
     ): DnsIssue? {
         if (wire.toByteArray().size > DnsSettings.MAX_WIRE_BYTES) return DnsIssue.INVALID_SETTINGS
@@ -81,7 +92,7 @@ class DnsSettingsStore(private val file: File) {
         val validated = scoped.encode().toByteArray(Charsets.UTF_8)
         if (validated.size > DnsSettings.MAX_WIRE_BYTES) return DnsIssue.INVALID_SETTINGS
         if (profile != null && scoped.requiresProfile) {
-            val issue = checkNamed(profile, scoped, validate)
+            val issue = checkNamed(profile, scoped, policyFor, validate)
             if (selected() != profile) return DnsIssue.PROFILE_CHANGED
             if (issue != null) return issue
         }

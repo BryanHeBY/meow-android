@@ -25,6 +25,7 @@ mod live_dns;
 mod log_level;
 mod logbook;
 mod logging;
+mod nameserver_policy_override;
 mod outbound;
 mod owner;
 mod probe;
@@ -227,12 +228,31 @@ fn drain_log_buffer() -> Vec<String> {
 // Engine lifecycle
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 fn start_engine(
     controllers: Option<ControllerConfig>,
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
     profile_id: i64,
     source_dns_requires_builtin: bool,
+) -> i32 {
+    start_engine_with_policy(
+        controllers,
+        mode,
+        dns,
+        profile_id,
+        source_dns_requires_builtin,
+        Default::default(),
+    )
+}
+
+fn start_engine_with_policy(
+    controllers: Option<ControllerConfig>,
+    mode: Option<TunnelMode>,
+    dns: engine::DnsUpstreams,
+    profile_id: i64,
+    source_dns_requires_builtin: bool,
+    nameserver_policy: nameserver_policy_override::NameserverPolicyOverride,
 ) -> i32 {
     logging::bridge_log("start_engine: acquiring ENGINE lock");
     let mut engine = ENGINE.lock();
@@ -248,6 +268,7 @@ fn start_engine(
         dns,
         profile_id,
         source_dns_requires_builtin,
+        nameserver_policy,
     )) {
         Ok((state, app_port)) => {
             logging::bridge_log("start_engine: engine started successfully");
@@ -271,6 +292,7 @@ async fn start_engine_async(
     dns: engine::DnsUpstreams,
     profile_id: i64,
     source_dns_requires_builtin: bool,
+    nameserver_policy: nameserver_policy_override::NameserverPolicyOverride,
 ) -> Result<(EngineState, u16), anyhow::Error> {
     if source_dns_requires_builtin && !matches!(dns, engine::DnsUpstreams::Builtin) {
         return Err(dns_override::DnsIssue::ResolverRejected.into());
@@ -326,7 +348,7 @@ async fn start_engine_async(
             meow_common::traffic_ledger::apply(ledger, ledger_options);
             let stripped_path = engine::sibling_stripped_path(path);
             (
-                engine::load_stripped_config(path, &dns, &mut startup_logs)
+                engine::load_stripped_config(path, &dns, &nameserver_policy, &mut startup_logs)
                     .await
                     .map_err(load_error)?,
                 stripped_path.to_str().map(str::to_string),
@@ -337,13 +359,18 @@ async fn start_engine_async(
             meow_common::logbook::apply(true);
             meow_common::traffic_ledger::apply(true, Default::default());
             let logs = &mut startup_logs;
-            let loaded = engine::load_profile(MINIMAL_CONFIG, &dns, |stripped| {
-                Box::pin(async move {
-                    let raw = meow_config::parse_raw_yaml(&stripped)?;
-                    logs.apply(raw.log_level.as_deref());
-                    engine::build_startup_config(raw, None).await
-                })
-            })
+            let loaded = engine::load_profile_with_policy(
+                MINIMAL_CONFIG,
+                &dns,
+                &nameserver_policy,
+                |stripped| {
+                    Box::pin(async move {
+                        let raw = meow_config::parse_raw_yaml(&stripped)?;
+                        logs.apply(raw.log_level.as_deref());
+                        engine::build_startup_config(raw, None).await
+                    })
+                },
+            )
             .await
             .map_err(load_error)?;
             (loaded, None)
@@ -470,6 +497,7 @@ async fn start_engine_async(
         profile_id,
         profile_dns,
         source_dns_requires_builtin,
+        nameserver_policy,
         loaded_from,
         dns,
         &config.dns.resolver,
@@ -652,6 +680,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
     profile_id: jlong,
     capability: JString,
     source_dns_requires_builtin: jni::sys::jboolean,
+    nameserver_policy: JString,
 ) -> jint {
     let mut read =
         |value: &JString| -> String { env.get_string(value).map(String::from).unwrap_or_default() };
@@ -661,10 +690,14 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
         .and_then(|(settings, owner)| {
             settings.check_android_support()?;
             settings.require_scope(owner, profile_id)?;
-            Ok(settings)
+            let policy = nameserver_policy_override::NameserverPolicyOverride::decode(&read(
+                &nameserver_policy,
+            ))
+            .map_err(|_| anyhow::Error::from(dns_override::DnsIssue::InvalidSettings))?;
+            Ok((settings, policy))
         });
     match settings {
-        Ok(settings) => start_engine(
+        Ok((settings, policy)) => start_engine_with_policy(
             Some(ControllerConfig {
                 dashboard_addr: read(&addr),
                 dashboard_secret: read(&dashboard_secret),
@@ -674,6 +707,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
             settings,
             profile_id,
             source_dns_requires_builtin != jni::sys::JNI_FALSE,
+            policy,
         ),
         Err(error) => {
             set_error(error.to_string());
@@ -964,7 +998,16 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeGetDownloa
     }
 }
 
+#[cfg(test)]
 fn validate_effective_config(yaml: &str, mode: &engine::DnsUpstreams) -> anyhow::Result<()> {
+    validate_effective_config_with_policy(yaml, mode, &Default::default())
+}
+
+fn validate_effective_config_with_policy(
+    yaml: &str,
+    mode: &engine::DnsUpstreams,
+    policy: &nameserver_policy_override::NameserverPolicyOverride,
+) -> anyhow::Result<()> {
     mode.check_android_support()?;
     // The core's offline flag is process-wide. Validation runs in the
     // app process; holding ENGINE also prevents a same-process caller
@@ -982,7 +1025,7 @@ fn validate_effective_config(yaml: &str, mode: &engine::DnsUpstreams) -> anyhow:
     }
     meow_config::set_offline_validate(true);
     let _offline = Offline;
-    let load = engine::load_profile(yaml, mode, |stripped| {
+    let load = engine::load_profile_with_policy(yaml, mode, policy, |stripped| {
         Box::pin(async move { meow_config::load_config_from_str(&stripped).await })
     });
     let loaded = get_runtime().block_on(load)?;
@@ -996,13 +1039,20 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeValidateCo
     _class: JClass,
     yaml: JString,
     dns: JString,
+    nameserver_policy: JString,
 ) -> jint {
     let yaml: String = env.get_string(&yaml).map(|s| s.into()).unwrap_or_default();
     let dns: String = env.get_string(&dns).map(|s| s.into()).unwrap_or_default();
+    let wire: String = env
+        .get_string(&nameserver_policy)
+        .map(|s| s.into())
+        .unwrap_or_default();
     let validate = || {
         let (mode, _) = engine::DnsUpstreams::decode_scoped(&dns)
             .map_err(|_| dns_override::DnsIssue::InvalidSettings)?;
-        validate_effective_config(&yaml, &mode)
+        let policy = nameserver_policy_override::NameserverPolicyOverride::decode(&wire)
+            .map_err(|_| dns_override::DnsIssue::InvalidSettings)?;
+        validate_effective_config_with_policy(&yaml, &mode, &policy)
     };
     match validate() {
         Ok(()) => 0,

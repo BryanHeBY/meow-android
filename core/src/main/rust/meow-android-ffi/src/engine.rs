@@ -78,6 +78,7 @@ pub(crate) async fn build_startup_config(
 
 pub(crate) use crate::dns_override::DnsUpstreams;
 use crate::dns_override::{engine_dns_block, has_list};
+use crate::nameserver_policy_override::NameserverPolicyOverride;
 
 /// Strip the shorthand listener ports + explicit `listeners:` array +
 /// `sniffer:` block from a raw config YAML, replace its `dns:` block with
@@ -85,7 +86,15 @@ use crate::dns_override::{engine_dns_block, has_list};
 /// generic `serde_yaml::Value` so unmodelled top-level keys (`tun:`,
 /// `experimental:`, `profile:`, etc.) round-trip unchanged.
 pub(crate) fn strip_and_inject(yaml: &str, upstreams: DnsUpstreams) -> Result<String> {
-    strip(yaml, &upstreams).map(|(stripped, _)| stripped)
+    strip_and_inject_with_policy(yaml, upstreams, &NameserverPolicyOverride::default())
+}
+
+pub(crate) fn strip_and_inject_with_policy(
+    yaml: &str,
+    upstreams: DnsUpstreams,
+    policy: &NameserverPolicyOverride,
+) -> Result<String> {
+    strip(yaml, &upstreams, policy).map(|(stripped, _)| stripped)
 }
 
 /// Import admission checks the document's shape. A DNS mode may replace
@@ -101,7 +110,11 @@ pub(crate) fn validate_profile_structure(yaml: &str) -> Result<()> {
 }
 
 /// [`strip_and_inject`], also handing back the profile's own `dns:` block.
-fn strip(yaml: &str, upstreams: &DnsUpstreams) -> Result<(String, Option<serde_yaml::Value>)> {
+fn strip(
+    yaml: &str,
+    upstreams: &DnsUpstreams,
+    policy: &NameserverPolicyOverride,
+) -> Result<(String, Option<serde_yaml::Value>)> {
     let mut doc: serde_yaml::Value =
         serde_yaml::from_str(yaml).map_err(|_| anyhow::anyhow!("Invalid profile YAML"))?;
     doc.apply_merge()
@@ -130,7 +143,7 @@ fn strip(yaml: &str, upstreams: &DnsUpstreams) -> Result<(String, Option<serde_y
         }
         m.insert(
             serde_yaml::Value::String("dns".into()),
-            serde_yaml::Value::Mapping(engine_dns_block(profile_dns.clone(), upstreams)?),
+            serde_yaml::Value::Mapping(engine_dns_block(profile_dns.clone(), upstreams, policy)?),
         );
         // In the YAML rather than only on the tunnel: the API's config
         // rebuilds re-read the flag from the raw config they apply.
@@ -214,6 +227,7 @@ pub(crate) fn uses_missing_dns_pool(
             .is_some_and(|dns| has_list(dns, "nameserver"))
 }
 
+#[cfg(test)]
 pub(crate) async fn load_profile<T, F, Fut>(
     yaml: &str,
     mode: &DnsUpstreams,
@@ -223,9 +237,23 @@ where
     F: FnOnce(String) -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    load_profile_with_policy(yaml, mode, &NameserverPolicyOverride::default(), load).await
+}
+
+pub(crate) async fn load_profile_with_policy<T, F, Fut>(
+    yaml: &str,
+    mode: &DnsUpstreams,
+    policy: &NameserverPolicyOverride,
+    load: F,
+) -> Result<Loaded<T>>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
     let mode = mode.clone();
+    let policy = policy.clone();
     let (stripped, profile_dns) =
-        meow_common::yaml::run_on_parse_stack(yaml, move |yaml| strip(yaml, &mode))
+        meow_common::yaml::run_on_parse_stack(yaml, move |yaml| strip(yaml, &mode, &policy))
             .map_err(|_| anyhow::anyhow!("Could not read the profile"))??;
     // The core may include complete URLs, policy keys and node names in its
     // errors. Only expose a fixed summary across the Android/logging boundary.
@@ -271,6 +299,7 @@ impl Drop for TempFileGuard {
 pub(crate) async fn load_stripped_config(
     config_path: &str,
     upstreams: &DnsUpstreams,
+    policy: &NameserverPolicyOverride,
     startup_logs: &mut crate::log_level::StartupLogLevel<'_>,
 ) -> Result<Loaded<Config>> {
     let original = std::fs::read_to_string(config_path)
@@ -293,7 +322,7 @@ pub(crate) async fn load_stripped_config(
             build_startup_config(raw, Some(&cache_dir)).await
         })
     };
-    load_profile(&original, upstreams, load).await
+    load_profile_with_policy(&original, upstreams, policy, load).await
 }
 
 /// The file [`load_stripped_config`] hands to the config loader. A rebuild

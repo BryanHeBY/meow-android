@@ -7,6 +7,7 @@ import io.github.madeye.meow.bg.MeowInstance
 import io.github.madeye.meow.bg.ReloadPolicy
 import io.github.madeye.meow.database.PrivateDatabase
 import io.github.madeye.meow.core.MeowCore
+import io.github.madeye.meow.preference.ConfigurationOverrideStore
 import io.github.madeye.meow.preference.DnsSettingsStore
 import io.github.madeye.meow.repo.ConfigValidator
 import io.github.madeye.meow.utils.Action
@@ -186,20 +187,25 @@ class ConfigReloader(
         val default: ConfigReloader by lazy {
             ConfigReloader(
                 selected = { ActiveConfig.of(PrivateDatabase.profileDao.getSelected()) },
-                validate = { candidate ->
+                validate = validateCandidate@ { candidate ->
                     // Only MainActivity prepares the engine home. A background
                     // refresh can run without it, and GeoIP rules would then
                     // fail validation. Idempotent.
                     val store = DnsSettingsStore.default
                     val settings = store.load().settings
-                    if (store.activationIssue(settings, candidate, MeowCore::nativeCheckCachedDns) != null) {
+                    val policy = try {
+                        ConfigurationOverrideStore.default.effective(candidate.profileId).nameserverPolicy
+                    } catch (_: java.io.IOException) {
+                        return@validateCandidate Outcome.CheckDns
+                    }
+                    if (store.activationIssue(settings, candidate, { policy }, MeowCore::nativeCheckCachedDns) != null) {
                         // Let the VPN process report the typed DNS rejection
                         // against the selection and the session it still runs.
                         val error = ConfigValidator().validateStructure(candidate.yaml)
                         if (error == null) Outcome.CheckDns else Outcome.Rejected(error)
                     } else {
                         withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
-                        val error = ConfigValidator().validate(candidate.yaml, settings)
+                        val error = ConfigValidator().validate(candidate.yaml, settings, policy)
                         if (error == null) Outcome.Reload else Outcome.Rejected(error)
                     }
                 },

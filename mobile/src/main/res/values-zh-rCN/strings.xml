@@ -310,7 +310,7 @@
     <string name="advanced_routing">路由和日志</string>
     <string name="advanced_sniffer">流量嗅探</string>
     <string name="advanced_data">数据和工具</string>
-    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。此处无法单独设置 DNS IPv6、HTTP/3 DNS、系统 DNS、DNS 监听、回退、策略。</string>
+    <string name="advanced_dns_unavailable">Android 需要在 VPN 内使用 Fake-IP DNS。此处无法单独设置 DNS IPv6、HTTP/3 DNS、系统 DNS、DNS 监听、回退。</string>
     <string name="advanced_listeners_unavailable">Android VPN 不会启动 HTTP、SOCKS、混合或透明代理监听。监听端口、认证和局域网绑定不可用。</string>
     <string name="advanced_controller_unavailable">Meow 管理经过认证的环回控制器。Android 覆写不支持自定义控制器地址、TLS、CORS 或凭据。</string>
     <string name="advanced_routing_unavailable">路由模式由首页管理。Android 不支持按配置设置日志级别。</string>
@@ -529,4 +529,12 @@
     <string name="advanced_fake_ip_filter_replace">替换域名模式</string>
     <string name="advanced_fake_ip_filter_format">每行一个域名或 +.example.test 后缀。两种模式下，空列表均表示不过滤。</string>
     <string name="advanced_fake_ip_filter_invalid">请输入不重复的域名或 +. 后缀。不支持规则条目。</string>
+    <string name="advanced_nameserver_policy">DNS 上游策略</string>
+    <string name="advanced_nameserver_policy_detail">策略用于发往上游的查询。本地生成的 Fake-IP 应答不会使用这些规则。</string>
+    <string name="advanced_nameserver_policy_rows">有序规则</string>
+    <string name="advanced_nameserver_policy_replace">替换规则列表</string>
+    <string name="advanced_nameserver_policy_format">每行填写一个域名或 +.example.test，以及一个带端口的 udp:// 或 tcp:// 数字 IP 地址。空列表会清除继承的规则。</string>
+    <string name="advanced_nameserver_policy_invalid">请输入不重复的域名模式，以及带端口的 UDP 或 TCP 数字 IP 地址。</string>
+    <string name="advanced_nameserver_policy_clear">清空规则</string>
+    <string name="advanced_nameserver_policy_routing_note">如果配置未启用独占策略，仍可能使用回退上游。独立的 DIRECT 解析器仅在配置启用跟随策略时使用这些规则。</string>
 </resources>

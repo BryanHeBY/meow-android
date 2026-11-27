@@ -53,6 +53,7 @@ data class ConfigurationOverride(
     val coreBehavior: CoreBehaviorOverride = CoreBehaviorOverride(),
     val dnsHosts: DnsHostsOverride = DnsHostsOverride(),
     val fakeIpFilter: FakeIpFilterOverride = FakeIpFilterOverride(),
+    val nameserverPolicy: List<NameserverPolicyRow>? = null,
 ) {
     fun withInherited(global: ConfigurationOverride) = ConfigurationOverride(
         ipv6.takeUnless { it == Ipv6Override.INHERIT } ?: global.ipv6,
@@ -60,9 +61,26 @@ data class ConfigurationOverride(
         coreBehavior.withInherited(global.coreBehavior),
         dnsHosts.withInherited(global.dnsHosts),
         fakeIpFilter.withInherited(global.fakeIpFilter),
+        nameserverPolicy ?: global.nameserverPolicy,
     )
 
     val blocksAppUdp443: Boolean get() = appQuic == AppQuicOverride.BLOCK_UDP_443
+}
+
+/** Both the editor and the store use this section boundary. */
+enum class OverrideSection {
+    MAIN, CORE, HOSTS, FAKE_IP, NAMESERVER_POLICY;
+
+    fun patch(target: ConfigurationOverride, source: ConfigurationOverride): ConfigurationOverride = when (this) {
+        MAIN -> target.copy(ipv6 = source.ipv6, appQuic = source.appQuic)
+        CORE -> target.copy(coreBehavior = source.coreBehavior)
+        HOSTS -> target.copy(dnsHosts = source.dnsHosts)
+        FAKE_IP -> target.copy(fakeIpFilter = source.fakeIpFilter)
+        NAMESERVER_POLICY -> target.copy(nameserverPolicy = source.nameserverPolicy?.toList())
+    }
+
+    fun matches(left: ConfigurationOverride, right: ConfigurationOverride): Boolean =
+        patch(right, left) == right
 }
 
 /** One file per scope, read fresh in the VPN process. Legacy files migrate on save. */
@@ -84,7 +102,7 @@ class ConfigurationOverrideStore(private val directory: File) {
                 return ConfigurationOverride(ipv6 ?: Ipv6Override.INHERIT, quic ?: AppQuicOverride.INHERIT)
             }
             val root = Json.parseToJsonElement(text) as? JsonObject ?: error("expected object")
-            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts", "fakeIpFilter") }) { "unknown override field" }
+            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts", "fakeIpFilter", "nameserverPolicy") }) { "unknown override field" }
             val version = root["version"]?.jsonPrimitive
             require(version?.isString == false && version.intOrNull == 1) { "unsupported override version" }
             fun enumName(key: String) = root[key]?.jsonPrimitive?.let {
@@ -138,6 +156,7 @@ class ConfigurationOverrideStore(private val directory: File) {
                 ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process, logLevel),
                 DnsHostsOverride(hosts, useHosts),
                 FakeIpFilterOverride(patterns, filterMode),
+                root["nameserverPolicy"]?.let(NameserverPolicyOverride::fromJson),
             )
         } catch (e: IllegalArgumentException) {
             throw IOException("Cannot read configuration override", e)
@@ -151,8 +170,24 @@ class ConfigurationOverrideStore(private val directory: File) {
         return if (profileId == null) global else load(profileId).withInherited(global)
     }
 
+    /** Compare only the edited section, then patch it over the latest file. */
+    @Synchronized
+    fun saveSection(
+        profileId: Long?,
+        section: OverrideSection,
+        expected: ConfigurationOverride,
+        draft: ConfigurationOverride,
+    ): ConfigurationOverride {
+        val latest = load(profileId)
+        if (!section.matches(expected, latest)) throw IOException("Configuration override changed while editing")
+        return section.patch(latest, draft).also { save(profileId, it) }
+    }
+
     @Synchronized
     fun save(profileId: Long?, override: ConfigurationOverride) {
+        if (override.nameserverPolicy?.let { !NameserverPolicyOverride.valid(it) } == true) {
+            throw IOException("Cannot save invalid nameserver policy")
+        }
         override.fakeIpFilter.patterns?.let { patterns ->
             if (patterns.size > 256 || FakeIpFilterRuntime.parsePatterns(patterns.joinToString("\n")) != patterns) {
                 throw IOException("Cannot save invalid Fake-IP filter patterns")
@@ -181,6 +216,7 @@ class ConfigurationOverrideStore(private val directory: File) {
             if (hosts.isNotEmpty()) put("dnsHosts", hosts)
             val fakeIp = override.fakeIpFilter.toJson()
             if (fakeIp.isNotEmpty()) put("fakeIpFilter", fakeIp)
+            override.nameserverPolicy?.let { put("nameserverPolicy", NameserverPolicyOverride.toJson(it)) }
         })
         val temp = File.createTempFile("override-", ".tmp", directory)
         try {

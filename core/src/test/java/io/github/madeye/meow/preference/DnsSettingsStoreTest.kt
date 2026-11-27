@@ -50,7 +50,7 @@ class DnsSettingsStoreTest {
     @Test
     fun `successful save is visible to another reader and encodes standard JNI fields`() = runBlocking {
         val preference = DnsPreference(store, commit = { wire, selectedId ->
-            store.commit(wire, selectedId, { first }, { yaml, _ ->
+            store.commit(wire, selectedId, { first }, { yaml, _, _ ->
                 assertEquals(first.yaml, yaml)
                 null
             }) { candidate, settings, staged, destination ->
@@ -78,7 +78,7 @@ class DnsSettingsStoreTest {
     fun `offline named save requires a selected profile and a compatible cached proxy`() {
         target.writeText("builtin")
         fun save(profile: ActiveConfig?) = store.commit(
-            named.encode(), profile?.profileId, { profile }, { _, _ -> DnsIssue.PROXY_UNAVAILABLE.name },
+            named.encode(), profile?.profileId, { profile }, { _, _, _ -> DnsIssue.PROXY_UNAVAILABLE.name },
         ) { _, _, _, _ -> error("Invalid named DNS reached publication") }
         assertEquals(DnsIssue.PROFILE_REQUIRED, save(null))
         assertEquals(DnsIssue.PROXY_UNAVAILABLE, save(first))
@@ -89,17 +89,37 @@ class DnsSettingsStoreTest {
     fun `named settings apply to the saved identity and recheck new cached YAML`() {
         val scoped = named.copy(profileId = first.profileId)
         var checked = 0
-        val validate: (String, String) -> String? = { yaml, _ ->
+        val validate: (String, String, String) -> String? = { yaml, _, _ ->
             checked++
             DnsIssue.PROXY_UNAVAILABLE.name.takeUnless { yaml == first.yaml }
         }
-        assertEquals(DnsIssue.PENDING, store.activationIssue(named, first, validate))
-        assertNull(store.activationIssue(scoped, first, validate))
-        assertEquals(DnsIssue.PROFILE_UNAVAILABLE, store.activationIssue(scoped, second, validate))
-        assertNull(store.activationIssue(scoped, first, validate))
+        assertEquals(DnsIssue.PENDING, store.activationIssue(named, first, validate = validate))
+        assertNull(store.activationIssue(scoped, first, validate = validate))
+        assertEquals(DnsIssue.PROFILE_UNAVAILABLE, store.activationIssue(scoped, second, validate = validate))
+        assertNull(store.activationIssue(scoped, first, validate = validate))
         assertEquals(1, checked)
-        assertEquals(DnsIssue.PROXY_UNAVAILABLE, store.activationIssue(scoped, first.copy(yaml = "no proxy"), validate))
+        assertEquals(DnsIssue.PROXY_UNAVAILABLE, store.activationIssue(scoped, first.copy(yaml = "no proxy"), validate = validate))
         assertEquals(2, checked)
+    }
+
+    @Test
+    fun `named DNS cache distinguishes inherit clear and ordered policy identity`() {
+        val scoped = named.copy(profileId = first.profileId)
+        val seen = mutableListOf<String>()
+        val validate: (String, String, String) -> String? = { _, _, policy ->
+            seen.add(policy)
+            DnsIssue.RESOLVER_REJECTED.name.takeIf { policy == "null" }
+        }
+        val rows = NameserverPolicyOverride.parseRows(
+            "example.test udp://127.0.0.1:53\n+.example.test tcp://127.0.0.1:54",
+        )!!
+        assertEquals(DnsIssue.RESOLVER_REJECTED, store.activationIssue(scoped, first, { null }, validate))
+        assertNull(store.activationIssue(scoped, first, { emptyList() }, validate))
+        assertNull(store.activationIssue(scoped, first, { emptyList() }, validate))
+        assertNull(store.activationIssue(scoped, first, { rows }, validate))
+        assertNull(store.activationIssue(scoped, first, { rows.reversed() }, validate))
+        assertEquals(listOf("null", "[]", NameserverPolicyOverride.wire(rows),
+            NameserverPolicyOverride.wire(rows.reversed())), seen)
     }
 
     @Test
@@ -111,7 +131,7 @@ class DnsSettingsStoreTest {
         val worker = Executors.newSingleThreadExecutor()
         try {
             val save = worker.submit<DnsIssue?> {
-                store.commit(named.encode(), first.profileId, selection::get, { _, _ ->
+                store.commit(named.encode(), first.profileId, selection::get, { _, _, _ ->
                     checking.countDown()
                     assertTrue(switched.await(3, TimeUnit.SECONDS))
                     null
@@ -147,7 +167,7 @@ class DnsSettingsStoreTest {
     fun `legacy split remains saved and unavailable`() {
         val oldSplit = """{"version":1,"mode":"split","splitProxy":"Node"}"""
         target.writeText(oldSplit)
-        assertEquals(DnsIssue.SPLIT_UNAVAILABLE, store.activationIssue(store.load().settings, first) { _, _ ->
+        assertEquals(DnsIssue.SPLIT_UNAVAILABLE, store.activationIssue(store.load().settings, first) { _, _, _ ->
             error("Unavailable preset reached candidate validation")
         })
         assertEquals(oldSplit, target.readText())
@@ -156,11 +176,11 @@ class DnsSettingsStoreTest {
     @Test
     fun `validation and transaction failures keep the original file and remove the stage`() {
         target.writeText("profile")
-        assertNotNull(store.commit("invalid", null, { null }, { _, _ -> null }) { _, _, _, _ ->
+        assertNotNull(store.commit("invalid", null, { null }, { _, _, _ -> null }) { _, _, _, _ ->
             error("Reached the native transaction")
         })
         for (failure in listOf(DnsIssue.RESOLVER_REJECTED, DnsIssue.SAVE_FAILED)) {
-            assertEquals(failure, store.commit(DnsSettings(DnsMode.CN).encode(), null, { null }, { _, _ -> null }) { _, _, staged, destination ->
+            assertEquals(failure, store.commit(DnsSettings(DnsMode.CN).encode(), null, { null }, { _, _, _ -> null }) { _, _, staged, destination ->
                 assertEquals("profile", destination.readText())
                 assertTrue(staged.isFile)
                 failure
