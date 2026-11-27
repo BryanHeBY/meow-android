@@ -547,6 +547,14 @@
     <string name="advanced_fake_ip_filter_replace">جایگزینی الگوها</string>
     <string name="advanced_fake_ip_filter_format">در هر خط یک دامنه یا پسوند مانند +.example.test وارد کنید. فهرست خالی در هر دو حالت یعنی بدون فیلتر.</string>
     <string name="advanced_fake_ip_filter_invalid">دامنه‌ها یا پسوندهای +. یکتا وارد کنید. قواعد پشتیبانی نمی‌شوند.</string>
+    <string name="advanced_dns_fallback">سرورهای جایگزین DNS</string>
+    <string name="advanced_dns_fallback_inherit">استفاده از پیش‌فرض حالت DNS</string>
+    <string name="advanced_dns_fallback_next_connection">تغییرات ذخیره‌شدهٔ DNS جایگزین در اتصال بعدی VPN اعمال می‌شوند.</string>
+    <string name="advanced_dns_fallback_detail">سرورها و فیلترهای جایگزین با هم عوض می‌شوند. در صورت تطبیق دامنه، ابتدا از سرور جایگزین پرس‌وجو می‌شود. تطبیق CIDR پاسخ عادی را رد می‌کند. هنگام خرابی DNS اصلی نیز ممکن است از جایگزین استفاده شود. حالت جایگزینی از GeoIP استفاده نمی‌کند.</string>
+    <string name="advanced_dns_fallback_upstreams">سرورهای عددی UDP/TCP (udp://IP:port، یک مورد در هر خط)</string>
+    <string name="advanced_dns_fallback_domains">دامنه‌ها (تطبیق دقیق یا پسوند +.، یک مورد در هر خط)</string>
+    <string name="advanced_dns_fallback_cidrs">شبکه‌های نشانی (CIDR، یک مورد در هر خط)</string>
+    <string name="advanced_dns_fallback_invalid">۱ تا ۸ سرور عددی معتبر و فیلترهای معتبر دامنه یا CIDR وارد کنید.</string>
     <string name="advanced_dns_ipv6">پاسخ‌های DNS برای IPv6 (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">فقط پاسخ‌های DNS را کنترل می‌کند، نه مسیریابی IPv6 یا ZeroTier. در DNS داخلی، ارث‌بری از رفتار پیش‌فرض داخلی استفاده می‌کند.</string>
     <string name="advanced_nameserver_policy">سیاست سرورهای DNS</string>

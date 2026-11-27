@@ -46,6 +46,7 @@ import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverrideFields
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverridePage
 import io.github.madeye.meow.ui.screens.advancedconfig.DnsHostsEditor
 import io.github.madeye.meow.ui.screens.advancedconfig.FakeIpFilterEditor
+import io.github.madeye.meow.ui.screens.advancedconfig.DnsFallbackEditor
 import io.github.madeye.meow.ui.screens.advancedconfig.DnsIpv6Editor
 import io.github.madeye.meow.ui.screens.advancedconfig.NameserverPolicyEditor
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedRouteModeEditor
@@ -146,6 +147,11 @@ internal fun ConfigurationOverrideRoute(
                     DnsIpv6Editor(form, global,
                         onEdit = { viewModel.edit(form.draft.copy(dnsIpv6 = it)) },
                         onSave = { viewModel.save(OverrideSection.DNS_IPV6) },
+                    )
+                } else if (page == AdvancedOverridePage.DNS_FALLBACK) {
+                    DnsFallbackEditor(form, global,
+                        onEdit = { viewModel.edit(form.draft.copy(dnsFallback = it)) },
+                        onSave = { viewModel.save(OverrideSection.DNS_FALLBACK) },
                     )
                 } else {
                     AdvancedOverrideFields(

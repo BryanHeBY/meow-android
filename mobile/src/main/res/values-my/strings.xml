@@ -534,6 +534,14 @@
     <string name="advanced_fake_ip_filter_replace">ပုံစံများ အစားထိုးရန်</string>
     <string name="advanced_fake_ip_filter_format">တစ်ကြောင်းလျှင် ဒိုမိန်းတစ်ခု သို့မဟုတ် +.example.test ကဲ့သို့ နောက်ဆက်တစ်ခု ထည့်ပါ။ စာရင်းအလွတ်ဆိုလျှင် နှစ်မျိုးစလုံးတွင် မစစ်ထုတ်ပါ။</string>
     <string name="advanced_fake_ip_filter_invalid">မထပ်သော ဒိုမိန်း သို့မဟုတ် +. နောက်ဆက်များ ထည့်ပါ။ စည်းမျဉ်းများကို မပံ့ပိုးပါ။</string>
+    <string name="advanced_dns_fallback">အရန် DNS</string>
+    <string name="advanced_dns_fallback_inherit">မူလသတ်မှတ်ထားသော DNS မုဒ်အပြုအမူကို သုံးရန်</string>
+    <string name="advanced_dns_fallback_next_connection">သိမ်းထားသော အရန် DNS အပြောင်းအလဲများသည် VPN နောက်တစ်ကြိမ် ချိတ်ဆက်ချိန်တွင် သက်ရောက်မည်။</string>
+    <string name="advanced_dns_fallback_detail">အရန်ဆာဗာများနှင့် စစ်ထုတ်မှုများကို အတူအစားထိုးသည်။ ဒိုမိန်းကိုက်ညီလျှင် အရန်ဆာဗာကို ဦးစွာမေးမြန်းပြီး CIDR ကိုက်ညီလျှင် ပုံမှန်လိပ်စာအဖြေကို ပယ်ချသည်။ ပင်မ DNS မအောင်မြင်လျှင်လည်း အရန်ကို သုံးနိုင်သည်။ အစားထိုးမုဒ်တွင် GeoIP မသုံးပါ။</string>
+    <string name="advanced_dns_fallback_upstreams">ကိန်းဂဏန်းလိပ်စာသုံး UDP/TCP ဆာဗာများ (udp://IP:port၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>
+    <string name="advanced_dns_fallback_domains">ဒိုမိန်းများ (အတိအကျ သို့မဟုတ် +. နောက်ဆက်၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>
+    <string name="advanced_dns_fallback_cidrs">ကွန်ရက်လိပ်စာများ (CIDR၊ တစ်ကြောင်းလျှင်တစ်ခု)</string>
+    <string name="advanced_dns_fallback_invalid">မှန်ကန်သော ကိန်းဂဏန်းဆာဗာ ၁ မှ ၈ ခုနှင့် မှန်ကန်သော ဒိုမိန်း သို့မဟုတ် CIDR စစ်ထုတ်မှုများ ထည့်ပါ။</string>
     <string name="advanced_dns_ipv6">IPv6 DNS အဖြေများ (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">DNS အဖြေများကိုသာ ထိန်းချုပ်ပြီး IPv6 လမ်းကြောင်းသတ်မှတ်မှု သို့မဟုတ် ZeroTier ကို မပြောင်းလဲပါ။ ထည့်သွင်းပါရှိသော DNS တွင် အမွေဆက်ခံပါက မူလသတ်မှတ်ချက်ကို သုံးပါမည်။</string>
     <string name="advanced_nameserver_policy">DNS အထက်ဆင့် ဆာဗာမူဝါဒ</string>

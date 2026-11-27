@@ -591,6 +591,14 @@
     <string name="advanced_fake_ip_filter_replace">استبدال الأنماط</string>
     <string name="advanced_fake_ip_filter_format">نطاق واحد أو لاحقة مثل +.example.test في كل سطر. القائمة الفارغة تعني عدم الترشيح في كلا الوضعين.</string>
     <string name="advanced_fake_ip_filter_invalid">أدخل نطاقات أو لواحق +. فريدة. لا تُدعم القواعد.</string>
+    <string name="advanced_dns_fallback">خوادم DNS الاحتياطية</string>
+    <string name="advanced_dns_fallback_inherit">استخدام الإعداد الافتراضي لوضع DNS</string>
+    <string name="advanced_dns_fallback_next_connection">تُطبّق تغييرات خوادم DNS الاحتياطية المحفوظة عند اتصال VPN التالي.</string>
+    <string name="advanced_dns_fallback_detail">استبدال الخوادم الاحتياطية ومرشحاتها معًا. تُستعلم الخوادم الاحتياطية أولًا عند تطابق النطاق، وتُرفض الإجابات العادية عند تطابق CIDR. قد يُستخدم الاحتياطي عند فشل DNS الأساسي. لا يستخدم وضع الاستبدال GeoIP.</string>
+    <string name="advanced_dns_fallback_upstreams">خوادم UDP/TCP بعناوين رقمية (udp://IP:port، واحد لكل سطر)</string>
+    <string name="advanced_dns_fallback_domains">النطاقات (مطابقة تامة أو لاحقة +.، واحد لكل سطر)</string>
+    <string name="advanced_dns_fallback_cidrs">شبكات العناوين (CIDR، واحدة لكل سطر)</string>
+    <string name="advanced_dns_fallback_invalid">أدخل من 1 إلى 8 خوادم رقمية صالحة ومرشحات نطاق أو CIDR صالحة.</string>
     <string name="advanced_dns_ipv6">إجابات DNS لبروتوكول IPv6 (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">يتحكم في إجابات DNS فقط، دون تأثير على توجيه IPv6 أو ZeroTier. عند استخدام DNS المدمج، يؤدي التوريث إلى استخدام السلوك الافتراضي المدمج.</string>
     <string name="advanced_nameserver_policy">سياسة خوادم DNS</string>

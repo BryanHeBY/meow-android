@@ -550,6 +550,14 @@
     <string name="advanced_fake_ip_filter_replace">Replace patterns</string>
     <string name="advanced_fake_ip_filter_format">One domain or +.example.test suffix per line. Empty means no filtering in either mode.</string>
     <string name="advanced_fake_ip_filter_invalid">Enter unique domains or +. suffixes. Rule entries are not supported.</string>
+    <string name="advanced_dns_fallback">Fallback DNS</string>
+    <string name="advanced_dns_fallback_inherit">Use DNS mode default</string>
+    <string name="advanced_dns_fallback_next_connection">Saved fallback DNS changes apply the next time the VPN connects.</string>
+    <string name="advanced_dns_fallback_detail">Replaces both the fallback servers and filters. Domain matches query fallback first; CIDR matches reject ordinary address answers. Fallback can also be tried when primary DNS fails. Replace does not use GeoIP.</string>
+    <string name="advanced_dns_fallback_upstreams">Numeric UDP/TCP servers (udp://IP:port, one per line)</string>
+    <string name="advanced_dns_fallback_domains">Domains (exact or +.suffix, one per line)</string>
+    <string name="advanced_dns_fallback_cidrs">Address networks (CIDR, one per line)</string>
+    <string name="advanced_dns_fallback_invalid">Enter 1–8 valid numeric servers and valid domain or CIDR filters.</string>
     <string name="advanced_dns_ipv6">IPv6 DNS answers (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">Controls DNS answers only, not IPv6 routing or ZeroTier. In Built-in DNS, inheriting uses the Built-in default.</string>
     <string name="advanced_nameserver_policy">DNS nameserver policy</string>

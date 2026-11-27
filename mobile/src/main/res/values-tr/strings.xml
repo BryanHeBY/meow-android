@@ -539,6 +539,14 @@
     <string name="advanced_fake_ip_filter_replace">Kalıpları değiştir</string>
     <string name="advanced_fake_ip_filter_format">Her satıra bir alan adı veya +.example.test gibi bir son ek girin. Boş liste iki modda da filtreleme yapmaz.</string>
     <string name="advanced_fake_ip_filter_invalid">Benzersiz alan adları veya +. son ekleri girin. Kurallar desteklenmez.</string>
+    <string name="advanced_dns_fallback">Yedek DNS</string>
+    <string name="advanced_dns_fallback_inherit">DNS modunun varsayılanını kullan</string>
+    <string name="advanced_dns_fallback_next_connection">Kaydedilen yedek DNS değişiklikleri VPN bir sonraki kez bağlandığında uygulanır.</string>
+    <string name="advanced_dns_fallback_detail">Yedek sunucuları ve filtreleri birlikte değiştirir. Alan adı eşleşirse önce yedek sunucu sorgulanır; CIDR eşleşmesi normal adres yanıtlarını reddeder. Birincil DNS başarısız olduğunda da yedek denenebilir. Değiştirme modu GeoIP kullanmaz.</string>
+    <string name="advanced_dns_fallback_upstreams">Sayısal UDP/TCP sunucuları (udp://IP:port, her satıra bir tane)</string>
+    <string name="advanced_dns_fallback_domains">Alan adları (tam eşleşme veya +.son ek, her satıra bir tane)</string>
+    <string name="advanced_dns_fallback_cidrs">Adres ağları (CIDR, her satıra bir tane)</string>
+    <string name="advanced_dns_fallback_invalid">1–8 geçerli sayısal sunucu ve geçerli alan adı veya CIDR filtreleri girin.</string>
     <string name="advanced_dns_ipv6">IPv6 DNS yanıtları (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">Yalnızca DNS yanıtlarını kontrol eder; IPv6 yönlendirmesini veya ZeroTier’i etkilemez. Yerleşik DNS modunda devralma, bu modun varsayılan davranışını kullanır.</string>
     <string name="advanced_nameserver_policy">DNS sunucusu ilkesi</string>

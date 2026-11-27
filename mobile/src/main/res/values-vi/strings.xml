@@ -529,6 +529,14 @@
     <string name="advanced_fake_ip_filter_replace">Thay thế mẫu tên miền</string>
     <string name="advanced_fake_ip_filter_format">Mỗi dòng nhập một tên miền hoặc hậu tố như +.example.test. Danh sách trống không lọc ở cả hai chế độ.</string>
     <string name="advanced_fake_ip_filter_invalid">Nhập tên miền hoặc hậu tố +. không trùng nhau. Không hỗ trợ mục dạng quy tắc.</string>
+    <string name="advanced_dns_fallback">DNS dự phòng</string>
+    <string name="advanced_dns_fallback_inherit">Dùng mặc định của chế độ DNS</string>
+    <string name="advanced_dns_fallback_next_connection">Các thay đổi DNS dự phòng đã lưu sẽ áp dụng khi VPN kết nối lần sau.</string>
+    <string name="advanced_dns_fallback_detail">Thay thế cả máy chủ dự phòng lẫn bộ lọc. Nếu khớp tên miền, truy vấn máy chủ dự phòng trước; nếu khớp CIDR, từ chối câu trả lời địa chỉ thông thường. Có thể dùng máy chủ dự phòng khi DNS chính lỗi. Chế độ thay thế không dùng GeoIP.</string>
+    <string name="advanced_dns_fallback_upstreams">Máy chủ UDP/TCP dạng số (udp://IP:cổng, mỗi dòng một mục)</string>
+    <string name="advanced_dns_fallback_domains">Tên miền (khớp chính xác hoặc hậu tố +., mỗi dòng một mục)</string>
+    <string name="advanced_dns_fallback_cidrs">Mạng địa chỉ (CIDR, mỗi dòng một mục)</string>
+    <string name="advanced_dns_fallback_invalid">Nhập 1–8 máy chủ dạng số hợp lệ và bộ lọc tên miền hoặc CIDR hợp lệ.</string>
     <string name="advanced_dns_ipv6">Câu trả lời DNS cho IPv6 (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">Chỉ điều khiển câu trả lời DNS, không ảnh hưởng đến định tuyến IPv6 hay ZeroTier. Khi dùng DNS tích hợp, tùy chọn kế thừa sẽ dùng hành vi mặc định của chế độ này.</string>
     <string name="advanced_nameserver_policy">Chính sách máy chủ DNS</string>

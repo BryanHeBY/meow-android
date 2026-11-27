@@ -529,6 +529,14 @@
     <string name="advanced_fake_ip_filter_replace">替换域名模式</string>
     <string name="advanced_fake_ip_filter_format">每行一个域名或 +.example.test 后缀。两种模式下，空列表均表示不过滤。</string>
     <string name="advanced_fake_ip_filter_invalid">请输入不重复的域名或 +. 后缀。不支持规则条目。</string>
+    <string name="advanced_dns_fallback">备用 DNS</string>
+    <string name="advanced_dns_fallback_inherit">使用当前 DNS 模式的默认行为</string>
+    <string name="advanced_dns_fallback_next_connection">保存的备用 DNS 设置将在下次连接 VPN 时生效。</string>
+    <string name="advanced_dns_fallback_detail">同时替换备用服务器和过滤条件。域名命中时优先查询备用服务器；地址命中 CIDR 时拒绝普通应答。主 DNS 失败时也可能查询备用服务器。替换模式不使用 GeoIP。</string>
+    <string name="advanced_dns_fallback_upstreams">UDP/TCP 数字地址（udp://IP:端口，每行一个）</string>
+    <string name="advanced_dns_fallback_domains">域名（精确匹配或 +.后缀，每行一个）</string>
+    <string name="advanced_dns_fallback_cidrs">地址网段（CIDR，每行一个）</string>
+    <string name="advanced_dns_fallback_invalid">请输入 1–8 个有效数字地址，以及有效的域名或 CIDR 条件。</string>
     <string name="advanced_dns_ipv6">IPv6 DNS 应答（AAAA）</string>
     <string name="advanced_dns_ipv6_detail">仅控制 DNS 应答，不影响 IPv6 路由或 ZeroTier。使用内置 DNS 时，继承采用内置默认行为。</string>
     <string name="advanced_nameserver_policy">DNS 上游策略</string>

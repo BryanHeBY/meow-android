@@ -57,7 +57,7 @@ object NameserverPolicyOverride {
         return rows
     }
 
-    private fun numericEndpoint(endpoint: String): Boolean {
+    internal fun numericEndpoint(endpoint: String): Boolean {
         val portText = endpoint.substringAfterLast(':', "")
         if (portText.isEmpty() || !portText.all { it in '0'..'9' } ||
             (portText.length > 1 && portText.startsWith('0')) ||

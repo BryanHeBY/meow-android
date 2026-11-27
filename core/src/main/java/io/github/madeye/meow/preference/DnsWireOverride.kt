@@ -8,12 +8,14 @@ import kotlinx.serialization.json.put
 data class DnsWireOverride(
     val nameserverPolicy: List<NameserverPolicyRow>? = null,
     val ipv6: Boolean? = null,
+    val fallback: DnsFallbackOverride? = null,
 ) {
-    fun snapshot(): DnsWireOverride = copy(nameserverPolicy = nameserverPolicy?.toList())
+    fun snapshot(): DnsWireOverride = copy(nameserverPolicy = nameserverPolicy?.toList(), fallback = fallback?.snapshot())
 
-    fun wire(): String = if (ipv6 == null) NameserverPolicyOverride.wire(nameserverPolicy)
+    fun wire(): String = if (ipv6 == null && fallback == null) NameserverPolicyOverride.wire(nameserverPolicy)
     else buildJsonObject {
         put("nameserverPolicy", nameserverPolicy?.let(NameserverPolicyOverride::toJson) ?: JsonNull)
-        put("ipv6", ipv6)
+        ipv6?.let { put("ipv6", it) }
+        fallback?.let { put("fallback", it.toJson()) }
     }.toString()
 }

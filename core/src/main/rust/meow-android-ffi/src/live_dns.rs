@@ -620,6 +620,93 @@ mod tests {
     }
 
     #[test]
+    fn fallback_override_queries_real_domain_and_cidr_gates_and_stays_frozen_live() {
+        async fn serve(socket: tokio::net::UdpSocket, fallback: bool) {
+            let mut buf = [0; 1536];
+            loop {
+                let (n, peer) = socket.recv_from(&mut buf).await.unwrap();
+                let mut end = 12;
+                while buf[end] != 0 {
+                    end += 1 + usize::from(buf[end]);
+                }
+                end += 5;
+                let mut reply = buf[..end.min(n)].to_vec();
+                reply[2..4].copy_from_slice(&[0x81, 0x80]);
+                reply[6..12].copy_from_slice(&[0, 1, 0, 0, 0, 0]);
+                reply.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+                reply.extend_from_slice(if fallback {
+                    &[198, 51, 100, 9]
+                } else if buf[13..end].starts_with(b"reject") {
+                    &[203, 0, 113, 5]
+                } else {
+                    &[192, 0, 2, 53]
+                });
+                socket.send_to(&reply, peer).await.unwrap();
+            }
+        }
+        let _serial = SERIAL.lock();
+        let rt = crate::get_runtime();
+        let (main, fallback) = rt.block_on(async {
+            (
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+                tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+            )
+        });
+        let primary = main.local_addr().unwrap();
+        let backup = fallback.local_addr().unwrap();
+        let _main_task = rt.spawn(serve(main, false));
+        let _fallback_task = rt.spawn(serve(fallback, true));
+        let replacement = NameserverPolicyOverride::decode(
+            &serde_json::json!({
+                "fallback": {"mode": "replace",
+                    "endpoints": [{"transport":"UDP", "endpoint":backup.to_string()}],
+                    "domains":["+.domain.test"], "cidrs":["203.0.113.0/24"]}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let disabled =
+            NameserverPolicyOverride::decode(r#"{"fallback":{"mode":"disabled"}}"#).unwrap();
+        let profile = format!("dns:\n  nameserver: ['udp://{primary}']\n  default-nameserver: ['udp://{primary}']\n  fake-ip-filter: ['+.test']\nrules: ['MATCH,DIRECT']\n");
+        let ask = |dns: &meow_dns::Resolver, name, ip: [u8; 4]| {
+            let query = dns_query(name, 1);
+            let reply = rt
+                .block_on(meow_dns::DnsServer::handle_query(&query, dns))
+                .unwrap();
+            assert_eq!(&reply[6..8], &[0, 1], "{name}");
+            assert_eq!(&reply[reply.len() - 4..], ip.as_slice(), "{name}");
+        };
+        let running = start_with_policy(
+            Some(&profile),
+            DnsUpstreams::Profile,
+            "fallback-replace",
+            false,
+            replacement,
+        );
+        ask(&resolver(), "sub.domain.test", [198, 51, 100, 9]);
+        ask(&resolver(), "reject.test", [198, 51, 100, 9]);
+        ask(&resolver(), "ordinary.test", [192, 0, 2, 53]);
+        let custom = DnsUpstreams::decode(&serde_json::json!({
+            "version":1, "mode":"custom",
+            "upstreams":[{"transport":"udp", "endpoint":primary.to_string(), "egress":"direct"}],
+        }).to_string()).unwrap();
+        apply(custom).unwrap();
+        ask(&resolver(), "fresh.domain.test", [198, 51, 100, 9]);
+        drop(running);
+        let _cold = start_with_policy(
+            Some(&profile),
+            DnsUpstreams::Profile,
+            "fallback-disabled",
+            false,
+            disabled,
+        );
+        ask(&resolver(), "sub.domain.test", [192, 0, 2, 53]);
+        ask(&resolver(), "reject.test", [203, 0, 113, 5]);
+        _main_task.abort();
+        _fallback_task.abort();
+    }
+
+    #[test]
     fn ordered_nameserver_policy_snapshot_routes_real_dns_and_survives_live_changes() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

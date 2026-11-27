@@ -128,6 +128,22 @@ class DnsSettingsStoreTest {
     }
 
     @Test
+    fun `named DNS cache distinguishes fallback removed inherited and replaced`() {
+        val scoped = named.copy(profileId = first.profileId)
+        val seen = mutableListOf<String>()
+        val validate: (String, String, String) -> String? = { _, _, snapshot ->
+            seen.add(snapshot)
+            null
+        }
+        val disabled = DnsWireOverride(fallback = DnsFallbackOverride.Disabled)
+        val replaced = DnsWireOverride(fallback = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "")))
+        for (snapshot in listOf(DnsWireOverride(), disabled, disabled, replaced, replaced)) {
+            assertNull(store.activationIssue(scoped, first, { snapshot }, validate))
+        }
+        assertEquals(listOf("null", disabled.wire(), replaced.wire()), seen)
+    }
+
+    @Test
     fun `a switch while a named save checks cached YAML leaves the old choice in place`() {
         target.writeText("profile")
         val selection = AtomicReference(first)

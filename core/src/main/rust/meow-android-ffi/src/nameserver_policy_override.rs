@@ -11,13 +11,155 @@ use std::net::{IpAddr, SocketAddr};
 pub(crate) struct NameserverPolicyOverride {
     rows: Option<Vec<(String, String)>>,
     dns_ipv6: Option<bool>,
+    fallback: Option<Fallback>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Snapshot {
     nameserver_policy: Option<Vec<Row>>,
-    ipv6: bool,
+    #[serde(default, deserialize_with = "present_bool")]
+    ipv6: Option<bool>,
+    #[serde(default, deserialize_with = "present_fallback")]
+    fallback: Option<RawFallback>,
+}
+
+fn present_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(d).map(Some)
+}
+
+fn present_fallback<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<RawFallback>, D::Error> {
+    map_only::<RawFallback, _>(d).map(Some)
+}
+
+fn map_only<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(d: D) -> Result<T, D::Error> {
+    struct OnlyMap<T>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for OnlyMap<T> {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a DNS settings object")
+        }
+
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+            T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
+    }
+    d.deserialize_map(OnlyMap(std::marker::PhantomData))
+}
+
+#[derive(Clone, Debug)]
+enum Fallback {
+    Disabled,
+    Replace {
+        upstreams: Vec<String>,
+        domains: Vec<String>,
+        cidrs: Vec<String>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
+enum RawFallback {
+    Disabled {},
+    Replace {
+        endpoints: Vec<Endpoint>,
+        domains: Vec<String>,
+        cidrs: Vec<String>,
+    },
+}
+
+struct Endpoint {
+    transport: Transport,
+    endpoint: String,
+}
+
+impl<'de> Deserialize<'de> for Endpoint {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            transport: Transport,
+            endpoint: String,
+        }
+        let fields = map_only::<Fields, _>(d)?;
+        Ok(Self {
+            transport: fields.transport,
+            endpoint: fields.endpoint,
+        })
+    }
+}
+
+impl RawFallback {
+    fn validate(self) -> Result<Fallback> {
+        let Self::Replace {
+            endpoints,
+            domains,
+            cidrs,
+        } = self
+        else {
+            return Ok(Fallback::Disabled);
+        };
+        ensure!(
+            (1..=8).contains(&endpoints.len()),
+            "invalid DNS fallback upstream count"
+        );
+        ensure!(
+            domains.len() <= 8 && cidrs.len() <= 16,
+            "too many DNS fallback filters"
+        );
+        let mut seen = HashSet::new();
+        let mut upstreams = Vec::with_capacity(endpoints.len());
+        for endpoint in endpoints {
+            let upstream = numeric_upstream(endpoint.transport, &endpoint.endpoint)?;
+            ensure!(
+                seen.insert(upstream.clone()),
+                "duplicate DNS fallback upstream"
+            );
+            upstreams.push(upstream);
+        }
+        let mut seen = HashSet::new();
+        for domain in &domains {
+            ensure!(
+                valid_domain(domain.strip_prefix("+.").unwrap_or(domain)) && seen.insert(domain),
+                "invalid or duplicate DNS fallback domain"
+            );
+        }
+        let mut cidr_identities = HashSet::new();
+        for cidr in &cidrs {
+            let identity = cidr_identity(cidr).context("invalid DNS fallback CIDR")?;
+            ensure!(
+                cidr_identities.insert(identity),
+                "duplicate DNS fallback CIDR"
+            );
+        }
+        Ok(Fallback::Replace {
+            upstreams,
+            domains,
+            cidrs,
+        })
+    }
+}
+
+fn cidr_identity(text: &str) -> Option<(IpAddr, u32)> {
+    let (address, width) = text.split_once('/')?;
+    let width_num = width.parse::<u32>().ok()?;
+    if width != width_num.to_string() {
+        return None;
+    }
+    let ip = address.parse::<IpAddr>().ok()?;
+    let valid = match ip {
+        IpAddr::V4(ip) if width_num <= 32 => {
+            width_num == 32 || (u32::from(ip) & (u32::MAX >> width_num)) == 0
+        }
+        IpAddr::V6(ip) if width_num <= 128 && ip.to_ipv4_mapped().is_none() => {
+            width_num == 128 || (u128::from(ip) & (u128::MAX >> width_num)) == 0
+        }
+        _ => false,
+    };
+    valid.then_some((ip, width_num))
 }
 
 #[derive(Deserialize)]
@@ -41,12 +183,18 @@ impl NameserverPolicyOverride {
         // Keep the formats disjoint. Struct deserializers can accept a
         // positional sequence; only a JSON object may carry DNS IPv6.
         // Deserialize directly so duplicate object fields are not collapsed.
-        let (rows, dns_ipv6) = if wire.trim_start().starts_with('{') {
+        let (rows, dns_ipv6, fallback) = if wire.trim_start().starts_with('{') {
             let snapshot: Snapshot = serde_json::from_str(wire).context("invalid DNS snapshot")?;
-            (snapshot.nameserver_policy, Some(snapshot.ipv6))
+            let fallback = snapshot.fallback.map(RawFallback::validate).transpose()?;
+            ensure!(
+                snapshot.ipv6.is_some() || fallback.is_some(),
+                "empty DNS snapshot object"
+            );
+            (snapshot.nameserver_policy, snapshot.ipv6, fallback)
         } else {
             (
                 serde_json::from_str::<Option<Vec<Row>>>(wire).context("invalid DNS policy")?,
+                None,
                 None,
             )
         };
@@ -54,6 +202,7 @@ impl NameserverPolicyOverride {
             return Ok(Self {
                 rows: None,
                 dns_ipv6,
+                fallback,
             });
         };
         ensure!(rows.len() <= 32, "DNS policy exceeds row limit");
@@ -65,43 +214,38 @@ impl NameserverPolicyOverride {
                 valid_domain(domain) && patterns.insert(row.pattern.clone()),
                 "invalid DNS policy pattern"
             );
-            ensure!(
-                !row.endpoint.contains('%'),
-                "scoped DNS policy endpoints are unsupported"
-            );
-            let address = row
-                .endpoint
-                .parse::<SocketAddr>()
-                .context("DNS policy requires a numeric address and port")?;
-            ensure!(
-                address.port() != 0
-                    && row
-                        .endpoint
-                        .rsplit_once(':')
-                        .is_some_and(|(_, port)| port == address.port().to_string()),
-                "invalid DNS policy port"
-            );
-            let ip = address.ip();
-            ensure!(
-                !ip.is_unspecified()
-                    && !ip.is_multicast()
-                    && match ip {
-                        IpAddr::V4(v4) => !v4.is_broadcast(),
-                        IpAddr::V6(v6) =>
-                            !v6.is_unicast_link_local() && v6.to_ipv4_mapped().is_none(),
-                    },
-                "invalid DNS policy address"
-            );
-            let scheme = match row.transport {
-                Transport::Udp => "udp",
-                Transport::Tcp => "tcp",
-            };
-            validated.push((row.pattern, format!("{scheme}://{address}")));
+            validated.push((row.pattern, numeric_upstream(row.transport, &row.endpoint)?));
         }
         Ok(Self {
             rows: Some(validated),
             dns_ipv6,
+            fallback,
         })
+    }
+
+    pub(crate) fn apply_fallback(&self, dns: &mut Mapping) {
+        let Some(fallback) = &self.fallback else {
+            return;
+        };
+        dns.remove("fallback");
+        dns.remove("fallback-filter");
+        if let Fallback::Replace {
+            upstreams,
+            domains,
+            cidrs,
+        } = fallback
+        {
+            let sequence = |items: &[String]| {
+                Value::Sequence(items.iter().cloned().map(Value::String).collect())
+            };
+            dns.insert("fallback".into(), sequence(upstreams));
+            let filter = Mapping::from_iter([
+                ("geoip".into(), Value::Bool(false)),
+                ("domain".into(), sequence(domains)),
+                ("ipcidr".into(), sequence(cidrs)),
+            ]);
+            dns.insert("fallback-filter".into(), Value::Mapping(filter));
+        }
     }
 
     pub(crate) fn apply(&self, dns: &mut Mapping) {
@@ -118,6 +262,38 @@ impl NameserverPolicyOverride {
             dns.insert("nameserver-policy".into(), Value::Mapping(policy));
         }
     }
+}
+
+fn numeric_upstream(transport: Transport, endpoint: &str) -> Result<String> {
+    ensure!(
+        !endpoint.contains('%'),
+        "scoped DNS policy endpoints are unsupported"
+    );
+    let address = endpoint
+        .parse::<SocketAddr>()
+        .context("DNS policy requires a numeric address and port")?;
+    ensure!(
+        address.port() != 0
+            && endpoint
+                .rsplit_once(':')
+                .is_some_and(|(_, port)| port == address.port().to_string()),
+        "invalid DNS policy port"
+    );
+    let ip = address.ip();
+    ensure!(
+        !ip.is_unspecified()
+            && !ip.is_multicast()
+            && match ip {
+                IpAddr::V4(v4) => !v4.is_broadcast(),
+                IpAddr::V6(v6) => !v6.is_unicast_link_local() && v6.to_ipv4_mapped().is_none(),
+            },
+        "invalid DNS policy address"
+    );
+    let scheme = match transport {
+        Transport::Udp => "udp",
+        Transport::Tcp => "tcp",
+    };
+    Ok(format!("{scheme}://{address}"))
 }
 
 fn valid_domain(domain: &str) -> bool {
@@ -202,6 +378,62 @@ mod tests {
         let snapshot = NameserverPolicyOverride::decode(r#"  {"ipv6":false}"#).unwrap();
         snapshot.apply(&mut dns);
         assert_eq!(dns.get("ipv6"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn dns_fallback_replaces_or_disables_the_whole_pair_and_preserves_inherited_yaml() {
+        let authored: Value = serde_yaml::from_str(
+            "nameserver: ['rcode://refused']\nfallback: ['https://authored.test/dns-query']\nfallback-filter: {geoip: true, geoip-code: JP, domain: ['*.example.test']}\n",
+        ).unwrap();
+        let profile = Some(authored.clone());
+        let inherit = NameserverPolicyOverride::decode("null").unwrap();
+        let disabled =
+            NameserverPolicyOverride::decode(r#"{"fallback":{"mode":"disabled"}}"#).unwrap();
+        let replaced = NameserverPolicyOverride::decode(r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","endpoint":"127.0.0.1:5353"}],"domains":["+.example.test"],"cidrs":["203.0.113.0/24","2001:db8::/32"]}}"#).unwrap();
+        for mode in [DnsUpstreams::Profile, DnsUpstreams::Builtin] {
+            let inherited = engine_dns_block(profile.clone(), &mode, &inherit).unwrap();
+            let disabled = engine_dns_block(profile.clone(), &mode, &disabled).unwrap();
+            let replaced = engine_dns_block(profile.clone(), &mode, &replaced).unwrap();
+            assert!(!disabled.contains_key("fallback"));
+            assert!(!disabled.contains_key("fallback-filter"));
+            assert_eq!(
+                replaced["fallback"][0].as_str(),
+                Some("udp://127.0.0.1:5353")
+            );
+            assert_eq!(replaced["fallback-filter"]["geoip"].as_bool(), Some(false));
+            assert!(replaced["fallback-filter"].get("geoip-code").is_none());
+            if mode == DnsUpstreams::Profile {
+                assert_eq!(inherited.get("fallback"), authored.get("fallback"));
+                assert_eq!(
+                    inherited.get("fallback-filter"),
+                    authored.get("fallback-filter")
+                );
+            } else {
+                assert!(!inherited.contains_key("fallback"));
+                assert!(!inherited.contains_key("fallback-filter"));
+            }
+        }
+        assert_eq!(
+            cidr_identity("2001:db8::/32"),
+            cidr_identity("2001:0db8:0:0:0:0:0:0/32")
+        );
+        assert_ne!(
+            cidr_identity("2001:db8::/32"),
+            cidr_identity("2001:db9::/32")
+        );
+        for bad in [
+            r#"{"ipv6":true,"fallback":null}"#,
+            r#"{"fallback":{"mode":"disabled","geoip":true}}"#,
+            r#"{"fallback":{"mode":"disabled","mode":"replace"}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[["UDP","127.0.0.1:53"]],"domains":[],"cidrs":[]}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[],"domains":[],"cidrs":[]}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","endpoint":"127.0.0.1:53#Node"}],"domains":[],"cidrs":[]}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","endpoint":"127.0.0.1:53"}],"domains":[],"cidrs":["203.0.113.1/24"]}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","endpoint":"127.0.0.1:53"}],"domains":[],"cidrs":["2001:db8::/32","2001:0db8:0:0:0:0:0:0/32"]}}"#,
+            r#"{"fallback":{"mode":"replace","endpoints":[{"transport":"UDP","transport":"TCP","endpoint":"127.0.0.1:53"}],"domains":[],"cidrs":[]}}"#,
+        ] {
+            assert!(NameserverPolicyOverride::decode(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -496,6 +496,7 @@ pub(crate) fn engine_dns_block(
     ] {
         dns.insert(key.into(), value);
     }
+    policy.apply_fallback(&mut dns);
     match mode {
         DnsUpstreams::Builtin => {
             set(&mut dns, "nameserver", CN_NAMESERVERS.iter().copied());

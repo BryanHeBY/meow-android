@@ -559,6 +559,14 @@
     <string name="advanced_fake_ip_filter_replace">Заменить шаблоны</string>
     <string name="advanced_fake_ip_filter_format">Один домен или суффикс вида +.example.test на строку. Пустой список отключает фильтрацию в обоих режимах.</string>
     <string name="advanced_fake_ip_filter_invalid">Укажите уникальные домены или суффиксы +. Правила не поддерживаются.</string>
+    <string name="advanced_dns_fallback">Резервный DNS</string>
+    <string name="advanced_dns_fallback_inherit">По умолчанию для режима DNS</string>
+    <string name="advanced_dns_fallback_next_connection">Сохранённые изменения резервного DNS вступят в силу при следующем подключении VPN.</string>
+    <string name="advanced_dns_fallback_detail">Заменяет резервные серверы и их фильтры. При совпадении домена сначала опрашивается резервный сервер; совпадение CIDR отклоняет обычный ответ с адресом. Резервный сервер также может использоваться при сбое основного DNS. Режим замены не использует GeoIP.</string>
+    <string name="advanced_dns_fallback_upstreams">Числовые адреса UDP/TCP (udp://IP:порт, один на строку)</string>
+    <string name="advanced_dns_fallback_domains">Домены (точное совпадение или +.суффикс, один на строку)</string>
+    <string name="advanced_dns_fallback_cidrs">Сети адресов (CIDR, одна на строку)</string>
+    <string name="advanced_dns_fallback_invalid">Введите от 1 до 8 допустимых числовых адресов и допустимые фильтры доменов или CIDR.</string>
     <string name="advanced_dns_ipv6">Ответы DNS для IPv6 (AAAA)</string>
     <string name="advanced_dns_ipv6_detail">Настройка влияет только на ответы DNS, а не на маршрутизацию IPv6 или ZeroTier. Во встроенном режиме DNS наследование сохраняет поведение этого режима по умолчанию.</string>
     <string name="advanced_nameserver_policy">Политика DNS-серверов</string>
