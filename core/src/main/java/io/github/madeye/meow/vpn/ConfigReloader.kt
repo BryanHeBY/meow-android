@@ -188,9 +188,8 @@ class ConfigReloader(
             ConfigReloader(
                 selected = { ActiveConfig.of(PrivateDatabase.profileDao.getSelected()) },
                 validate = validateCandidate@ { candidate ->
-                    // Only MainActivity prepares the engine home. A background
-                    // refresh can run without it, and GeoIP rules would then
-                    // fail validation. Idempotent.
+                    // A background refresh can run without MainActivity;
+                    // seed and register the home before opting in to GeoIP.
                     val store = DnsSettingsStore.default
                     val settings = store.load().settings
                     val policy = try {
@@ -198,13 +197,15 @@ class ConfigReloader(
                     } catch (_: java.io.IOException) {
                         return@validateCandidate Outcome.CheckDns
                     }
-                    if (store.activationIssue(settings, candidate, { policy }, MeowCore::nativeCheckCachedDns) != null) {
+                    val optedIntoGeoIp = policy.usesFallbackGeoIp
+                    if (optedIntoGeoIp) withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
+                    if (store.freshActivationIssue(settings, candidate, { policy }, MeowCore::nativeCheckCachedDns) != null) {
                         // Let the VPN process report the typed DNS rejection
                         // against the selection and the session it still runs.
                         val error = ConfigValidator().validateStructure(candidate.yaml)
                         if (error == null) Outcome.CheckDns else Outcome.Rejected(error)
                     } else {
-                        withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
+                        if (!optedIntoGeoIp) withContext(Dispatchers.IO) { MeowInstance.prepareEngineHome(Core.app) }
                         val error = ConfigValidator().validate(candidate.yaml, settings, policy)
                         if (error == null) Outcome.Reload else Outcome.Rejected(error)
                     }

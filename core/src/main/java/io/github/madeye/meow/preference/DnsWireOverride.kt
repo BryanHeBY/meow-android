@@ -11,6 +11,9 @@ data class DnsWireOverride(
     val fallback: DnsFallbackOverride? = null,
     val bootstrap: List<NumericDnsEndpoint>? = null,
 ) {
+    val usesFallbackGeoIp: Boolean
+        get() = (fallback as? DnsFallbackOverride.Replace)?.geoIpCountry != null
+
     fun snapshot(): DnsWireOverride = copy(nameserverPolicy = nameserverPolicy?.toList(), fallback = fallback?.snapshot(), bootstrap = bootstrap?.toList())
 
     fun wire(): String = if (ipv6 == null && fallback == null && bootstrap == null) NameserverPolicyOverride.wire(nameserverPolicy)

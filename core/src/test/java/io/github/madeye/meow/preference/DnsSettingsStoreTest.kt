@@ -103,6 +103,47 @@ class DnsSettingsStoreTest {
     }
 
     @Test
+    fun `cold VPN registers native home before named and global country preflight`() {
+        val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))
+        val policy = DnsWireOverride(fallback = configured)
+        val scoped = named.copy(profileId = first.profileId)
+        for (mode in listOf(scoped, DnsSettings(DnsMode.LEGACY_BUILTIN))) {
+            var registered = false
+            var visited = 0
+            val validate: (String, String, String) -> String? = { _, _, wire ->
+                visited++
+                assertEquals(policy.wire(), wire)
+                DnsIssue.GEOIP_UNAVAILABLE.name.takeUnless { registered }
+            }
+            assertEquals(DnsIssue.GEOIP_UNAVAILABLE, store.freshActivationIssue(mode, first, { policy }, validate))
+            assertNull(store.startupActivationIssue(mode, first, { registered = true }, { policy }, validate))
+            assertEquals(2, visited)
+        }
+    }
+
+    @Test
+    fun `restart rechecks country availability before replacing a running resolver`() {
+        val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))
+        val policy = DnsWireOverride(fallback = configured)
+        val scoped = named.copy(profileId = first.profileId)
+        var visits = 0
+        var validFile = true
+        val validate: (String, String, String) -> String? = { _, _, _ ->
+            visits++
+            DnsIssue.GEOIP_UNAVAILABLE.name.takeUnless { validFile }
+        }
+        assertNull(store.activationIssue(scoped, first, { policy }, validate)) // Running snapshot success.
+        validFile = false
+        assertEquals(DnsIssue.GEOIP_UNAVAILABLE, store.freshActivationIssue(scoped, first, { policy }, validate))
+        assertEquals(DnsIssue.GEOIP_UNAVAILABLE, store.freshActivationIssue(
+            DnsSettings(DnsMode.LEGACY_BUILTIN), first, { policy }, validate))
+        assertEquals(3, visits)
+        val disabled = DnsWireOverride(fallback = DnsFallbackOverride.Disabled)
+        assertNull(store.freshActivationIssue(DnsSettings(DnsMode.LEGACY_BUILTIN), first, { disabled }, validate))
+        assertEquals(3, visits)
+    }
+
+    @Test
     fun `temporary missing country data cannot cache a stale negative preflight`() {
         val scoped = named.copy(profileId = first.profileId)
         val configured = requireNotNull(DnsFallbackOverride.parse("udp://127.0.0.1:53", "", "", "CN"))

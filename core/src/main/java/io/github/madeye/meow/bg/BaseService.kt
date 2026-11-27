@@ -391,7 +391,7 @@ object BaseService {
                 while (data.state == State.Connected && data.meowInstance === running) {
                     val settings = store.load().settings
                     val issue = withContext(Dispatchers.IO) {
-                        store.activationIssue(settings, candidate, policyFor = { profile ->
+                        store.freshActivationIssue(settings, candidate, policyFor = { profile ->
                             ConfigurationOverrideStore.default.effective(profile.profileId).dnsWireOverride
                         }, validate = MeowCore::nativeCheckCachedDns)
                     }

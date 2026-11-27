@@ -112,8 +112,7 @@ class MeowInstance(profile: ClashProfile) {
         // unreliable on censored / metered links. APK assets are populated
         // at build time by the `:core:downloadGeoxAssets` Gradle task.
         copyGeoxAssets(context, configDir)
-        // Note: nativeSetHomeDir is also called below; prepareEngineHome and
-        // this start() path share copyGeoxAssets via the companion object.
+        // Register the native home before the cold DNS preflight below.
 
         val configFile = File(configDir, "config.yaml")
         // Runtime-only stripping and DNS injection run in the core for both
@@ -138,8 +137,9 @@ class MeowInstance(profile: ClashProfile) {
         DnsSettingsStore.default.withSavedValue { saved ->
             val dns = appliedDns ?: saved
             val selected = activeConfig.takeIf { it.profileId > 0 }
-            val issue = DnsSettingsStore.default.activationIssue(
-                dns, selected, policyFor = { override.dnsWireOverride }, validate = MeowCore::nativeCheckCachedDns,
+            val issue = DnsSettingsStore.default.startupActivationIssue(
+                dns, selected, registerHome = { MeowCore.nativeSetHomeDir(configDir.absolutePath) },
+                policyFor = { override.dnsWireOverride }, validate = MeowCore::nativeCheckCachedDns,
             )
             if (issue != null) throw DnsActivationException(issue)
             val withCore = CoreBehaviorRuntime.apply(runtimeYaml, override.coreBehavior)
@@ -147,7 +147,6 @@ class MeowInstance(profile: ClashProfile) {
             val sourceDnsRequiresBuiltin = builtinDns && MeowCore.nativeSourceDnsRequiresBuiltin(yaml)
             val withHosts = DnsHostsRuntime.apply(withCore, override.dnsHosts, builtinDns)
             configFile.writeText(FakeIpFilterRuntime.apply(withHosts, override.fakeIpFilter, builtinDns))
-            MeowCore.nativeSetHomeDir(configDir.absolutePath)
             val port = MeowCore.nativeStartEngine(
                 "127.0.0.1:9090", mintCredential(), routeMode, dns.encode(), activeConfig.profileId, capability,
                 sourceDnsRequiresBuiltin, override.dnsWireOverride.wire(),

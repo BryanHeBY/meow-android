@@ -43,13 +43,43 @@ class DnsSettingsStore(private val file: File) {
         profile: ActiveConfig?,
         policyFor: (ActiveConfig) -> DnsWireOverride? = { null },
         validate: (String, String, String) -> String?,
+    ): DnsIssue? = checkActivation(settings, profile, policyFor, validate, fresh = false)
+
+    /** Next generation must not reuse an earlier check of the packaged database. */
+    internal fun freshActivationIssue(
+        settings: DnsSettings,
+        profile: ActiveConfig?,
+        policyFor: (ActiveConfig) -> DnsWireOverride?,
+        validate: (String, String, String) -> String?,
+    ): DnsIssue? = checkActivation(settings, profile, policyFor, validate, fresh = true)
+
+    /** The VPN process starts with its own unset native home (unlike the UI process). */
+    internal fun startupActivationIssue(
+        settings: DnsSettings,
+        profile: ActiveConfig?,
+        registerHome: () -> Unit,
+        policyFor: (ActiveConfig) -> DnsWireOverride?,
+        validate: (String, String, String) -> String?,
+    ): DnsIssue? {
+        registerHome()
+        return freshActivationIssue(settings, profile, policyFor, validate)
+    }
+
+    private fun checkActivation(
+        settings: DnsSettings,
+        profile: ActiveConfig?,
+        policyFor: (ActiveConfig) -> DnsWireOverride?,
+        validate: (String, String, String) -> String?,
+        fresh: Boolean,
     ): DnsIssue? {
         if (settings.mode == DnsMode.SPLIT) return DnsIssue.SPLIT_UNAVAILABLE
         return when (settings.applicability(profile?.profileId)) {
-            DnsApplicability.GLOBAL -> null
+            DnsApplicability.GLOBAL -> if (fresh && profile != null) {
+                checkNamed(profile, settings, policyFor, validate, fresh = true, onlyCountry = true)
+            } else null
             DnsApplicability.PENDING -> DnsIssue.PENDING
             DnsApplicability.UNAVAILABLE -> DnsIssue.PROFILE_UNAVAILABLE
-            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, policyFor, validate)
+            DnsApplicability.AVAILABLE -> checkNamed(requireNotNull(profile), settings, policyFor, validate, fresh = fresh)
         }
     }
 
@@ -58,15 +88,22 @@ class DnsSettingsStore(private val file: File) {
         settings: DnsSettings,
         policyFor: (ActiveConfig) -> DnsWireOverride?,
         validate: (String, String, String) -> String?,
+        fresh: Boolean = false,
+        onlyCountry: Boolean = false,
     ): DnsIssue? {
         val policy = try { policyFor(profile)?.snapshot() ?: DnsWireOverride() } catch (_: IOException) { return DnsIssue.INVALID_SETTINGS }
-        checked?.let {
+        val countryEnabled = policy.usesFallbackGeoIp
+        if (onlyCountry && !countryEnabled) return null
+        val recheckReader = fresh && countryEnabled
+        checked?.takeUnless { recheckReader }?.let {
             if (it.profile == profile && it.settings == settings && it.wireOverride == policy) return it.issue
         }
         val issue = validate(profile.yaml, settings.encode(), policy.wire())?.let(DnsIssue::fromWire)
         // Availability of the packaged reader or the current VPN generation
         // may change independently of YAML and snapshot values.
-        if (issue != DnsIssue.GEOIP_UNAVAILABLE && issue != DnsIssue.PROFILE_CHANGED) {
+        if (issue == DnsIssue.GEOIP_UNAVAILABLE || issue == DnsIssue.PROFILE_CHANGED) {
+            if (recheckReader) checked = null
+        } else if (!recheckReader) {
             checked = Check(profile, settings, policy, issue)
         }
         return issue
