@@ -5,6 +5,7 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -39,17 +40,26 @@ data class DnsHostsOverride(val hosts: Map<String, String>? = null, val useHosts
         DnsHostsOverride(hosts ?: global.hosts, useHosts ?: global.useHosts)
 }
 
+enum class FakeIpFilterMode { BLACKLIST, WHITELIST }
+
+data class FakeIpFilterOverride(val patterns: List<String>? = null, val mode: FakeIpFilterMode? = null) {
+    fun withInherited(global: FakeIpFilterOverride) =
+        FakeIpFilterOverride(patterns ?: global.patterns, mode ?: global.mode)
+}
+
 data class ConfigurationOverride(
     val ipv6: Ipv6Override = Ipv6Override.INHERIT,
     val appQuic: AppQuicOverride = AppQuicOverride.INHERIT,
     val coreBehavior: CoreBehaviorOverride = CoreBehaviorOverride(),
     val dnsHosts: DnsHostsOverride = DnsHostsOverride(),
+    val fakeIpFilter: FakeIpFilterOverride = FakeIpFilterOverride(),
 ) {
     fun withInherited(global: ConfigurationOverride) = ConfigurationOverride(
         ipv6.takeUnless { it == Ipv6Override.INHERIT } ?: global.ipv6,
         appQuic.takeUnless { it == AppQuicOverride.INHERIT } ?: global.appQuic,
         coreBehavior.withInherited(global.coreBehavior),
         dnsHosts.withInherited(global.dnsHosts),
+        fakeIpFilter.withInherited(global.fakeIpFilter),
     )
 
     val blocksAppUdp443: Boolean get() = appQuic == AppQuicOverride.BLOCK_UDP_443
@@ -74,7 +84,7 @@ class ConfigurationOverrideStore(private val directory: File) {
                 return ConfigurationOverride(ipv6 ?: Ipv6Override.INHERIT, quic ?: AppQuicOverride.INHERIT)
             }
             val root = Json.parseToJsonElement(text) as? JsonObject ?: error("expected object")
-            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts") }) { "unknown override field" }
+            require(root.keys.all { it in setOf("version", "ipv6", "appQuic", "coreBehavior", "dnsHosts", "fakeIpFilter") }) { "unknown override field" }
             val version = root["version"]?.jsonPrimitive
             require(version?.isString == false && version.intOrNull == 1) { "unsupported override version" }
             fun enumName(key: String) = root[key]?.jsonPrimitive?.let {
@@ -110,9 +120,24 @@ class ConfigurationOverrideStore(private val directory: File) {
                 require(it.isString) { "invalid logLevel" }
                 LogLevelOverride.valueOf(it.content)
             }
+            val fakeIp = (root["fakeIpFilter"] ?: JsonObject(emptyMap())) as? JsonObject
+                ?: error("invalid fakeIpFilter")
+            require(fakeIp.keys.all { it in setOf("patterns", "mode") }) { "unknown Fake-IP filter field" }
+            val patterns = fakeIp["patterns"]?.let { field ->
+                val values = (field as? JsonArray ?: error("invalid Fake-IP patterns")).map {
+                    it.jsonPrimitive.also { value -> require(value.isString) }.content
+                }
+                require(FakeIpFilterRuntime.parsePatterns(values.joinToString("\n")) == values) { "invalid Fake-IP patterns" }
+                values
+            }
+            val filterMode = fakeIp["mode"]?.jsonPrimitive?.let {
+                require(it.isString)
+                FakeIpFilterMode.valueOf(it.content)
+            }
             return ConfigurationOverride(
                 ipv6, quic, CoreBehaviorOverride(boolean("unifiedDelay"), boolean("tcpConcurrent"), process, logLevel),
                 DnsHostsOverride(hosts, useHosts),
+                FakeIpFilterOverride(patterns, filterMode),
             )
         } catch (e: IllegalArgumentException) {
             throw IOException("Cannot read configuration override", e)
@@ -128,6 +153,11 @@ class ConfigurationOverrideStore(private val directory: File) {
 
     @Synchronized
     fun save(profileId: Long?, override: ConfigurationOverride) {
+        override.fakeIpFilter.patterns?.let { patterns ->
+            if (patterns.size > 256 || FakeIpFilterRuntime.parsePatterns(patterns.joinToString("\n")) != patterns) {
+                throw IOException("Cannot save invalid Fake-IP filter patterns")
+            }
+        }
         val target = file(profileId)
         // Do not replace an unknown or malformed format with a lossy older version.
         if (target.exists()) load(profileId)
@@ -149,6 +179,8 @@ class ConfigurationOverrideStore(private val directory: File) {
             if (core.isNotEmpty()) put("coreBehavior", JsonObject(core))
             val hosts = override.dnsHosts.toJson()
             if (hosts.isNotEmpty()) put("dnsHosts", hosts)
+            val fakeIp = override.fakeIpFilter.toJson()
+            if (fakeIp.isNotEmpty()) put("fakeIpFilter", fakeIp)
         })
         val temp = File.createTempFile("override-", ".tmp", directory)
         try {

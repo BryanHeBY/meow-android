@@ -17,6 +17,7 @@ object MeowCore {
      * [mode] overrides the config's `mode:` (`rule`/`global`/`direct`); empty keeps it.
      * [dns] carries the saved DNS preference.
      * [profileId] is the immutable ID of the profile this engine will run.
+     * [sourceDnsRequiresBuiltin] preserves the authored DNS shape through runtime overlays.
      */
     external fun nativeStartEngine(
         addr: String,
@@ -25,6 +26,7 @@ object MeowCore {
         dns: String,
         profileId: Long,
         capability: String,
+        sourceDnsRequiresBuiltin: Boolean = false,
     ): Int
 
     /** Commits a staged preference and, when requested, installs its live resolver. Returns a DNS issue code on failure. */
@@ -43,8 +45,11 @@ object MeowCore {
     /** Overrides the top-level IPv6 key in a runtime copy of the profile. */
     external fun nativeOverrideIpv6(yaml: String, enabled: Boolean): String
 
+    /** Checks the merged authored DNS shape without probing a resolver. */
+    external fun nativeSourceDnsRequiresBuiltin(yaml: String): Boolean
+    external fun nativeOverrideFakeIpFilter(yaml: String, options: String, builtinDns: Boolean): String
+    external fun nativeOverrideDnsHosts(yaml: String, options: String, builtinDns: Boolean): String
     /** Applies the typed core behavior choices to the runtime copy. */
-    external fun nativeOverrideDnsHosts(yaml: String, options: String): String
     external fun nativeOverrideCoreBehavior(yaml: String, options: String): String
 
     /** Startup values from the profile, without using the network. */

@@ -12,9 +12,9 @@ internal fun DnsHostsOverride.toJson(): JsonObject = JsonObject(buildMap {
 })
 
 object DnsHostsRuntime {
-    fun apply(yaml: String, override: DnsHostsOverride): String =
+    fun apply(yaml: String, override: DnsHostsOverride, builtinDns: Boolean = false): String =
         if (override == DnsHostsOverride()) yaml
-        else MeowCore.nativeOverrideDnsHosts(yaml, override.toJson().toString())
+        else MeowCore.nativeOverrideDnsHosts(yaml, override.toJson().toString(), builtinDns)
 
     /** Editable rows are exact DNS names and literal addresses, one pair per line. */
     fun parseRows(text: String): Map<String, String>? {

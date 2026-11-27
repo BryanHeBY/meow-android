@@ -303,7 +303,7 @@
     <string name="advanced_routing">Định tuyến và nhật ký</string>
     <string name="advanced_sniffer">Nhận diện lưu lượng</string>
     <string name="advanced_data">Dữ liệu và công cụ</string>
-    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có tùy chọn riêng cho IPv6 của DNS, DNS qua HTTP/3, DNS hệ thống, trình lắng nghe DNS, máy chủ dự phòng, chính sách và bộ lọc Fake-IP.</string>
+    <string name="advanced_dns_unavailable">Android yêu cầu DNS Fake-IP trong VPN. Không có tùy chọn riêng cho IPv6 của DNS, DNS qua HTTP/3, DNS hệ thống, trình lắng nghe DNS, máy chủ dự phòng, chính sách.</string>
     <string name="advanced_listeners_unavailable">VPN Android không khởi chạy trình lắng nghe proxy HTTP, SOCKS, kết hợp hoặc trong suốt. Không có tùy chọn cổng, xác thực và liên kết mạng LAN.</string>
     <string name="advanced_controller_unavailable">Meow quản lý bộ điều khiển cục bộ có xác thực. Không thể ghi đè địa chỉ bộ điều khiển, TLS, CORS và thông tin xác thực trên Android.</string>
     <string name="advanced_routing_unavailable">Chế độ định tuyến được quản lý ở màn hình chính. Android không có mức nhật ký theo hồ sơ.</string>
@@ -521,4 +521,12 @@
     <string name="advanced_route_mode_next">Chế độ định tuyến khi khởi động lần sau</string>
     <string name="advanced_route_mode_next_detail">Lưu ngay để dùng khi Meow khởi động lần sau. Kết nối hiện tại không thay đổi. Để đổi ngay, hãy dùng Trang chủ.</string>
     <string name="advanced_route_mode_save_failed">Không lưu được chế độ định tuyến cho lần khởi động sau.</string>
+    <string name="advanced_fake_ip_filter">Bộ lọc Fake-IP</string>
+    <string name="advanced_fake_ip_filter_mode">Chế độ lọc</string>
+    <string name="advanced_fake_ip_filter_blacklist">Danh sách đen: mục khớp không dùng Fake-IP</string>
+    <string name="advanced_fake_ip_filter_whitelist">Danh sách trắng: chỉ mục khớp dùng Fake-IP</string>
+    <string name="advanced_fake_ip_filter_list">Mẫu tên miền</string>
+    <string name="advanced_fake_ip_filter_replace">Thay thế mẫu tên miền</string>
+    <string name="advanced_fake_ip_filter_format">Mỗi dòng nhập một tên miền hoặc hậu tố như +.example.test. Danh sách trống không lọc ở cả hai chế độ.</string>
+    <string name="advanced_fake_ip_filter_invalid">Nhập tên miền hoặc hậu tố +. không trùng nhau. Không hỗ trợ mục dạng quy tắc.</string>
 </resources>

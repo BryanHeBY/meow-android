@@ -401,10 +401,36 @@ fn valid_hostname(host: &str) -> bool {
             }))
 }
 
+pub(crate) fn fake_ip_filter_mode_supported(mode: Option<&Value>) -> bool {
+    mode.is_none_or(|mode| {
+        mode.is_null()
+            || matches!(
+                mode.as_str(),
+                Some("blacklist" | "black-list" | "whitelist" | "white-list")
+            )
+    })
+}
+
+// Mirror the pin's DomainTrie token normalization before inheriting a
+// policy into Built-in DNS. Strict profile validation otherwise raises on
+// a dead label, an error Built-in did not inherit before this feature.
+fn inherited_fake_ip_pattern_valid(value: &Value) -> bool {
+    value.as_str().is_some_and(|key| {
+        let key = key.trim();
+        let domain = key
+            .strip_prefix("+.")
+            .or_else(|| key.strip_prefix("*."))
+            .or_else(|| key.strip_prefix('.'))
+            .unwrap_or(key)
+            .trim_end_matches('.');
+        !domain.is_empty() && domain.split('.').all(|label| !label.is_empty())
+    })
+}
+
 pub(crate) fn engine_dns_block(profile: Option<Value>, mode: &DnsUpstreams) -> Result<Mapping> {
     let mut dns = match (mode, profile) {
-        // Built-in changes upstreams, not local host-table policy. Retain
-        // only a valid boolean; no network paths from the profile are used.
+        // Built-in changes upstreams, not local DNS record/synthesis policy.
+        // Do not carry any authored upstream or sockets into this branch.
         (DnsUpstreams::Builtin, profile) => {
             let mut dns = Mapping::new();
             if let Some(enabled) = profile
@@ -413,6 +439,28 @@ pub(crate) fn engine_dns_block(profile: Option<Value>, mode: &DnsUpstreams) -> R
                 .and_then(Value::as_bool)
             {
                 dns.insert("use-hosts".into(), enabled.into());
+            }
+            // Preserve supported local policy as a pair. Never drop an
+            // unsupported mode alone: doing so would reinterpret its list.
+            let filter_mode = profile
+                .as_ref()
+                .and_then(|value| value.get("fake-ip-filter-mode"));
+            let filter = profile
+                .as_ref()
+                .and_then(|value| value.get("fake-ip-filter"));
+            let valid_list = filter.is_none_or(|value| {
+                value.is_null()
+                    || value
+                        .as_sequence()
+                        .is_some_and(|list| list.iter().all(inherited_fake_ip_pattern_valid))
+            });
+            if fake_ip_filter_mode_supported(filter_mode) && valid_list {
+                if let Some(filter) = filter {
+                    dns.insert("fake-ip-filter".into(), filter.clone());
+                }
+                if let Some(mode) = filter_mode {
+                    dns.insert("fake-ip-filter-mode".into(), mode.clone());
+                }
             }
             dns
         }

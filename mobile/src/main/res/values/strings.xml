@@ -329,7 +329,7 @@
     <string name="advanced_routing">Routing and logging</string>
     <string name="advanced_sniffer">Traffic sniffing</string>
     <string name="advanced_data">Data and tools</string>
-    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback, policies, and fake-IP filters are unavailable here.</string>
+    <string name="advanced_dns_unavailable">Android requires in-VPN fake-IP DNS. Separate controls for DNS IPv6, DNS over HTTP/3, system DNS, DNS listeners, fallback, policies are unavailable here.</string>
     <string name="advanced_listeners_unavailable">The Android VPN starts no HTTP, SOCKS, mixed, or transparent proxy listeners. Listener ports, authentication, and LAN binding are unavailable.</string>
     <string name="advanced_controller_unavailable">Meow manages the authenticated loopback controller. Custom controller addresses, TLS, CORS, and credentials are unavailable as Android overrides.</string>
     <string name="advanced_routing_unavailable">The Home screen owns routing mode. Android has no profile-scoped log-level control.</string>
@@ -542,4 +542,12 @@
     <string name="advanced_route_mode_next">Route mode on next start</string>
     <string name="advanced_route_mode_next_detail">Saved immediately for the next Meow start. This does not change the current connection. To switch now, use Home.</string>
     <string name="advanced_route_mode_save_failed">Could not save the route mode for the next start.</string>
+    <string name="advanced_fake_ip_filter">Fake-IP filter</string>
+    <string name="advanced_fake_ip_filter_mode">Filter mode</string>
+    <string name="advanced_fake_ip_filter_blacklist">Blacklist: matches bypass Fake-IP</string>
+    <string name="advanced_fake_ip_filter_whitelist">Whitelist: only matches use Fake-IP</string>
+    <string name="advanced_fake_ip_filter_list">Domain patterns</string>
+    <string name="advanced_fake_ip_filter_replace">Replace patterns</string>
+    <string name="advanced_fake_ip_filter_format">One domain or +.example.test suffix per line. Empty means no filtering in either mode.</string>
+    <string name="advanced_fake_ip_filter_invalid">Enter unique domains or +. suffixes. Rule entries are not supported.</string>
 </resources>

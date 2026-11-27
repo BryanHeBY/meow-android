@@ -27,6 +27,9 @@ struct Applied {
 pub(crate) struct LiveDns {
     profile_id: i64,
     profile_dns: Option<serde_yaml::Value>,
+    // Runtime overlays may synthesize a mapping for Built-in while the
+    // original DNS block remains invalid in every profile-preserving mode.
+    source_dns_requires_builtin: bool,
     config_path: Option<String>,
     applied: Mutex<Applied>,
     raw_config: Arc<RwLock<RawConfig>>,
@@ -42,6 +45,7 @@ impl LiveDns {
     pub(crate) fn new(
         profile_id: i64,
         profile_dns: Option<serde_yaml::Value>,
+        source_dns_requires_builtin: bool,
         config_path: Option<String>,
         mode: DnsUpstreams,
         resolver: &Arc<Resolver>,
@@ -52,6 +56,7 @@ impl LiveDns {
         Self {
             profile_id,
             profile_dns,
+            source_dns_requires_builtin,
             config_path,
             applied: Mutex::new(Applied {
                 mode,
@@ -64,6 +69,9 @@ impl LiveDns {
     }
 
     fn candidate(&self, tunnel: &Tunnel, mode: &DnsUpstreams) -> Result<Option<RawConfig>> {
+        if self.source_dns_requires_builtin && !matches!(mode, DnsUpstreams::Builtin) {
+            bail!(DnsIssue::ResolverRejected);
+        }
         let applied = self.applied.lock();
         if applied.mode == *mode && applied.resolver.ptr_eq(&Arc::downgrade(&tunnel.resolver())) {
             return Ok(None);
@@ -339,6 +347,15 @@ mod tests {
     }
 
     fn start_engine(profile: Option<&str>, upstreams: DnsUpstreams, name: &str) -> impl Drop {
+        start_with_source_shape(profile, upstreams, name, false)
+    }
+
+    fn start_with_source_shape(
+        profile: Option<&str>,
+        upstreams: DnsUpstreams,
+        name: &str,
+        source_requires_builtin: bool,
+    ) -> impl Drop {
         struct Running(std::path::PathBuf);
         impl Drop for Running {
             fn drop(&mut self) {
@@ -358,7 +375,7 @@ mod tests {
         *crate::HOME_DIR.lock() = Some(home.to_str().unwrap().to_string());
         let running = Running(dir);
         assert_eq!(
-            crate::start_engine(None, None, upstreams, 41),
+            crate::start_engine(None, None, upstreams, 41, source_requires_builtin),
             0,
             "{}",
             crate::get_error()
@@ -461,6 +478,95 @@ mod tests {
 
         apply(DnsUpstreams::Builtin).unwrap();
         assert!(Arc::ptr_eq(&resolver(), &before));
+    }
+
+    #[test]
+    fn builtin_dns_overlays_keep_authored_shape_for_live_and_cold_start() {
+        use crate::configuration_override::{
+            dns_hosts_yaml, fake_ip_filter_yaml, source_dns_requires_builtin,
+        };
+        let _serial = SERIAL.lock();
+        // The malformed DNS value arrives via an authored YAML merge.
+        let authored =
+            "defaults: &defaults { dns: scalar }\n<<: *defaults\nrules: ['MATCH,DIRECT']\n";
+        let hosts = r#"{"hosts":{"local.test":"192.0.2.65"},"useHosts":true}"#;
+        let filter = r#"{"patterns":["+.skip.test"],"mode":"BLACKLIST"}"#;
+        for (name, enable_hosts, enable_filter) in [
+            ("shape-hosts", true, false),
+            ("shape-filter", false, true),
+            ("shape-combined", true, true),
+        ] {
+            let source = source_dns_requires_builtin(authored).unwrap();
+            assert!(source);
+            assert!(!source_dns_requires_builtin("dns: null\n").unwrap());
+            assert!(!source_dns_requires_builtin("dns: {}\n").unwrap());
+            let mut runtime = authored.to_owned();
+            if enable_hosts {
+                runtime =
+                    dns_hosts_yaml(&runtime, serde_json::from_str(hosts).unwrap(), true).unwrap();
+            }
+            if enable_filter {
+                runtime =
+                    fake_ip_filter_yaml(&runtime, serde_json::from_str(filter).unwrap(), true)
+                        .unwrap();
+            }
+            assert!(!source_dns_requires_builtin(&runtime).unwrap());
+            let active =
+                start_with_source_shape(Some(&runtime), DnsUpstreams::Builtin, name, source);
+            let before = resolver();
+            if enable_hosts {
+                let query = dns_query("local.test", 1);
+                let reply = crate::get_runtime()
+                    .block_on(meow_dns::DnsServer::handle_query(&query, &before))
+                    .unwrap();
+                assert!(reply.ends_with(&[192, 0, 2, 65]));
+            }
+            if enable_filter {
+                let engine = crate::ENGINE.lock();
+                let raw = engine.as_ref().unwrap().live_dns.raw_config.read();
+                assert_eq!(
+                    raw.dns.as_ref().unwrap().fake_ip_filter.as_ref().unwrap(),
+                    &["+.skip.test"]
+                );
+            }
+            let primary = nameservers();
+            let custom = DnsUpstreams::decode(
+                r#"{"version":1,"mode":"custom","upstreams":[{"transport":"udp","endpoint":"127.0.0.1:9","egress":"direct"}]}"#
+            ).unwrap();
+            for mode in [
+                DnsUpstreams::Inherit,
+                DnsUpstreams::Profile,
+                DnsUpstreams::Cn,
+                custom,
+            ] {
+                let cold = engine::strip_and_inject(authored, mode.clone());
+                assert!(cold.is_err());
+                let mut persisted = false;
+                let err = commit(mode, Some(41), || {
+                    persisted = true;
+                    Ok(())
+                })
+                .unwrap_err();
+                assert_eq!(
+                    err.downcast::<DnsIssue>().unwrap(),
+                    DnsIssue::ResolverRejected
+                );
+                assert!(!persisted);
+                assert!(Arc::ptr_eq(&before, &resolver()));
+                assert_eq!(nameservers(), primary);
+                assert_eq!(status().mode, Some("builtin"));
+            }
+            drop(active);
+        }
+        // The actual cold startup loader also rejects that same unmodified scalar.
+        let cold = start(authored, DnsUpstreams::Builtin, "shape-cold");
+        crate::stop_engine();
+        assert_eq!(
+            crate::start_engine(None, None, DnsUpstreams::Inherit, 41, false),
+            -1
+        );
+        assert!(crate::ENGINE.lock().is_none());
+        drop(cold);
     }
 
     #[test]

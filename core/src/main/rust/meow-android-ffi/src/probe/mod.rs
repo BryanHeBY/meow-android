@@ -325,7 +325,8 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("config.yaml"), profile).unwrap();
         *crate::HOME_DIR.lock() = Some(home.to_str().unwrap().to_string());
-        let started = crate::start_engine(None, None, crate::engine::DnsUpstreams::Builtin, 0);
+        let started =
+            crate::start_engine(None, None, crate::engine::DnsUpstreams::Builtin, 0, false);
         let error = crate::get_error();
         let routed = crate::engine::tunnel().map(|tunnel| {
             let rt = crate::get_runtime();

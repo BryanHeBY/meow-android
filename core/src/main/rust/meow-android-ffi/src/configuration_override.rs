@@ -20,13 +20,165 @@ fn runtime_yaml(yaml: &str, enabled: bool) -> Result<String> {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum FakeIpFilterMode {
+    Blacklist,
+    Whitelist,
+}
+
+#[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DnsHostsOverride {
+pub(crate) struct FakeIpFilterOverride {
+    patterns: Option<Vec<String>>,
+    mode: Option<FakeIpFilterMode>,
+}
+
+pub(crate) fn source_dns_requires_builtin(yaml: &str) -> Result<bool> {
+    meow_common::yaml::run_on_parse_stack(yaml, |yaml| {
+        let mut doc: serde_yaml::Value =
+            serde_yaml::from_str(yaml).context("parsing profile YAML")?;
+        doc.apply_merge().context("applying profile YAML merges")?;
+        let map = doc.as_mapping().context("expected a profile mapping")?;
+        Ok(map
+            .get("dns")
+            .is_some_and(|dns| !dns.is_null() && !dns.is_mapping()))
+    })
+    .context("starting the YAML parser")?
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeSourceDnsRequiresBuiltin(
+    mut env: JNIEnv,
+    _class: JClass,
+    yaml: JString,
+) -> jboolean {
+    let result = (|| -> Result<bool> {
+        let yaml: String = env.get_string(&yaml)?.into();
+        source_dns_requires_builtin(&yaml)
+    })();
+    match result {
+        Ok(required) => jboolean::from(required),
+        Err(_) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Could not inspect the profile DNS shape",
+            );
+            JNI_FALSE
+        }
+    }
+}
+
+fn overlay_dns_mapping(
+    map: &mut serde_yaml::Mapping,
+    builtin_dns: bool,
+) -> Result<&mut serde_yaml::Mapping> {
+    use serde_yaml::Value;
+    let block = map.entry("dns".into()).or_insert(Value::Null);
+    // Built-in has always discarded a non-mapping authored DNS block.
+    // Other modes still require their actual profile DNS to be a map.
+    if block.is_null() || (builtin_dns && !block.is_mapping()) {
+        *block = Value::Mapping(serde_yaml::Mapping::new());
+    }
+    block.as_mapping_mut().context("expected a DNS mapping")
+}
+
+pub(crate) fn fake_ip_filter_yaml(
+    yaml: &str,
+    options: FakeIpFilterOverride,
+    builtin_dns: bool,
+) -> Result<String> {
+    meow_common::yaml::run_on_parse_stack(yaml, move |yaml| {
+        use serde_yaml::Value;
+        let mut doc: Value = serde_yaml::from_str(yaml).context("parsing profile YAML")?;
+        doc.apply_merge().context("applying profile YAML merges")?;
+        let map = doc.as_mapping_mut().context("expected a profile mapping")?;
+        if options.patterns.is_none() && options.mode.is_none() {
+            return serde_yaml::to_string(&doc).context("serializing runtime profile");
+        }
+        let dns = overlay_dns_mapping(map, builtin_dns)?;
+        anyhow::ensure!(
+            crate::dns_override::fake_ip_filter_mode_supported(dns.get("fake-ip-filter-mode"))
+                || (options.mode.is_some() && options.patterns.is_some()),
+            "replace both Fake-IP mode and patterns when the profile uses an unsupported mode"
+        );
+        if let Some(patterns) = options.patterns {
+            anyhow::ensure!(patterns.len() <= 256, "too many filter patterns");
+            let mut seen = std::collections::HashSet::new();
+            for pattern in &patterns {
+                let domain = pattern.strip_prefix("+.").unwrap_or(pattern);
+                anyhow::ensure!(
+                    seen.insert(pattern)
+                        && !domain.is_empty()
+                        && domain.len() <= 253
+                        && domain.split('.').all(|label| {
+                            !label.is_empty()
+                                && label.len() <= 63
+                                && !label.starts_with('-')
+                                && !label.ends_with('-')
+                                && label.bytes().all(|c| {
+                                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'
+                                })
+                        }),
+                    "invalid Fake-IP filter pattern"
+                );
+            }
+            dns.insert("fake-ip-filter".into(), serde_yaml::to_value(&patterns)?);
+        }
+        if let Some(mode) = options.mode {
+            let wire = match mode {
+                FakeIpFilterMode::Blacklist => "blacklist",
+                FakeIpFilterMode::Whitelist => "whitelist",
+            };
+            dns.insert("fake-ip-filter-mode".into(), wire.into());
+        }
+        serde_yaml::to_string(&doc).context("serializing runtime profile")
+    })
+    .context("starting the YAML parser")?
+}
+
+#[no_mangle]
+pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeOverrideFakeIpFilter(
+    mut env: JNIEnv,
+    _class: JClass,
+    yaml: JString,
+    options: JString,
+    builtin_dns: jboolean,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let yaml: String = env.get_string(&yaml)?.into();
+        let options: String = env.get_string(&options)?.into();
+        fake_ip_filter_yaml(
+            &yaml,
+            serde_json::from_str(&options)?,
+            builtin_dns != JNI_FALSE,
+        )
+    })();
+    match result {
+        Ok(runtime) => env
+            .new_string(runtime)
+            .map_or(std::ptr::null_mut(), |s| s.into_raw()),
+        Err(_) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Could not prepare the saved Fake-IP filter. If the profile uses an unsupported mode, replace both the mode and patterns.",
+            );
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DnsHostsOverride {
     hosts: Option<std::collections::BTreeMap<String, std::net::IpAddr>>,
     use_hosts: Option<bool>,
 }
 
-fn dns_hosts_yaml(yaml: &str, options: DnsHostsOverride) -> Result<String> {
+pub(crate) fn dns_hosts_yaml(
+    yaml: &str,
+    options: DnsHostsOverride,
+    builtin_dns: bool,
+) -> Result<String> {
     meow_common::yaml::run_on_parse_stack(yaml, move |yaml| {
         use serde_yaml::Value;
         let mut doc: Value = serde_yaml::from_str(yaml).context("parsing profile YAML")?;
@@ -53,14 +205,7 @@ fn dns_hosts_yaml(yaml: &str, options: DnsHostsOverride) -> Result<String> {
             map.insert("hosts".into(), serde_yaml::to_value(hosts)?);
         }
         if let Some(enabled) = options.use_hosts {
-            let block = map.entry("dns".into()).or_insert(Value::Null);
-            if block.is_null() {
-                *block = Value::Mapping(serde_yaml::Mapping::new());
-            }
-            block
-                .as_mapping_mut()
-                .context("expected a DNS mapping")?
-                .insert("use-hosts".into(), enabled.into());
+            overlay_dns_mapping(map, builtin_dns)?.insert("use-hosts".into(), enabled.into());
         }
         serde_yaml::to_string(&doc).context("serializing runtime profile")
     })
@@ -73,11 +218,16 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeOverrideDn
     _class: JClass,
     yaml: JString,
     options: JString,
+    builtin_dns: jboolean,
 ) -> jstring {
     let result = (|| -> Result<String> {
         let yaml: String = env.get_string(&yaml)?.into();
         let options: String = env.get_string(&options)?.into();
-        dns_hosts_yaml(&yaml, serde_json::from_str(&options)?)
+        dns_hosts_yaml(
+            &yaml,
+            serde_json::from_str(&options)?,
+            builtin_dns != JNI_FALSE,
+        )
     })();
     match result {
         Ok(runtime) => env
@@ -230,6 +380,15 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeProfileIpv
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fake_ip_filter_yaml(yaml: &str, options: FakeIpFilterOverride) -> Result<String> {
+        super::fake_ip_filter_yaml(yaml, options, false)
+    }
+
+    fn dns_hosts_yaml(yaml: &str, options: DnsHostsOverride) -> Result<String> {
+        super::dns_hosts_yaml(yaml, options, false)
+    }
+
     use crate::engine::{self, DnsUpstreams};
 
     #[test]
@@ -384,6 +543,267 @@ rules: ['MATCH,DIRECT']
                     assert_eq!(reply.ends_with(original), expect_authored, "{json} {name}");
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn fake_ip_filter_controls_dns_answers_and_reverse_map() {
+        let authored = r#"
+dns:
+  nameserver: ['rcode://refused']
+  fake-ip-filter: ['+.skip.test']
+  fake-ip-filter-mode: blacklist
+rules: ['MATCH,DIRECT']
+"#;
+        for mode in [DnsUpstreams::Builtin, DnsUpstreams::Profile] {
+            for (json, root_fake, sub_fake, other_fake) in [
+                (r#"{}"#, false, false, true),
+                (r#"{"mode":"WHITELIST"}"#, true, true, false),
+                (
+                    r#"{"patterns":["skip.test"],"mode":"BLACKLIST"}"#,
+                    false,
+                    true,
+                    true,
+                ),
+                (r#"{"patterns":[],"mode":"BLACKLIST"}"#, true, true, true),
+                (r#"{"patterns":[],"mode":"WHITELIST"}"#, true, true, true),
+            ] {
+                let runtime =
+                    fake_ip_filter_yaml(authored, serde_json::from_str(json).unwrap()).unwrap();
+                let stripped = engine::strip_and_inject(&runtime, mode.clone()).unwrap();
+                let mut local: serde_yaml::Value = serde_yaml::from_str(&stripped).unwrap();
+                for key in [
+                    "nameserver",
+                    "default-nameserver",
+                    "proxy-server-nameserver",
+                ] {
+                    local["dns"].as_mapping_mut().unwrap().insert(
+                        key.into(),
+                        serde_yaml::to_value(["rcode://refused"]).unwrap(),
+                    );
+                }
+                let config =
+                    meow_config::load_config_from_str(&serde_yaml::to_string(&local).unwrap())
+                        .await
+                        .unwrap();
+                let resolver = &config.dns.resolver;
+                for (host, is_fake) in [
+                    ("skip.test", root_fake),
+                    ("sub.skip.test", sub_fake),
+                    ("other.test", other_fake),
+                ] {
+                    let query = crate::test_support::dns_query(host, 1);
+                    let reply = meow_dns::DnsServer::handle_query(&query, resolver)
+                        .await
+                        .unwrap();
+                    let answers = u16::from_be_bytes([reply[6], reply[7]]);
+                    assert_eq!(answers, u16::from(is_fake), "{json} {host}");
+                    if is_fake {
+                        let bytes: [u8; 4] = reply[reply.len() - 4..].try_into().unwrap();
+                        assert_eq!(bytes[0], 28);
+                        let ip = std::net::Ipv4Addr::from(bytes);
+                        assert_eq!(resolver.reverse_lookup(ip.into()).as_deref(), Some(host));
+                    }
+                }
+            }
+        }
+        assert!(serde_json::from_str::<FakeIpFilterOverride>(r#"{"mode":"RULE"}"#).is_err());
+        let wrong = serde_json::from_str(r#"{"patterns":["RULE-SET,lan"]}"#).unwrap();
+        assert!(fake_ip_filter_yaml(authored, wrong).is_err());
+    }
+
+    #[tokio::test]
+    async fn unsupported_authored_fake_ip_mode_never_inherits_as_builtin_blacklist() {
+        // REFUSED is synthetic: any A answer is a fake address, never egress.
+        async fn resolves_fake_authored(yaml: &str, mode: DnsUpstreams, name: &str) -> bool {
+            let stripped = engine::strip_and_inject(yaml, mode).unwrap();
+            let mut local: serde_yaml::Value = serde_yaml::from_str(&stripped).unwrap();
+            for key in [
+                "nameserver",
+                "default-nameserver",
+                "proxy-server-nameserver",
+            ] {
+                local["dns"].as_mapping_mut().unwrap().insert(
+                    key.into(),
+                    serde_yaml::to_value(["rcode://refused"]).unwrap(),
+                );
+            }
+            let config = meow_config::load_config_from_str(&serde_yaml::to_string(&local).unwrap())
+                .await
+                .unwrap();
+            let query = crate::test_support::dns_query(name, 1);
+            let reply = meow_dns::DnsServer::handle_query(&query, &config.dns.resolver)
+                .await
+                .unwrap();
+            u16::from_be_bytes([reply[6], reply[7]]) == 1
+        }
+
+        for (mode_line, unsupported) in [
+            ("  fake-ip-filter-mode: rule\n", true),
+            ("  fake-ip-filter-mode: future-mode\n", true),
+            ("  fake-ip-filter-mode: null\n", false),
+            ("", false),
+        ] {
+            let authored = format!(
+                "dns:\n  nameserver: ['rcode://refused']\n  fake-ip-filter: ['+.original.test']\n{mode_line}rules: ['MATCH,DIRECT']\n"
+            );
+            let inherit =
+                fake_ip_filter_yaml(&authored, serde_json::from_str("{}").unwrap()).unwrap();
+            let partial_mode = fake_ip_filter_yaml(
+                &authored,
+                serde_json::from_str(r#"{"mode":"WHITELIST"}"#).unwrap(),
+            );
+            let partial_list = fake_ip_filter_yaml(
+                &authored,
+                serde_json::from_str(r#"{"patterns":["another.test"]}"#).unwrap(),
+            );
+            assert_eq!(partial_mode.is_err(), unsupported);
+            assert_eq!(partial_list.is_err(), unsupported);
+            let replacement = fake_ip_filter_yaml(
+                &authored,
+                serde_json::from_str(r#"{"mode":"WHITELIST","patterns":["another.test"]}"#)
+                    .unwrap(),
+            )
+            .unwrap();
+            for mode in [DnsUpstreams::Builtin, DnsUpstreams::Profile] {
+                // Profile continues interpreting authored YAML as before, including
+                // the pinned core's existing fallback for unknown modes.
+                let builtin = matches!(mode, DnsUpstreams::Builtin);
+                let stripped = engine::strip_and_inject(&inherit, mode.clone()).unwrap();
+                let raw = meow_config::parse_raw_yaml(&stripped).unwrap().dns.unwrap();
+                assert_eq!(raw.fake_ip_filter.is_none(), unsupported && builtin);
+                assert_eq!(
+                    resolves_fake_authored(&inherit, mode.clone(), "original.test").await,
+                    unsupported && builtin,
+                    "{mode_line} builtin={builtin}"
+                );
+                assert!(!resolves_fake_authored(&replacement, mode.clone(), "original.test").await);
+                assert!(resolves_fake_authored(&replacement, mode.clone(), "another.test").await);
+                if !unsupported {
+                    assert!(
+                        resolves_fake_authored(
+                            partial_mode.as_ref().unwrap(),
+                            mode.clone(),
+                            "original.test"
+                        )
+                        .await
+                    );
+                    assert!(
+                        !resolves_fake_authored(
+                            partial_list.as_ref().unwrap(),
+                            mode,
+                            "another.test"
+                        )
+                        .await
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn builtin_dns_overlays_tolerate_scalar_and_invalid_inherited_policy_only_in_builtin() {
+        fn load_without_egress(
+            stripped: String,
+        ) -> impl std::future::Future<Output = Result<meow_config::Config>> {
+            async move {
+                let mut local: serde_yaml::Value = serde_yaml::from_str(&stripped)?;
+                for key in [
+                    "nameserver",
+                    "default-nameserver",
+                    "proxy-server-nameserver",
+                ] {
+                    local["dns"].as_mapping_mut().unwrap().insert(
+                        key.into(),
+                        serde_yaml::to_value(["rcode://refused"]).unwrap(),
+                    );
+                }
+                meow_config::load_config_from_str(&serde_yaml::to_string(&local)?).await
+            }
+        }
+
+        let scalar = "strict: true\ndns: legacy-scalar\nrules: ['MATCH,DIRECT']\n";
+        let hosts_options = r#"{"hosts":{"local.test":"192.0.2.65"},"useHosts":true}"#;
+        let fake_options = r#"{"patterns":["+.skip.test"],"mode":"BLACKLIST"}"#;
+        assert!(
+            super::dns_hosts_yaml(scalar, serde_json::from_str(hosts_options).unwrap(), false)
+                .is_err()
+        );
+        assert!(super::fake_ip_filter_yaml(
+            scalar,
+            serde_json::from_str(fake_options).unwrap(),
+            false
+        )
+        .is_err());
+        assert!(engine::strip_and_inject(scalar, DnsUpstreams::Profile).is_err());
+        let baseline = engine::load_profile(scalar, &DnsUpstreams::Builtin, load_without_egress)
+            .await
+            .unwrap();
+        assert!(baseline
+            .config
+            .dns
+            .resolver
+            .lookup_hosts_all("local.test")
+            .is_none());
+        let with_hosts =
+            super::dns_hosts_yaml(scalar, serde_json::from_str(hosts_options).unwrap(), true)
+                .unwrap();
+        let runtime = super::fake_ip_filter_yaml(
+            &with_hosts,
+            serde_json::from_str(fake_options).unwrap(),
+            true,
+        )
+        .unwrap();
+        let loaded = engine::load_profile(&runtime, &DnsUpstreams::Builtin, load_without_egress)
+            .await
+            .unwrap();
+        for (name, expected) in [
+            ("local.test", Some(192)),
+            ("sub.skip.test", None),
+            ("other.test", Some(28)),
+        ] {
+            let query = crate::test_support::dns_query(name, 1);
+            let reply = meow_dns::DnsServer::handle_query(&query, &loaded.config.dns.resolver)
+                .await
+                .unwrap();
+            let answer =
+                (u16::from_be_bytes([reply[6], reply[7]]) == 1).then(|| reply[reply.len() - 4]);
+            assert_eq!(answer, expected, "{name}");
+        }
+        assert!(scalar.contains("dns: legacy-scalar"));
+
+        let malformed = "strict: true\ndns: {fake-ip-filter: ['a..test', '+.good.test'], fake-ip-filter-mode: blacklist}\nrules: ['MATCH,DIRECT']\n";
+        assert!(
+            engine::load_profile(malformed, &DnsUpstreams::Profile, load_without_egress)
+                .await
+                .is_err()
+        );
+        let builtin = engine::load_profile(malformed, &DnsUpstreams::Builtin, load_without_egress)
+            .await
+            .unwrap();
+        let query = crate::test_support::dns_query("sub.good.test", 1);
+        let reply = meow_dns::DnsServer::handle_query(&query, &builtin.config.dns.resolver)
+            .await
+            .unwrap();
+        assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), 1);
+        assert_eq!(reply[reply.len() - 4], 28);
+
+        // Previously-authored core-supported wildcard spellings survive
+        // even though the app editor offers a smaller explicit subset.
+        let valid = "strict: true\ndns: {fake-ip-filter: ['*.wild.test', '.other.test'], fake-ip-filter-mode: blacklist}\nrules: ['MATCH,DIRECT']\n";
+        let builtin = engine::load_profile(valid, &DnsUpstreams::Builtin, load_without_egress)
+            .await
+            .unwrap();
+        for (host, count) in [
+            ("a.wild.test", 0),
+            ("a.b.wild.test", 1),
+            ("a.b.other.test", 0),
+        ] {
+            let query = crate::test_support::dns_query(host, 1);
+            let reply = meow_dns::DnsServer::handle_query(&query, &builtin.config.dns.resolver)
+                .await
+                .unwrap();
+            assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), count, "{host}");
         }
     }
 

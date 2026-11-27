@@ -45,6 +45,7 @@ import io.github.madeye.meow.ui.components.SectionHeader
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverrideFields
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedOverridePage
 import io.github.madeye.meow.ui.screens.advancedconfig.DnsHostsEditor
+import io.github.madeye.meow.ui.screens.advancedconfig.FakeIpFilterEditor
 import io.github.madeye.meow.ui.screens.advancedconfig.AdvancedRouteModeEditor
 import io.github.madeye.meow.ui.screens.home.HomeViewModel
 
@@ -128,6 +129,11 @@ internal fun ConfigurationOverrideRoute(
                     DnsHostsEditor(form, global,
                         onEdit = { viewModel.edit(form.draft.copy(dnsHosts = it)) },
                         onSave = { viewModel.save(OverrideSection.HOSTS) },
+                    )
+                } else if (page == AdvancedOverridePage.FAKE_IP) {
+                    FakeIpFilterEditor(form, global,
+                        onEdit = { viewModel.edit(form.draft.copy(fakeIpFilter = it)) },
+                        onSave = { viewModel.save(OverrideSection.FAKE_IP) },
                     )
                 } else {
                     AdvancedOverrideFields(

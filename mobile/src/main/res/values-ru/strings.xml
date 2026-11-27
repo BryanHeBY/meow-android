@@ -327,7 +327,7 @@
     <string name="advanced_routing">Маршрутизация и журналы</string>
     <string name="advanced_sniffer">Анализ трафика</string>
     <string name="advanced_data">Данные и инструменты</string>
-    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов, политик и фильтров Fake-IP.</string>
+    <string name="advanced_dns_unavailable">Android требует DNS с Fake-IP внутри VPN. Здесь недоступны отдельные настройки IPv6 для DNS, DNS через HTTP/3, системного DNS, DNS-слушателей, резервных серверов, политик.</string>
     <string name="advanced_listeners_unavailable">VPN Android не запускает HTTP-, SOCKS-, смешанные и прозрачные прокси-слушатели. Порты, аутентификация и привязка к локальной сети недоступны.</string>
     <string name="advanced_controller_unavailable">Meow управляет локальным контроллером с аутентификацией. Адреса контроллера, TLS, CORS и учётные данные недоступны для переопределения в Android.</string>
     <string name="advanced_routing_unavailable">Режим маршрутизации задаётся на главном экране. Android не поддерживает уровень журнала для отдельных профилей.</string>
@@ -551,4 +551,12 @@
     <string name="advanced_route_mode_next">Режим маршрутизации при следующем запуске</string>
     <string name="advanced_route_mode_next_detail">Сохраняется сразу для следующего запуска Meow. Текущее подключение не изменится. Чтобы переключить режим сейчас, откройте главный экран.</string>
     <string name="advanced_route_mode_save_failed">Не удалось сохранить режим маршрутизации для следующего запуска.</string>
+    <string name="advanced_fake_ip_filter">Фильтр Fake-IP</string>
+    <string name="advanced_fake_ip_filter_mode">Режим фильтра</string>
+    <string name="advanced_fake_ip_filter_blacklist">Чёрный список: совпадения обходят Fake-IP</string>
+    <string name="advanced_fake_ip_filter_whitelist">Белый список: Fake-IP только для совпадений</string>
+    <string name="advanced_fake_ip_filter_list">Шаблоны доменов</string>
+    <string name="advanced_fake_ip_filter_replace">Заменить шаблоны</string>
+    <string name="advanced_fake_ip_filter_format">Один домен или суффикс вида +.example.test на строку. Пустой список отключает фильтрацию в обоих режимах.</string>
+    <string name="advanced_fake_ip_filter_invalid">Укажите уникальные домены или суффиксы +. Правила не поддерживаются.</string>
 </resources>

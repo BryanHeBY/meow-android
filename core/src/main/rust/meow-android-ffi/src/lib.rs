@@ -232,6 +232,7 @@ fn start_engine(
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
     profile_id: i64,
+    source_dns_requires_builtin: bool,
 ) -> i32 {
     logging::bridge_log("start_engine: acquiring ENGINE lock");
     let mut engine = ENGINE.lock();
@@ -241,7 +242,13 @@ fn start_engine(
     }
 
     let rt = get_runtime();
-    match rt.block_on(start_engine_async(controllers, mode, dns, profile_id)) {
+    match rt.block_on(start_engine_async(
+        controllers,
+        mode,
+        dns,
+        profile_id,
+        source_dns_requires_builtin,
+    )) {
         Ok((state, app_port)) => {
             logging::bridge_log("start_engine: engine started successfully");
             *engine = Some(state);
@@ -263,7 +270,11 @@ async fn start_engine_async(
     mode: Option<TunnelMode>,
     dns: engine::DnsUpstreams,
     profile_id: i64,
+    source_dns_requires_builtin: bool,
 ) -> Result<(EngineState, u16), anyhow::Error> {
+    if source_dns_requires_builtin && !matches!(dns, engine::DnsUpstreams::Builtin) {
+        return Err(dns_override::DnsIssue::ResolverRejected.into());
+    }
     install_tracing_subscriber();
     let tcp_policy = engine::StartupTcpPolicy::capture();
     let mut startup_logs = log_level::StartupLogLevel::new();
@@ -458,6 +469,7 @@ async fn start_engine_async(
     let live_dns = Arc::new(live_dns::LiveDns::new(
         profile_id,
         profile_dns,
+        source_dns_requires_builtin,
         loaded_from,
         dns,
         &config.dns.resolver,
@@ -639,6 +651,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
     dns: JString,
     profile_id: jlong,
     capability: JString,
+    source_dns_requires_builtin: jni::sys::jboolean,
 ) -> jint {
     let mut read =
         |value: &JString| -> String { env.get_string(value).map(String::from).unwrap_or_default() };
@@ -660,6 +673,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartEngin
             parse_mode_override(&read(&mode)),
             settings,
             profile_id,
+            source_dns_requires_builtin != jni::sys::JNI_FALSE,
         ),
         Err(error) => {
             set_error(error.to_string());
@@ -1079,7 +1093,8 @@ mod tests {
         }
         let _cleanup = Cleanup(root);
         let config = home.join("config.yaml");
-        let start = |controller| start_engine(controller, None, engine::DnsUpstreams::Builtin, 41);
+        let start =
+            |controller| start_engine(controller, None, engine::DnsUpstreams::Builtin, 41, false);
         let write_settings = |settings: &str| {
             std::fs::write(&config, format!("logbook: {{enable: false}}\n{settings}")).unwrap();
         };

@@ -319,7 +319,7 @@
     <string name="advanced_routing">مسیریابی و گزارش‌ها</string>
     <string name="advanced_sniffer">بررسی ترافیک</string>
     <string name="advanced_data">داده‌ها و ابزارها</string>
-    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. تنظیم جداگانهٔ IPv6 برای DNS، DNS روی HTTP/3، DNS سیستم، شنونده‌های DNS، سرورهای جایگزین، سیاست‌ها و فیلترهای Fake-IP در اینجا در دسترس نیست.</string>
+    <string name="advanced_dns_unavailable">در Android باید از DNS با نشانی Fake-IP درون VPN استفاده شود. تنظیم جداگانهٔ IPv6 برای DNS، DNS روی HTTP/3، DNS سیستم، شنونده‌های DNS، سرورهای جایگزین، سیاست‌ها در اینجا در دسترس نیست.</string>
     <string name="advanced_listeners_unavailable">هیچ شنوندهٔ پراکسی HTTP، SOCKS، ترکیبی یا شفاف در VPN اندروید راه‌اندازی نمی‌شود. درگاه‌ها، احراز هویت و اتصال به شبکهٔ محلی در دسترس نیستند.</string>
     <string name="advanced_controller_unavailable">مِیو کنترل‌گر محلی دارای احراز هویت را مدیریت می‌کند. آدرس کنترل‌گر، TLS، CORS و اطلاعات ورود قابل بازنویسی نیستند.</string>
     <string name="advanced_routing_unavailable">حالت مسیریابی در صفحهٔ اصلی مدیریت می‌شود. در Android نمی‌توان سطح گزارش را برای هر پروفایل تنظیم کرد.</string>
@@ -539,4 +539,12 @@
     <string name="advanced_route_mode_next">حالت مسیریابی در اجرای بعدی</string>
     <string name="advanced_route_mode_next_detail">برای اجرای بعدی Meow فوراً ذخیره می‌شود. اتصال فعلی تغییر نمی‌کند. برای تغییر فوری از صفحهٔ اصلی استفاده کنید.</string>
     <string name="advanced_route_mode_save_failed">ذخیرهٔ حالت مسیریابی برای اجرای بعدی ممکن نشد.</string>
+    <string name="advanced_fake_ip_filter">فیلتر Fake-IP</string>
+    <string name="advanced_fake_ip_filter_mode">حالت فیلتر</string>
+    <string name="advanced_fake_ip_filter_blacklist">فهرست سیاه: موارد منطبق از Fake-IP عبور می‌کنند</string>
+    <string name="advanced_fake_ip_filter_whitelist">فهرست سفید: فقط موارد منطبق از Fake-IP استفاده می‌کنند</string>
+    <string name="advanced_fake_ip_filter_list">الگوهای دامنه</string>
+    <string name="advanced_fake_ip_filter_replace">جایگزینی الگوها</string>
+    <string name="advanced_fake_ip_filter_format">در هر خط یک دامنه یا پسوند مانند +.example.test وارد کنید. فهرست خالی در هر دو حالت یعنی بدون فیلتر.</string>
+    <string name="advanced_fake_ip_filter_invalid">دامنه‌ها یا پسوندهای +. یکتا وارد کنید. قواعد پشتیبانی نمی‌شوند.</string>
 </resources>

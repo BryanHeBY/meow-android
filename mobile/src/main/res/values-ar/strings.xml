@@ -355,7 +355,7 @@
     <string name="advanced_routing">التوجيه والسجلات</string>
     <string name="advanced_sniffer">فحص حركة البيانات</string>
     <string name="advanced_data">البيانات والأدوات</string>
-    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر هنا خيارات مستقلة لـ IPv6 في DNS أو DNS عبر HTTP/3 أو DNS النظام أو منافذ استقبال DNS أو الخوادم الاحتياطية أو السياسات أو مرشحات Fake-IP.</string>
+    <string name="advanced_dns_unavailable">يتطلب Android استخدام DNS بعناوين Fake-IP داخل VPN. لا تتوفر هنا خيارات مستقلة لـ IPv6 في DNS أو DNS عبر HTTP/3 أو DNS النظام أو منافذ استقبال DNS أو الخوادم الاحتياطية أو السياسات.</string>
     <string name="advanced_listeners_unavailable">لا يشغّل VPN في Android منافذ استقبال لوكلاء HTTP أو SOCKS أو الوكلاء المختلطين أو الشفافين. لا تتوفر خيارات المنافذ أو المصادقة أو الربط بالشبكة المحلية.</string>
     <string name="advanced_controller_unavailable">يدير Meow وحدة التحكم المحلية المحمية بالمصادقة. لا تتوفر تجاوزات Android لعناوين وحدة التحكم أو TLS أو CORS أو بيانات الاعتماد.</string>
     <string name="advanced_routing_unavailable">تدير الشاشة الرئيسية وضع التوجيه. لا يوفر Android مستوى سجل خاصًا بكل ملف.</string>
@@ -583,4 +583,12 @@
     <string name="advanced_route_mode_next">وضع التوجيه عند التشغيل التالي</string>
     <string name="advanced_route_mode_next_detail">يُحفظ فورًا للتشغيل التالي لـ Meow. لا يغيّر الاتصال الحالي. للتبديل الآن، استخدم الصفحة الرئيسية.</string>
     <string name="advanced_route_mode_save_failed">تعذّر حفظ وضع التوجيه للتشغيل التالي.</string>
+    <string name="advanced_fake_ip_filter">مرشّح Fake-IP</string>
+    <string name="advanced_fake_ip_filter_mode">وضع الترشيح</string>
+    <string name="advanced_fake_ip_filter_blacklist">القائمة السوداء: تتجاوز الأسماء المطابقة Fake-IP</string>
+    <string name="advanced_fake_ip_filter_whitelist">القائمة البيضاء: تستخدم الأسماء المطابقة فقط Fake-IP</string>
+    <string name="advanced_fake_ip_filter_list">أنماط النطاقات</string>
+    <string name="advanced_fake_ip_filter_replace">استبدال الأنماط</string>
+    <string name="advanced_fake_ip_filter_format">نطاق واحد أو لاحقة مثل +.example.test في كل سطر. القائمة الفارغة تعني عدم الترشيح في كلا الوضعين.</string>
+    <string name="advanced_fake_ip_filter_invalid">أدخل نطاقات أو لواحق +. فريدة. لا تُدعم القواعد.</string>
 </resources>
