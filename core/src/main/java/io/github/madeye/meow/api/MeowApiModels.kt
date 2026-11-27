@@ -5,6 +5,7 @@ import kotlinx.serialization.Required
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -72,6 +73,8 @@ data class Proxy(
     val name: String,
     val type: String,
     val history: List<ProxyHistory>,
+    /** Empty for inline proxies, null if the engine does not report provenance. */
+    val providerName: String? = null,
 ) {
     /** Delay of the most recent probe; 0 when never tested or timed out. */
     val latestDelay: Int get() = history.lastOrNull()?.delay ?: 0
@@ -264,6 +267,7 @@ data class ProxiesResult(
                         name = name,
                         type = type,
                         history = data.historyList(),
+                        providerName = (data["provider-name"] as? JsonPrimitive)?.contentOrNull,
                     )
                 }
             }

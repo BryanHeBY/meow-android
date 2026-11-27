@@ -17,7 +17,9 @@ import io.github.madeye.meow.diagnostics.FaultDiagnostics
 import io.github.madeye.meow.diagnostics.FaultKind
 import io.github.madeye.meow.diagnostics.FaultProcess
 import io.github.madeye.meow.database.ClashProfile
+import io.github.madeye.meow.ui.screens.providers.proxyDialersFromYaml
 import io.github.madeye.meow.vpn.ControllerSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -41,6 +43,8 @@ data class ProxyNodeUi(
     val type: String,
     val delay: NodeDelay,
     val selected: Boolean,
+    /** The saved inline dialer setting; not evidence of the live route. */
+    val dialer: String? = null,
 )
 
 @Immutable
@@ -74,6 +78,7 @@ class ProxyGroupsViewModel(
     private val onRouteChanged: () -> Unit,
     private val onNodeSelected: (String) -> Unit,
     private val saveSelection: suspend (Long, String, () -> Boolean) -> Unit,
+    private val loadProfileYaml: suspend (Long) -> String? = { null },
 ) : ViewModel() {
     private val reload = MutableStateFlow(0L)
     private val expanded = MutableStateFlow<String?>(null)
@@ -90,7 +95,9 @@ class ProxyGroupsViewModel(
         val mode = api.configs().routeMode
         val proxies = api.proxies()
         val pending = api.proxyProviders().any { it.awaitingFirstUpdate }
-        GroupsRead(proxies.rows(mode), pending)
+        val dialers = loadDialers(session)
+        controller.requireCurrent(session)
+        GroupsRead(proxies.rows(mode, dialers), pending)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), ControllerSnapshot())
 
     val uiState: StateFlow<ProxyGroupsUiState> = combine(
@@ -195,12 +202,22 @@ class ProxyGroupsViewModel(
         job.start()
     }
 
+    // Editor selection may point to a different profile while this session is running.
+    private suspend fun loadDialers(session: ControllerSession): Map<String, String> = try {
+        session.profileId?.let { loadProfileYaml(it)?.let(::proxyDialersFromYaml) }.orEmpty()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Timber.w(e, "loading proxy dialers failed")
+        emptyMap()
+    }
+
     private fun currentGroups(): ControllerSession? = snapshot.value.let { data ->
         data.session?.takeIf { controller.isCurrent(it) && data.value != null }
     }
 }
 
-private fun ProxiesResult.rows(mode: RouteMode?): List<ProxyGroupUi> = visibleGroups(mode).map { group ->
+private fun ProxiesResult.rows(mode: RouteMode?, dialers: Map<String, String>): List<ProxyGroupUi> = visibleGroups(mode).map { group ->
     ProxyGroupUi(
         name = group.name,
         type = group.type,
@@ -214,6 +231,7 @@ private fun ProxiesResult.rows(mode: RouteMode?): List<ProxyGroupUi> = visibleGr
                 type = node?.type ?: member?.type.orEmpty(),
                 delay = NodeDelay.fromHistory(node?.history ?: member?.history.orEmpty()),
                 selected = name == group.now,
+                dialer = dialers[name].takeIf { node?.providerName == "" },
             )
         }.sortedForGroup(group.type),
     )
