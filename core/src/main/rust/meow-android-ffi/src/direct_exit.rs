@@ -30,7 +30,10 @@ pub(crate) fn physical_destination(ip: IpAddr) -> bool {
 }
 
 #[cfg(target_os = "android")]
-pub(crate) async fn tcp(mut stream: lwip::TcpStream, dst: SocketAddr) -> std::io::Result<()> {
+pub(crate) async fn tcp(
+    mut stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    dst: SocketAddr,
+) -> std::io::Result<()> {
     use std::{io, os::fd::AsRawFd, time::Duration};
     use tokio::net::TcpSocket;
     if !physical_destination(dst.ip()) {

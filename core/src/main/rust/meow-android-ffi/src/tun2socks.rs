@@ -540,25 +540,13 @@ async fn run_tun2socks(
                             let dns = dns_hijacking.captures(remote_addr).then(|| tcp_dns.clone());
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let generation = dns.as_ref().and_then(|_| meow_lwip.snapshot());
-                            let handle = tokio::spawn(async move {
-                                match flow_exit(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
-                                    FlowExit::Clash => {
-                                        if let Some(dns) = dns {
-                                            run_selected_dns(
-                                                dns.serve(stream),
-                                                #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                                generation,
-                                            ).await;
-                                        } else {
-                                            dispatch_tcp(stream, local_addr, remote_addr).await;
-                                        }
-                                    }
-                                    #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                    FlowExit::Direct(_) => { let _ = crate::direct_exit::tcp(stream, remote_addr).await; }
-                                    #[cfg(feature = "zerotier")]
-                                    _ => {}
-                                }
-                            });
+                            let handle = tokio::spawn(dispatch_accepted_tcp(
+                                AcceptedTcp { conn: NetstackConn(stream), src: local_addr, dst: remote_addr },
+                                gate,
+                                dns,
+                                #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                generation,
+                            ));
                             track_flow_task(&flow_tasks_lwip, handle);
                         }
                         None => break,
@@ -1148,7 +1136,7 @@ impl TcpDnsLimits {
         }
     }
 
-    async fn serve(&self, stream: lwip::TcpStream) {
+    async fn serve(&self, stream: impl AsyncRead + AsyncWrite + Unpin) {
         let Ok(_connection) = self.connections.try_acquire() else {
             warn_capped(
                 &TCP_DNS_CAP_LOG_LAST_MS,
@@ -1239,7 +1227,68 @@ async fn abort_flow_tasks(flow_tasks: &FlowTasks) {
 // TCP dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch_tcp(stream: lwip::TcpStream, src_addr: SocketAddr, dst_addr: SocketAddr) {
+/// Original tuple plus stream as seen by the app. The stack is responsible
+/// only for accepting the stream; routing and socket protection remain here.
+struct AcceptedTcp<C> {
+    conn: C,
+    src: SocketAddr,
+    dst: SocketAddr,
+}
+
+impl<C> AcceptedTcp<C> {
+    fn metadata(&self) -> Metadata {
+        Metadata {
+            network: Network::Tcp,
+            conn_type: ConnType::Inner,
+            src_ip: Some(self.src.ip()),
+            src_port: self.src.port(),
+            dst_ip: Some(self.dst.ip()),
+            dst_port: self.dst.port(),
+            ..Default::default()
+        }
+    }
+}
+
+async fn dispatch_accepted_tcp(
+    accepted: AcceptedTcp<impl ProxyConn + 'static>,
+    gate: Option<Arc<ClashGate>>,
+    dns: Option<TcpDnsLimits>,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] generation: Option<
+        tokio_util::sync::CancellationToken,
+    >,
+) {
+    match flow_exit(
+        gate.as_deref(),
+        owner::IPPROTO_TCP,
+        accepted.src,
+        accepted.dst,
+    )
+    .await
+    {
+        FlowExit::Clash => {
+            if let Some(dns) = dns {
+                run_selected_dns(
+                    dns.serve(accepted.conn),
+                    #[cfg(all(target_os = "android", feature = "zerotier"))]
+                    generation,
+                )
+                .await;
+            } else {
+                dispatch_clash_tcp(accepted).await;
+            }
+        }
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
+        FlowExit::Direct(_) => {
+            let _ = crate::direct_exit::tcp(accepted.conn, accepted.dst).await;
+        }
+        #[cfg(feature = "zerotier")]
+        _ => {}
+    }
+}
+
+async fn dispatch_clash_tcp(accepted: AcceptedTcp<impl ProxyConn + 'static>) {
+    let src_addr = accepted.src;
+    let dst_addr = accepted.dst;
     let tunnel = match engine::tunnel() {
         Some(t) => t,
         None => {
@@ -1253,21 +1302,13 @@ async fn dispatch_tcp(stream: lwip::TcpStream, src_addr: SocketAddr, dst_addr: S
 
     tracing::debug!("tun2socks: dispatch {} -> {}", src_addr, dst_addr);
 
-    let mut metadata = Metadata {
-        network: Network::Tcp,
-        conn_type: ConnType::Inner,
-        src_ip: Some(src_addr.ip()),
-        src_port: src_addr.port(),
-        dst_ip: Some(dst_addr.ip()),
-        dst_port: dst_addr.port(),
-        ..Default::default()
-    };
+    let mut metadata = accepted.metadata();
     apply_flow_owner(tunnel.process_lookup_mode(), &mut metadata, || {
         owner::lookup(owner::IPPROTO_TCP, src_addr, dst_addr)
     })
     .await;
 
-    let proxy_conn: Box<dyn ProxyConn> = Box::new(NetstackConn(stream));
+    let proxy_conn: Box<dyn ProxyConn> = Box::new(accepted.conn);
     let inner = tunnel.inner().clone();
     meow_tunnel::tcp::handle_tcp(&inner, proxy_conn, metadata).await;
     tracing::debug!("tun2socks: flow done {} -> {}", src_addr, dst_addr);
@@ -1300,9 +1341,9 @@ fn apply_owner(metadata: &mut Metadata, owner: Option<owner::Owner>) {
     }
 }
 
-struct NetstackConn(lwip::TcpStream);
+struct NetstackConn<S>(S);
 
-impl AsyncRead for NetstackConn {
+impl<S: AsyncRead + Unpin> AsyncRead for NetstackConn<S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -1312,7 +1353,7 @@ impl AsyncRead for NetstackConn {
     }
 }
 
-impl AsyncWrite for NetstackConn {
+impl<S: AsyncWrite + Unpin> AsyncWrite for NetstackConn<S> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -1330,7 +1371,7 @@ impl AsyncWrite for NetstackConn {
     }
 }
 
-impl ProxyConn for NetstackConn {}
+impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> ProxyConn for NetstackConn<S> {}
 
 // ---------------------------------------------------------------------------
 // UDP dispatch
@@ -1906,6 +1947,87 @@ mod tests {
 
         assert!(finished.load(Ordering::SeqCst));
         TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+    }
+
+    #[tokio::test]
+    async fn accepted_tcp_keeps_original_tuple_and_accepts_non_lwip_io() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (src, dst) in [
+            ("192.0.2.3:41000", "198.51.100.7:443"),
+            ("[2001:db8::3]:41000", "[2001:db8:1::7]:443"),
+        ] {
+            let (stream, mut peer) = tokio::io::duplex(16);
+            let accepted = AcceptedTcp {
+                conn: NetstackConn(stream),
+                src: src.parse().unwrap(),
+                dst: dst.parse().unwrap(),
+            };
+            let metadata = accepted.metadata();
+            assert_eq!(
+                (metadata.src_ip, metadata.src_port),
+                (Some(accepted.src.ip()), accepted.src.port())
+            );
+            assert_eq!(
+                (metadata.dst_ip, metadata.dst_port),
+                (Some(accepted.dst.ip()), accepted.dst.port())
+            );
+            let mut proxy: Box<dyn ProxyConn> = Box::new(accepted.conn);
+            assert!(proxy.tcp_stream().is_none());
+            peer.write_all(b"up").await.unwrap();
+            let mut incoming = [0; 2];
+            proxy.read_exact(&mut incoming).await.unwrap();
+            assert_eq!(&incoming, b"up");
+            proxy.write_all(b"ok").await.unwrap();
+            proxy.shutdown().await.unwrap();
+            let mut reply = Vec::new();
+            peer.read_to_end(&mut reply).await.unwrap();
+            assert_eq!(reply, b"ok");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn accepted_tcp_dispatch_serves_framed_dns_on_non_lwip_io() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _serial = SERIAL.lock();
+        let result = crate::get_runtime().block_on(async {
+            let yaml = "dns: {nameserver: ['rcode://refused']}\nrules: [MATCH,DIRECT]\n";
+            let stripped = engine::strip_and_inject(yaml, engine::DnsUpstreams::Inherit).unwrap();
+            let config = meow_config::load_config_from_str(&stripped).await.unwrap();
+            let old = crate::DNS_RESOLVER
+                .write()
+                .replace(config.dns.resolver_slot);
+            let (stream, mut peer) = tokio::io::duplex(512);
+            let accepted = AcceptedTcp {
+                conn: NetstackConn(stream),
+                src: "192.0.2.3:41000".parse().unwrap(),
+                dst: "198.51.100.7:53".parse().unwrap(),
+            };
+            let worker = tokio::spawn(dispatch_accepted_tcp(
+                accepted,
+                None,
+                Some(TcpDnsLimits::new()),
+            ));
+            let result = tokio::time::timeout(Duration::from_secs(2), async {
+                let dns = dns_query("portable.invalid", 16);
+                peer.write_u16(u16::try_from(dns.len()).unwrap()).await?;
+                peer.write_all(&dns).await?;
+                peer.shutdown().await?;
+                let n = peer.read_u16().await? as usize;
+                let mut reply = vec![0; n];
+                peer.read_exact(&mut reply).await?;
+                Ok::<_, io::Error>(reply)
+            })
+            .await;
+            drop(peer);
+            worker.abort();
+            let _ = worker.await;
+            *crate::DNS_RESOLVER.write() = old;
+            result
+        });
+        let reply = result.unwrap().unwrap();
+        assert_eq!(&reply[..2], &[0x12, 0x34]);
+        assert_eq!(reply[3] & 0x0f, 5); // REFUSED from the configured resolver
     }
 
     #[cfg(not(target_os = "android"))]
