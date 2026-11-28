@@ -23,7 +23,6 @@ pub(crate) use tun_dns::DnsHijackPolicy;
 use crate::engine;
 use crate::logging;
 use crate::owner;
-use futures::{SinkExt, StreamExt};
 use meow_common::{ConnType, Metadata, Network, ProxyConn};
 use meow_dns::DnsServer;
 #[cfg(feature = "zerotier")]
@@ -46,6 +45,8 @@ use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
 use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::{trace, warn};
+
+mod stack_endpoint;
 
 pub(crate) struct UdpDatagram {
     pub(crate) payload: Vec<u8>,
@@ -461,10 +462,12 @@ async fn run_tun2socks(
 ) -> io::Result<()> {
     logging::bridge_log("tun2socks: building lwip netstack");
 
-    let (mut stack, mut tcp_listener, udp_socket) =
-        lwip::NetStack::with_buffer_size(1024, 256).map_err(|e| io::Error::other(e.to_string()))?;
-
-    let (udp_write, mut udp_read) = udp_socket.split();
+    let stack_endpoint::Endpoint {
+        mut frames,
+        mut tcp,
+        udp_tx,
+        mut udp_rx,
+    } = stack_endpoint::Endpoint::open()?;
 
     let (udp_reply_tx, mut udp_reply_rx) = mpsc::channel::<UdpDatagram>(256);
     let (dns_reply_tx, mut dns_reply_rx) = mpsc::channel::<StackDnsReply>(64);
@@ -524,11 +527,11 @@ async fn run_tun2socks(
                                 tokio::select! {
                                     biased;
                                     _ = generation.cancelled() => continue,
-                                    result = stack.send(bytes) => result,
+                                    result = frames.send(bytes) => result,
                                 }
                             };
                             #[cfg(not(all(target_os = "android", feature = "zerotier")))]
-                            let result = stack.send(frame).await;
+                            let result = frames.send(frame).await;
                             if let Err(e) = result {
                                 logging::bridge_log(&format!("stack send error: {}", e));
                                 break;
@@ -537,7 +540,7 @@ async fn run_tun2socks(
                         None => break,
                     }
                 }
-                pkt = stack.next() => {
+                pkt = frames.receive() => {
                     match pkt {
                         Some(Ok(frame)) => { egress_tx_lwip.enqueue(frame); }
                         Some(Err(e)) => {
@@ -547,15 +550,15 @@ async fn run_tun2socks(
                         None => break,
                     }
                 }
-                accepted = tcp_listener.next() => {
+                accepted = tcp.accept() => {
                     match accepted {
-                        Some((stream, local_addr, remote_addr)) => {
+                        Some(accepted) => {
                             let gate = stack_clash_gate.clone();
-                            let dns = dns_hijacking.captures(remote_addr).then(|| tcp_dns.clone());
+                            let dns = dns_hijacking.captures(accepted.dst).then(|| tcp_dns.clone());
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let generation = dns.as_ref().and_then(|_| meow_lwip.snapshot());
                             let handle = tokio::spawn(dispatch_accepted_tcp(
-                                AcceptedTcp { conn: NetstackConn(stream), src: local_addr, dst: remote_addr },
+                                accepted,
                                 gate,
                                 dns,
                                 #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -566,13 +569,13 @@ async fn run_tun2socks(
                         None => break,
                     }
                 }
-                udp_pkt = udp_read.next() => {
+                udp_pkt = udp_rx.receive() => {
                     match udp_pkt {
-                        Some((payload, src, dst)) => {
+                        Some(packet) => {
                             let reply_tx = udp_reply_tx_lwip.clone();
                             let readers = reply_readers_lwip.clone();
                             let gate = stack_clash_gate.clone();
-                            let dns = dns_hijacking.captures(dst).then(|| {
+                            let dns = dns_hijacking.captures(packet.dst).then(|| {
                                 (Arc::clone(&dns_sem_lwip), dns_reply_tx.clone())
                             });
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -580,7 +583,7 @@ async fn run_tun2socks(
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let direct = direct_udp.clone();
                             let handle = tokio::spawn(dispatch_accepted_udp(
-                                UdpDatagram { payload, src, dst },
+                                packet,
                                 UdpDispatch {
                                     gate, block_app_udp443, dns, reply_tx, readers,
                                     #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -600,14 +603,14 @@ async fn run_tun2socks(
                         continue;
                     }
                     let packet = reply.packet;
-                    if udp_write.send_to(&packet.payload, &packet.src, &packet.dst).is_err() {
+                    if udp_tx.send(&packet).is_err() {
                         trace!("tun2socks: dropping undeliverable UDP DNS reply");
                     }
                 }
                 msg = udp_reply_rx.recv() => {
                     match msg {
                         Some(msg) => {
-                            if let Err(e) = udp_write.send_to(&msg.payload, &msg.src, &msg.dst) {
+                            if let Err(e) = udp_tx.send(&msg) {
                                 logging::bridge_log(&format!("tun2socks: UDP reply send error: {}", e));
                                 break;
                             }
@@ -2426,6 +2429,17 @@ mod tests {
 
     /// With the reader asleep on an idle fd, stop() has to wake it rather
     /// than wait out TUN2SOCKS_STOP_TIMEOUT.
+    #[test]
+    fn packet_endpoint_releases_lwip_on_stop_before_same_fd_restart() {
+        let _serial = SERIAL.lock();
+        let (tun, _peer) = std::os::unix::net::UnixDatagram::pair().unwrap();
+        for _ in 0..2 {
+            start(tun.as_raw_fd(), 0).unwrap();
+            assert!(stop());
+            assert!(!TUN2SOCKS_ACTIVE.load(Ordering::SeqCst));
+        }
+    }
+
     #[test]
     fn stop_wakes_an_idle_reader() {
         let _serial = SERIAL.lock();
