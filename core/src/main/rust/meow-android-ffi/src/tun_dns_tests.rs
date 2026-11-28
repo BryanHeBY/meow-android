@@ -1,12 +1,11 @@
 use super::{ipv4_header_checksum, start, stop};
 use crate::test_support::{dns_query, from_the_profile_nameserver, txt_reply, SERIAL};
 use std::io;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixDatagram;
 use std::time::{Duration, Instant};
 
-const APP: [u8; 4] = [172, 19, 0, 1];
-const VPN_DNS: [u8; 4] = [172, 19, 0, 2];
 const APP_PORT: u16 = 42123;
 const DNS_PORT: u16 = 53;
 const LIMIT: Duration = Duration::from_secs(3);
@@ -36,41 +35,78 @@ impl Drop for Upstream {
 struct FakeTun {
     _tun: UnixDatagram,
     peer: UnixDatagram,
+    app: IpAddr,
+    dns: IpAddr,
 }
 
 impl FakeTun {
-    fn open() -> Self {
+    fn open(app: IpAddr, dns: IpAddr) -> Self {
         let (tun, peer) = UnixDatagram::pair().unwrap();
         peer.set_read_timeout(Some(LIMIT)).unwrap();
         start(tun.as_raw_fd(), 0).unwrap();
-        Self { _tun: tun, peer }
+        Self {
+            _tun: tun,
+            peer,
+            app,
+            dns,
+        }
     }
 
     fn send_tcp(&self, seq: u32, ack: u32, flags: u8, payload: &[u8]) {
-        let total = u16::try_from(40 + payload.len()).unwrap();
-        let mut packet = vec![0; usize::from(total)];
-        packet[0] = 0x45;
-        packet[2..4].copy_from_slice(&total.to_be_bytes());
-        packet[8] = 64;
-        packet[9] = 6;
-        packet[12..16].copy_from_slice(&APP);
-        packet[16..20].copy_from_slice(&VPN_DNS);
-        let sum = ipv4_header_checksum(&packet[..20]);
-        packet[10..12].copy_from_slice(&sum.to_be_bytes());
+        let mut tcp = vec![0; 20];
+        tcp[..2].copy_from_slice(&APP_PORT.to_be_bytes());
+        tcp[2..4].copy_from_slice(&DNS_PORT.to_be_bytes());
+        tcp[4..8].copy_from_slice(&seq.to_be_bytes());
+        tcp[8..12].copy_from_slice(&ack.to_be_bytes());
+        tcp[12] = 0x50; // No TCP options.
+        tcp[13] = flags;
+        tcp[14..16].copy_from_slice(&u16::MAX.to_be_bytes());
+        tcp.extend_from_slice(payload);
 
-        packet[20..22].copy_from_slice(&APP_PORT.to_be_bytes());
-        packet[22..24].copy_from_slice(&DNS_PORT.to_be_bytes());
-        packet[24..28].copy_from_slice(&seq.to_be_bytes());
-        packet[28..32].copy_from_slice(&ack.to_be_bytes());
-        packet[32] = 0x50; // No TCP options.
-        packet[33] = flags;
-        packet[34..36].copy_from_slice(&u16::MAX.to_be_bytes());
-        packet[40..].copy_from_slice(payload);
-        let mut pseudo = [APP.as_slice(), VPN_DNS.as_slice(), &[0, 6]].concat();
-        pseudo.extend_from_slice(&(total - 20).to_be_bytes());
-        pseudo.extend_from_slice(&packet[20..]);
+        let tcp_len = u16::try_from(tcp.len()).unwrap();
+        let (mut packet, mut pseudo) = match (self.app, self.dns) {
+            (IpAddr::V4(src), IpAddr::V4(dst)) => {
+                let mut ip = vec![0; 20];
+                ip[0] = 0x45;
+                ip[2..4].copy_from_slice(&(20 + tcp_len).to_be_bytes());
+                ip[8] = 64;
+                ip[9] = 6;
+                ip[12..16].copy_from_slice(&src.octets());
+                ip[16..20].copy_from_slice(&dst.octets());
+                let sum = ipv4_header_checksum(&ip);
+                ip[10..12].copy_from_slice(&sum.to_be_bytes());
+                let pseudo = [
+                    src.octets().as_slice(),
+                    dst.octets().as_slice(),
+                    &[0, 6],
+                    tcp_len.to_be_bytes().as_slice(),
+                ]
+                .concat();
+                (ip, pseudo)
+            }
+            (IpAddr::V6(src), IpAddr::V6(dst)) => {
+                let mut ip = vec![0; 40];
+                ip[0] = 0x60;
+                ip[4..6].copy_from_slice(&tcp_len.to_be_bytes());
+                ip[6] = 6;
+                ip[7] = 64;
+                ip[8..24].copy_from_slice(&src.octets());
+                ip[24..40].copy_from_slice(&dst.octets());
+                let pseudo = [
+                    src.octets().as_slice(),
+                    dst.octets().as_slice(),
+                    u32::from(tcp_len).to_be_bytes().as_slice(),
+                    &[0, 0, 0, 6],
+                ]
+                .concat();
+                (ip, pseudo)
+            }
+            _ => panic!("test addresses must have the same family"),
+        };
+        pseudo.extend_from_slice(&tcp);
         let sum = ipv4_header_checksum(&pseudo);
-        packet[36..38].copy_from_slice(&sum.to_be_bytes());
+        tcp[16..18].copy_from_slice(&sum.to_be_bytes());
+        packet.extend(tcp);
         assert_eq!(self.peer.send(&packet).unwrap(), packet.len());
     }
 
@@ -83,10 +119,23 @@ impl FakeTun {
             }
             self.peer.set_read_timeout(Some(remaining)).unwrap();
             let len = self.peer.recv(&mut packet)?;
-            if len < 40 || packet[0] >> 4 != 4 || packet[9] != 6 {
-                continue;
-            }
-            let ip_end = usize::from(packet[0] & 15) * 4;
+            let ip_end = match packet[0] >> 4 {
+                4 if len >= 40 && packet[9] == 6 && self.dns.is_ipv4() => {
+                    let src: [u8; 4] = packet[12..16].try_into().unwrap();
+                    let dst: [u8; 4] = packet[16..20].try_into().unwrap();
+                    assert_eq!(IpAddr::from(Ipv4Addr::from(src)), self.dns);
+                    assert_eq!(IpAddr::from(Ipv4Addr::from(dst)), self.app);
+                    usize::from(packet[0] & 15) * 4
+                }
+                6 if len >= 60 && packet[6] == 6 && self.dns.is_ipv6() => {
+                    let src: [u8; 16] = packet[8..24].try_into().unwrap();
+                    let dst: [u8; 16] = packet[24..40].try_into().unwrap();
+                    assert_eq!(IpAddr::from(Ipv6Addr::from(src)), self.dns);
+                    assert_eq!(IpAddr::from(Ipv6Addr::from(dst)), self.app);
+                    40
+                }
+                _ => continue,
+            };
             let tcp = &packet[ip_end..len];
             if tcp.len() < 20
                 || tcp[..2] != DNS_PORT.to_be_bytes()
@@ -94,8 +143,6 @@ impl FakeTun {
             {
                 continue;
             }
-            assert_eq!(packet[12..16], VPN_DNS);
-            assert_eq!(packet[16..20], APP);
             let tcp_end = usize::from(tcp[12] >> 4) * 4;
             return Ok(TcpSegment {
                 seq: u32::from_be_bytes(tcp[4..8].try_into().unwrap()),
@@ -180,6 +227,15 @@ fn exchange_over_fake_tun(tun: &FakeTun) -> io::Result<Vec<Vec<u8>>> {
 
 #[test]
 fn tun_tcp_dns_uses_live_resolver_for_split_and_repeated_queries() {
+    check_dns_round_trip("172.19.0.1", "172.19.0.2");
+}
+
+#[test]
+fn tun_tcp_dns_intercepts_ipv6_when_hijack_is_enabled() {
+    check_dns_round_trip("2001:db8::1", "2001:db8::53");
+}
+
+fn check_dns_round_trip(app: &str, dns: &str) {
     let _serial = SERIAL.lock();
     let rt = crate::get_runtime();
     let server = rt
@@ -207,7 +263,7 @@ fn tun_tcp_dns_uses_live_resolver_for_split_and_repeated_queries() {
         .block_on(meow_config::load_config_from_str(&yaml))
         .unwrap();
     let _resolver = PublishedResolver::set(config.dns.resolver_slot);
-    let tun = FakeTun::open();
+    let tun = FakeTun::open(app.parse().unwrap(), dns.parse().unwrap());
     let result = exchange_over_fake_tun(&tun);
     drop(tun);
     let replies = result.expect("VPN DNS TCP/53 must reach the published resolver");
