@@ -283,3 +283,47 @@ fn check_dns_round_trip(app: &str, dns: &str) {
         assert!(from_the_profile_nameserver(reply));
     }
 }
+
+#[test]
+fn dns_hijack_does_not_capture_encrypted_dns_ports_or_change_upstream_transports() {
+    use super::DnsHijackPolicy;
+    use crate::engine::{strip_and_inject, DnsUpstreams};
+
+    let enabled = DnsHijackPolicy::new(true);
+    let disabled = DnsHijackPolicy::new(false);
+    let vpn = "172.19.0.2:53".parse().unwrap();
+    assert!(enabled.captures(vpn));
+    assert!(disabled.captures(vpn));
+    for destination in ["192.0.2.53:53", "[2001:db8::53]:53"] {
+        let address = destination.parse().unwrap();
+        assert!(enabled.captures(address));
+        assert!(!disabled.captures(address));
+    }
+    for destination in [
+        "172.19.0.2:443",
+        "172.19.0.2:853",
+        "192.0.2.53:443",
+        "192.0.2.53:853",
+        "[2001:db8::53]:443",
+        "[2001:db8::53]:853",
+    ] {
+        let address = destination.parse().unwrap();
+        assert!(!enabled.captures(address));
+        assert!(!disabled.captures(address));
+    }
+
+    // Normalize offline only. The ingress switch belongs to a VPN session,
+    // not the author's resolver plan for encrypted outbound DNS.
+    let profile = r#"
+dns:
+  nameserver: ["https://192.0.2.53/dns-query", "tls://[2001:db8::53]:853"]
+  default-nameserver: ["udp://192.0.2.54:53"]
+rules: ["MATCH,DIRECT"]
+"#;
+    let authored: serde_yaml::Value = serde_yaml::from_str(profile).unwrap();
+    let normalized = strip_and_inject(profile, DnsUpstreams::Profile).unwrap();
+    let actual: serde_yaml::Value = serde_yaml::from_str(&normalized).unwrap();
+    for key in ["nameserver", "default-nameserver"] {
+        assert_eq!(actual["dns"][key], authored["dns"][key], "{key}");
+    }
+}
