@@ -87,7 +87,7 @@ pub(crate) mod udp {
     use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 
     type Key = (SocketAddr, SocketAddr);
-    type Datagram = (Vec<u8>, SocketAddr, SocketAddr);
+    use crate::tun2socks::UdpDatagram;
     struct Flow {
         owner: Vec<String>,
         tx: mpsc::Sender<Vec<u8>>,
@@ -111,7 +111,7 @@ pub(crate) mod udp {
             key: Key,
             owner: Vec<String>,
             data: Vec<u8>,
-            reply: mpsc::Sender<Datagram>,
+            reply: mpsc::Sender<UdpDatagram>,
         ) {
             if !physical_destination(key.1.ip()) {
                 return;
@@ -147,7 +147,7 @@ pub(crate) mod udp {
         key: Key,
         owner: Vec<String>,
         mut ingress: mpsc::Receiver<Vec<u8>>,
-        reply: mpsc::Sender<Datagram>,
+        reply: mpsc::Sender<UdpDatagram>,
     ) -> io::Result<()> {
         let socket = match key.1 {
             SocketAddr::V4(_) => UdpSocket::bind("0.0.0.0:0").await?,
@@ -176,7 +176,7 @@ pub(crate) mod udp {
                     if current != owner {
                         return Ok(());
                     }
-                    let _ = reply.try_send((payload, key.1, key.0));
+                    let _ = reply.try_send(UdpDatagram { payload, src: key.1, dst: key.0 });
                 }
                 () = &mut idle => return Ok(()),
             }

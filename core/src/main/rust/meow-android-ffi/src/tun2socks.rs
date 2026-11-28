@@ -47,7 +47,21 @@ use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::{trace, warn};
 
-type UdpMsg = (Vec<u8>, SocketAddr, SocketAddr);
+pub(crate) struct UdpDatagram {
+    pub(crate) payload: Vec<u8>,
+    pub(crate) src: SocketAddr,
+    pub(crate) dst: SocketAddr,
+}
+
+impl UdpDatagram {
+    fn reply(&self, payload: Vec<u8>) -> Self {
+        Self {
+            payload,
+            src: self.dst,
+            dst: self.src,
+        }
+    }
+}
 type AnyIpPktFrame = Vec<u8>;
 #[cfg(all(target_os = "android", feature = "zerotier"))]
 type StackFrame = (AnyIpPktFrame, tokio_util::sync::CancellationToken);
@@ -452,7 +466,7 @@ async fn run_tun2socks(
 
     let (udp_write, mut udp_read) = udp_socket.split();
 
-    let (udp_reply_tx, mut udp_reply_rx) = mpsc::channel::<UdpMsg>(256);
+    let (udp_reply_tx, mut udp_reply_rx) = mpsc::channel::<UdpDatagram>(256);
     let (dns_reply_tx, mut dns_reply_rx) = mpsc::channel::<StackDnsReply>(64);
     let reply_readers: ReplyReaders = Arc::new(Mutex::new(HashMap::new()));
 
@@ -565,46 +579,16 @@ async fn run_tun2socks(
                             let generation = dns.as_ref().and_then(|_| meow_lwip.snapshot());
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let direct = direct_udp.clone();
-                            let handle = tokio::spawn(async move {
-                                let exit = flow_exit(gate.as_deref(), owner::IPPROTO_UDP, src, dst).await;
-                                if drop_app_udp(&exit, block_app_udp443, dst) {
-                                    return;
-                                }
-                                match exit {
-                                    FlowExit::Clash => {
-                                        if let Some((budget, dns_reply)) = dns {
-                                            #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                            let reply_generation = generation.clone();
-                                            let work = async {
-                                                let Ok(_permit) = budget.try_acquire() else {
-                                                    warn_dns_burst();
-                                                    return;
-                                                };
-                                                if let Ok(Some(bytes)) = tokio::time::timeout(
-                                                    DNS_TASK_TIMEOUT, answer_dns(&payload),
-                                                ).await {
-                                                    let _ = dns_reply.try_send(StackDnsReply {
-                                                        packet: (bytes, dst, src),
-                                                        #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                                        generation: reply_generation,
-                                                    });
-                                                }
-                                            };
-                                            run_selected_dns(
-                                                work,
-                                                #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                                generation,
-                                            ).await;
-                                        } else {
-                                            dispatch_udp(payload, src, dst, reply_tx, readers).await;
-                                        }
-                                    }
+                            let handle = tokio::spawn(dispatch_accepted_udp(
+                                UdpDatagram { payload, src, dst },
+                                UdpDispatch {
+                                    gate, block_app_udp443, dns, reply_tx, readers,
                                     #[cfg(all(target_os = "android", feature = "zerotier"))]
-                                    FlowExit::Direct(owner) => direct.transmit((src, dst), owner, payload, reply_tx),
-                                    #[cfg(feature = "zerotier")]
-                                    _ => {}
-                                }
-                            });
+                                    generation,
+                                    #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                    direct,
+                                },
+                            ));
                             track_flow_task(&flow_tasks_lwip, handle);
                         }
                         None => break,
@@ -615,15 +599,15 @@ async fn run_tun2socks(
                     if reply.generation.is_none_or(|gen| gen.is_cancelled()) {
                         continue;
                     }
-                    let (bytes, src, dst) = reply.packet;
-                    if udp_write.send_to(&bytes, &src, &dst).is_err() {
+                    let packet = reply.packet;
+                    if udp_write.send_to(&packet.payload, &packet.src, &packet.dst).is_err() {
                         trace!("tun2socks: dropping undeliverable UDP DNS reply");
                     }
                 }
                 msg = udp_reply_rx.recv() => {
                     match msg {
                         Some(msg) => {
-                            if let Err(e) = udp_write.send_to(&msg.0, &msg.1, &msg.2) {
+                            if let Err(e) = udp_write.send_to(&msg.payload, &msg.src, &msg.dst) {
                                 logging::bridge_log(&format!("tun2socks: UDP reply send error: {}", e));
                                 break;
                             }
@@ -1117,7 +1101,7 @@ impl ClashIngress {
 }
 
 struct StackDnsReply {
-    packet: UdpMsg,
+    packet: UdpDatagram,
     #[cfg(all(target_os = "android", feature = "zerotier"))]
     generation: Option<tokio_util::sync::CancellationToken>,
 }
@@ -1377,13 +1361,77 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> ProxyConn for NetstackConn
 // UDP dispatch
 // ---------------------------------------------------------------------------
 
+struct UdpDispatch {
+    gate: Option<Arc<ClashGate>>,
+    block_app_udp443: bool,
+    dns: Option<(Arc<Semaphore>, mpsc::Sender<StackDnsReply>)>,
+    reply_tx: mpsc::Sender<UdpDatagram>,
+    readers: ReplyReaders,
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
+    generation: Option<tokio_util::sync::CancellationToken>,
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
+    direct: Arc<crate::direct_exit::udp::Flows>,
+}
+
+async fn dispatch_accepted_udp(packet: UdpDatagram, route: UdpDispatch) {
+    let exit = flow_exit(
+        route.gate.as_deref(),
+        owner::IPPROTO_UDP,
+        packet.src,
+        packet.dst,
+    )
+    .await;
+    if drop_app_udp(&exit, route.block_app_udp443, packet.dst) {
+        return;
+    }
+    match exit {
+        FlowExit::Clash => {
+            if let Some((budget, dns_reply)) = route.dns {
+                #[cfg(all(target_os = "android", feature = "zerotier"))]
+                let reply_generation = route.generation.clone();
+                let work = async {
+                    let Ok(_permit) = budget.try_acquire() else {
+                        warn_dns_burst();
+                        return;
+                    };
+                    if let Ok(Some(bytes)) =
+                        tokio::time::timeout(DNS_TASK_TIMEOUT, answer_dns(&packet.payload)).await
+                    {
+                        let _ = dns_reply.try_send(StackDnsReply {
+                            packet: packet.reply(bytes),
+                            #[cfg(all(target_os = "android", feature = "zerotier"))]
+                            generation: reply_generation,
+                        });
+                    }
+                };
+                run_selected_dns(
+                    work,
+                    #[cfg(all(target_os = "android", feature = "zerotier"))]
+                    route.generation,
+                )
+                .await;
+            } else {
+                dispatch_udp(packet, route.reply_tx, route.readers).await;
+            }
+        }
+        #[cfg(all(target_os = "android", feature = "zerotier"))]
+        FlowExit::Direct(owner) => route.direct.transmit(
+            (packet.src, packet.dst),
+            owner,
+            packet.payload,
+            route.reply_tx,
+        ),
+        #[cfg(feature = "zerotier")]
+        _ => {}
+    }
+}
+
 async fn dispatch_udp(
-    payload: Vec<u8>,
-    src: SocketAddr,
-    dst: SocketAddr,
-    reply_tx: mpsc::Sender<UdpMsg>,
+    packet: UdpDatagram,
+    reply_tx: mpsc::Sender<UdpDatagram>,
     reply_readers: ReplyReaders,
 ) {
+    let UdpDatagram { payload, src, dst } = packet;
     let Some(tunnel) = engine::tunnel() else {
         return;
     };
@@ -1459,7 +1507,7 @@ fn spawn_udp_reply_reader(
     session: Arc<UdpSession>,
     app_src: SocketAddr,
     app_dst: SocketAddr,
-    reply_tx: mpsc::Sender<UdpMsg>,
+    reply_tx: mpsc::Sender<UdpDatagram>,
     reply_readers: ReplyReaders,
     tunnel_inner: Arc<meow_tunnel::tunnel::TunnelInner>,
 ) {
@@ -1527,12 +1575,18 @@ async fn relay_udp_replies(
     session: &UdpSession,
     app_src: SocketAddr,
     app_dst: SocketAddr,
-    reply_tx: &mpsc::Sender<UdpMsg>,
+    reply_tx: &mpsc::Sender<UdpDatagram>,
 ) {
     let forward = |payload| {
         // Replies are activity too: refresh the NAT sweeper's idle clock.
         session.touch();
-        reply_tx.try_send((payload, app_dst, app_src)).is_ok()
+        reply_tx
+            .try_send(UdpDatagram {
+                payload,
+                src: app_dst,
+                dst: app_src,
+            })
+            .is_ok()
     };
     if let Some(conn) = session.conn.poll_packet_conn_ref() {
         while let Ok(payload) = std::future::poll_fn(|cx| {
@@ -1922,9 +1976,9 @@ mod tests {
             let (tx, mut rx) = mpsc::channel(4);
             relay_udp_replies(&session, app_src, app_dst, &tx).await;
             for payload in packets {
-                let (received, from, to) = rx.try_recv().expect("flow lost a reply");
-                assert_eq!(received, payload);
-                assert_eq!((from, to), (app_dst, app_src));
+                let reply = rx.try_recv().expect("flow lost a reply");
+                assert_eq!(reply.payload, payload);
+                assert_eq!((reply.src, reply.dst), (app_dst, app_src));
             }
         }
     }
@@ -2028,6 +2082,72 @@ mod tests {
         let reply = result.unwrap().unwrap();
         assert_eq!(&reply[..2], &[0x12, 0x34]);
         assert_eq!(reply[3] & 0x0f, 5); // REFUSED from the configured resolver
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn accepted_udp_dns_preserves_reverse_tuple_and_disabled_policy_for_both_families() {
+        let _serial = SERIAL.lock();
+        let checks = crate::get_runtime().block_on(async {
+            assert!(
+                engine::tunnel().is_none(),
+                "negative case must not dial any engine"
+            );
+            let yaml = "dns: {nameserver: ['rcode://refused']}\nrules: [MATCH,DIRECT]\n";
+            let stripped = engine::strip_and_inject(yaml, engine::DnsUpstreams::Inherit).unwrap();
+            let config = meow_config::load_config_from_str(&stripped).await.unwrap();
+            let old = crate::DNS_RESOLVER
+                .write()
+                .replace(config.dns.resolver_slot);
+            let mut checks = Vec::new();
+            for (src, dst, enabled) in [
+                ("192.0.2.3:41000", "198.51.100.7:53", true),
+                ("192.0.2.3:41000", "198.51.100.7:53", false),
+                ("[2001:db8::3]:41000", "[2001:db8:1::7]:53", true),
+                ("[2001:db8::3]:41000", "[2001:db8:1::7]:53", false),
+            ] {
+                let src = src.parse().unwrap();
+                let dst = dst.parse().unwrap();
+                let (reply_tx, mut replies) = mpsc::channel(1);
+                let (dns_tx, mut dns_replies) = mpsc::channel(1);
+                let dns = DnsHijackPolicy::new(enabled)
+                    .captures(dst)
+                    .then(|| (Arc::new(Semaphore::new(1)), dns_tx));
+                dispatch_accepted_udp(
+                    UdpDatagram {
+                        payload: dns_query("portable.invalid", 16),
+                        src,
+                        dst,
+                    },
+                    UdpDispatch {
+                        gate: None,
+                        block_app_udp443: false,
+                        dns,
+                        reply_tx,
+                        readers: Arc::new(Mutex::new(HashMap::new())),
+                    },
+                )
+                .await;
+                checks.push((
+                    src,
+                    dst,
+                    enabled,
+                    dns_replies.try_recv().ok(),
+                    replies.try_recv().is_err(),
+                ));
+            }
+            *crate::DNS_RESOLVER.write() = old;
+            checks
+        });
+        for (src, dst, enabled, reply, no_ordinary_reply) in checks {
+            assert!(no_ordinary_reply);
+            assert_eq!(reply.is_some(), enabled);
+            if let Some(reply) = reply {
+                assert_eq!((reply.packet.src, reply.packet.dst), (dst, src));
+                assert_eq!(&reply.packet.payload[..2], &[0x12, 0x34]);
+                assert_eq!(reply.packet.payload[3] & 0x0f, 5);
+            }
+        }
     }
 
     #[cfg(not(target_os = "android"))]
