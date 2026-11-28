@@ -257,7 +257,7 @@ fn check_dns_round_trip(app: &str, dns: &str) {
     }));
 
     let yaml = format!(
-        "dns:\n  nameserver: ['udp://{local}']\n  default-nameserver: ['udp://{local}']\nrules: ['MATCH,DIRECT']\n"
+        "dns:\n  enable: true\n  nameserver: ['udp://{local}']\n  default-nameserver: ['udp://{local}']\nrules: ['MATCH,DIRECT']\n"
     );
     let config = rt
         .block_on(meow_config::load_config_from_str(&yaml))
