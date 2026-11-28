@@ -1042,7 +1042,10 @@ impl ClashIngress {
     ) -> bool {
         // Unfragmented IPv4 fast path. IPv6 and reassembled UDP arrive
         // through lwIP and use the same destination policy and budget.
-        if parse_udp_packet(ip_data).is_some_and(|p| self.dns_hijacking.captures(p.dst)) {
+        if parse_udp_packet(ip_data).is_some_and(|p| {
+            self.dns_hijacking
+                .captures_raw_ipv4(p.dst, self.gate.is_some())
+        }) {
             let permit = match self.dns_sem.clone().try_acquire_owned() {
                 Ok(p) => p,
                 Err(_) => {
