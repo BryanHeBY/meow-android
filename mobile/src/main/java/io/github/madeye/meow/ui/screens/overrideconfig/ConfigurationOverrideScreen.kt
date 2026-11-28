@@ -217,6 +217,19 @@ private fun OverrideFields(
         }
     }
 
+    SectionHeader(stringResource(R.string.override_dns_hijack))
+    GlassCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(stringResource(R.string.override_dns_hijack_detail), style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.selectableGroup()) {
+            val default = if (global) R.string.override_dns_hijack_default else R.string.override_inherit_global
+            Choice(default, draft.dnsHijacking == null, enabled) { onEdit(draft.copy(dnsHijacking = null)) }
+            Choice(R.string.override_dns_hijack_on, draft.dnsHijacking == true, enabled) { onEdit(draft.copy(dnsHijacking = true)) }
+            Choice(R.string.override_dns_hijack_off, draft.dnsHijacking == false, enabled, Modifier.testTag("override_dns_hijack_off")) {
+                onEdit(draft.copy(dnsHijacking = false))
+            }
+        }
+    }
+
     SectionHeader(stringResource(R.string.override_preview))
     GlassCard {
         if (global) profile?.let { Text(it.name, style = MaterialTheme.typography.titleSmall) }
@@ -236,12 +249,14 @@ private fun OverrideFields(
         effective?.let {
             val quic = if (it.blocksAppUdp443) R.string.override_quic_block else R.string.override_quic_allow
             Text(stringResource(quic), style = MaterialTheme.typography.bodySmall)
+            val dnsHijack = if (it.interceptsPlainDns) R.string.override_dns_hijack_on else R.string.override_dns_hijack_off
+            Text(stringResource(dnsHijack), style = MaterialTheme.typography.bodySmall)
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         TextButton(
-            onClick = { onEdit(draft.copy(ipv6 = Ipv6Override.INHERIT, appQuic = AppQuicOverride.INHERIT)) },
-            enabled = enabled && (draft.ipv6 != Ipv6Override.INHERIT || draft.appQuic != AppQuicOverride.INHERIT),
+            onClick = { onEdit(draft.copy(ipv6 = Ipv6Override.INHERIT, appQuic = AppQuicOverride.INHERIT, dnsHijacking = null)) },
+            enabled = enabled && (draft.ipv6 != Ipv6Override.INHERIT || draft.appQuic != AppQuicOverride.INHERIT || draft.dnsHijacking != null),
         ) { Text(stringResource(R.string.override_reset)) }
         Button(onClick = onSave, enabled = form.canSave(OverrideSection.MAIN), modifier = Modifier.testTag("save_configuration_override")) {
             Text(stringResource(R.string.common_save))

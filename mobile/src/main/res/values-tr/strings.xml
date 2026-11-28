@@ -242,6 +242,11 @@
     <string name="override_quic_block">443 numaralı porta giden uygulama UDP trafiğini engelle</string>
     <string name="override_quic_allow">443 numaralı porta giden uygulama UDP trafiğini engelleme</string>
     <string name="override_quic_limit">Yalnızca Meow’un ilettiği, hedef portu 443 olan uygulama UDP paketlerini düşürür. Diğer portlar ve ZeroTier trafiği bu ayarın dışındadır.</string>
+    <string name="override_dns_hijack">DNS yakalama</string>
+    <string name="override_dns_hijack_default">Uygulama varsayılanı (açık)</string>
+    <string name="override_dns_hijack_on">53 numaralı UDP ve TCP bağlantı noktasını yakala</string>
+    <string name="override_dns_hijack_off">Yalnızca VPN DNS sunucusuna giden istekleri yakala</string>
+    <string name="override_dns_hijack_detail">Sonraki VPN bağlantısında uygulanır. Kapalıyken VPN DNS sunucusuna giden istekleri Meow işlemeye devam eder; diğer hedefler mevcut rotalarını izler. Üst DNS sunucuları ve ZeroTier rotaları değişmez.</string>
     <string name="override_preview">Sonraki bağlantının önizlemesi</string>
     <string name="override_ipv6_on">IPv6 VPN üzerinden, AAAA etkin</string>
     <string name="override_ipv6_off">VPN uygulamaları için IPv6 engelli, AAAA devre dışı</string>

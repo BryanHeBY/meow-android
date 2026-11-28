@@ -250,6 +250,11 @@
     <string name="override_quic_block">مسدود کردن UDP برنامه‌ها به پورت ۴۴۳</string>
     <string name="override_quic_allow">باز گذاشتن UDP برنامه‌ها به پورت ۴۴۳</string>
     <string name="override_quic_limit">فقط بسته‌های UDP برنامه‌ها به پورت مقصد ۴۴۳ که Meow هدایت می‌کند حذف می‌شوند. پورت‌های دیگر و ترافیک ZeroTier خارج از این تنظیم هستند.</string>
+    <string name="override_dns_hijack">رهگیری DNS</string>
+    <string name="override_dns_hijack_default">پیش‌فرض برنامه (روشن)</string>
+    <string name="override_dns_hijack_on">رهگیری UDP و TCP در درگاه ۵۳</string>
+    <string name="override_dns_hijack_off">فقط رهگیری درخواست‌های سرور DNS وی‌پی‌ان</string>
+    <string name="override_dns_hijack_detail">در اتصال بعدی وی‌پی‌ان اعمال می‌شود. در حالت خاموش، Meow همچنان درخواست‌های سرور DNS وی‌پی‌ان را دریافت می‌کند و مقصدهای دیگر از مسیرهای فعلی می‌گذرند. سرورهای بالادستی DNS و مسیرهای ZeroTier تغییر نمی‌کنند.</string>
     <string name="override_preview">پیش‌نمایش اتصال بعدی</string>
     <string name="override_ipv6_on">\u200FIPv6 از طریق VPN و AAAA فعال</string>
     <string name="override_ipv6_off">\u200FIPv6 برای برنامه‌های VPN مسدود و AAAA غیرفعال است</string>

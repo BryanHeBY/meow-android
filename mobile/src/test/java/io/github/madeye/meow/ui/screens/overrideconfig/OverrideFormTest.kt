@@ -38,6 +38,21 @@ class OverrideFormTest {
         assertEquals(dns, coreReset.savedDns)
     }
     @Test
+    fun dnsInterceptionIsSavedAndResetOnlyInTheMainSection() {
+        val original = ConfigurationOverride(coreBehavior = CoreBehaviorOverride(unifiedDelay = true))
+        val local = original.copy(dnsHijacking = false, coreBehavior = CoreBehaviorOverride())
+        val form = OverrideForm(saved = original, draft = local, global = original, savedDns = null)
+        assertTrue(form.canSave(OverrideSection.MAIN))
+        assertEquals(original.copy(dnsHijacking = false), form.draftFor(OverrideSection.MAIN))
+        assertEquals(original.copy(coreBehavior = CoreBehaviorOverride()), form.draftFor(OverrideSection.CORE))
+        val saved = form.afterSectionSave(OverrideSection.MAIN, original.copy(dnsHijacking = false))
+        assertFalse(saved.canSave(OverrideSection.MAIN))
+        assertFalse(saved.saved.interceptsPlainDns)
+        val reset = saved.copy(draft = saved.draft.copy(dnsHijacking = null))
+        assertEquals(original, reset.draftFor(OverrideSection.MAIN))
+    }
+
+    @Test
     fun sectionMergeKeepsDirtyDraftAndItsOriginalConflictBaseline() {
         val original = ConfigurationOverride()
         val rows = NameserverPolicyOverride.parseRows("x.test udp://127.0.0.1:53")!!

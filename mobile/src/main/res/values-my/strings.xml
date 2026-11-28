@@ -239,6 +239,11 @@
     <string name="override_quic_block">ပေါက် 443 သို့ သွားသော အက်ပ် UDP ကို ပိတ်ရန်</string>
     <string name="override_quic_allow">ပေါက် 443 သို့ သွားသော အက်ပ် UDP ကို မပိတ်ရန်</string>
     <string name="override_quic_limit">Meow က ဆင့်ပို့သော ပစ်မှတ်ပေါက် 443 သို့ သွားသည့် အက်ပ် UDP ကိုသာ ပယ်ချပါသည်။ အခြားပေါက်များနှင့် ZeroTier အသွားအလာအပေါ် သက်ရောက်မှုမရှိပါ။</string>
+    <string name="override_dns_hijack">DNS ကြားဖြတ်ဖမ်းယူမှု</string>
+    <string name="override_dns_hijack_default">အက်ပ်၏ မူလသတ်မှတ်ချက် (ဖွင့်ထားသည်)</string>
+    <string name="override_dns_hijack_on">UDP နှင့် TCP ပေါက် 53 ကို ကြားဖြတ်ဖမ်းယူရန်</string>
+    <string name="override_dns_hijack_off">VPN DNS ဆာဗာသို့ ပေးပို့သော တောင်းဆိုချက်များကိုသာ ကြားဖြတ်ရန်</string>
+    <string name="override_dns_hijack_detail">နောက်တစ်ကြိမ် VPN ချိတ်ဆက်ချိန်တွင် သက်ရောက်မည်။ ပိတ်ထားလျှင် VPN DNS ဆာဗာသို့ တောင်းဆိုချက်များကို Meow ဆက်လက်ကိုင်တွယ်ပြီး အခြားဦးတည်ရာများက ရှိပြီးသားလမ်းကြောင်းကို သုံးမည်။ အထက်ဆင့် DNS ဆာဗာများနှင့် ZeroTier လမ်းကြောင်းများ မပြောင်းလဲပါ။</string>
     <string name="override_preview">နောက်ချိတ်ဆက်မှု အကြိုကြည့်ရန်</string>
     <string name="override_ipv6_on">VPN မှတစ်ဆင့် IPv6 သုံးပြီး AAAA ကို ဖွင့်ထားသည်</string>
     <string name="override_ipv6_off">VPN အက်ပ်များအတွက် IPv6 နှင့် AAAA ကို ပိတ်ထားသည်</string>

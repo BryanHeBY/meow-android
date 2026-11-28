@@ -86,10 +86,6 @@ class VpnService : BaseVpnService(), BaseService.Interface {
     private var meowForwarding = true
     private var overlayApplyUnknown = false
 
-    private data class TunPlan(val envelope: TunEnvelope, val overlayEnabled: Boolean, val overlayJson: String) {
-        fun nativeConfig(meowForwarding: Boolean): String =
-            JSONObject(overlayJson).put("meow_forwarding", meowForwarding).toString()
-    }
     private var metered = false
     private var networkChanges: NetworkChangeRecorder? = null
     /** Keeps the declared underlying network current, below API 29 only. */
@@ -285,10 +281,12 @@ class VpnService : BaseVpnService(), BaseService.Interface {
             clash.union(overlay)
         } else clash
 
+        val instance = checkNotNull(data.meowInstance)
         return TunPlan(
-            envelope = TunEnvelope(capture, checkNotNull(data.meowInstance).tunIpv6(), metered),
+            envelope = TunEnvelope(capture, instance.tunIpv6(), metered),
             overlayEnabled = overlayConfig.optBoolean("enabled"),
             overlayJson = overlayConfig.toString(),
+            dnsHijacking = instance.dnsHijacking,
         )
     }
 

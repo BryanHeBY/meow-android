@@ -96,6 +96,8 @@ class MeowInstance(profile: ClashProfile) {
     }
 
     private var blockAppUdp443 = false
+    internal var dnsHijacking = true
+        private set
 
     private var prevTx: Long = 0
     private var prevRx: Long = 0
@@ -130,6 +132,7 @@ class MeowInstance(profile: ClashProfile) {
         // reads the next-start overrides once, before applying any of them.
         val override = appliedOverride ?: ConfigurationOverrideStore.default.effective(profile.id.takeIf { it > 0 })
         blockAppUdp443 = override.blocksAppUdp443
+        dnsHijacking = override.interceptsPlainDns
         val runtimeYaml = when (override.ipv6) {
             Ipv6Override.INHERIT -> yaml
             Ipv6Override.FORCE_ON -> MeowCore.nativeOverrideIpv6(yaml, true)

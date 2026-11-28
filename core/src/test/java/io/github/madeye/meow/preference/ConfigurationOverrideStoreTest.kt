@@ -39,6 +39,26 @@ class ConfigurationOverrideStoreTest {
     }
 
     @Test
+    fun `DNS interception defaults on and preserves a frozen explicit profile choice`() {
+        assertTrue(store.effective(7L).interceptsPlainDns)
+        directory.mkdirs()
+        File(directory, "global").writeText("FORCE_OFF\nBLOCK_UDP_443\n")
+        assertTrue(store.effective(7L).interceptsPlainDns)
+        store.save(null, store.load().copy(dnsHijacking = false))
+        assertFalse(store.effective(7L).interceptsPlainDns)
+        store.save(7L, ConfigurationOverride(dnsHijacking = true))
+        val started = store.effective(7L)
+        assertTrue(started.interceptsPlainDns)
+        assertFalse(store.effective(8L).interceptsPlainDns)
+        store.save(7L, ConfigurationOverride())
+        assertFalse(store.effective(7L).interceptsPlainDns)
+        assertTrue(started.interceptsPlainDns)
+        assertEquals(false, store.load().dnsHijacking)
+        store.save(null, ConfigurationOverride())
+        assertTrue(store.effective(7L).interceptsPlainDns)
+    }
+
+    @Test
     fun `reset only removes the chosen scope`() {
         val global = ConfigurationOverride(Ipv6Override.FORCE_ON, AppQuicOverride.BLOCK_UDP_443)
         val local = ConfigurationOverride(Ipv6Override.FORCE_OFF, AppQuicOverride.DO_NOT_BLOCK)
@@ -102,6 +122,8 @@ class ConfigurationOverrideStoreTest {
             """{"version":"1"}""",
             """{"version":1,"coreBehavior":{"tcpConcurrent":42}}""",
             """{"version":1,"coreBehavior":{"findProcessMode":"STRICT"}}""",
+            """{"version":1,"dnsHijacking":"false"}""",
+            """{"version":1,"dnsHijacking":null}""",
             """{"version":1,"future":true}""",
             "[future format]",
         )) {

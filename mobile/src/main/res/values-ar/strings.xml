@@ -286,6 +286,11 @@
     <string name="override_quic_block">حظر UDP للتطبيقات إلى المنفذ 443</string>
     <string name="override_quic_allow">السماح بـ UDP للتطبيقات إلى المنفذ 443</string>
     <string name="override_quic_limit">يُسقط فقط حزم UDP للتطبيقات التي يمررها Meow إلى منفذ الوجهة 443. لا يشمل هذا الإعداد المنافذ الأخرى أو حركة ZeroTier.</string>
+    <string name="override_dns_hijack">اعتراض DNS</string>
+    <string name="override_dns_hijack_default">الإعداد الافتراضي للتطبيق (مفعّل)</string>
+    <string name="override_dns_hijack_on">اعتراض المنفذ 53 عبر UDP وTCP</string>
+    <string name="override_dns_hijack_off">اعتراض الطلبات إلى خادم DNS للـ VPN فقط</string>
+    <string name="override_dns_hijack_detail">يُطبّق عند اتصال VPN التالي. عند الإيقاف، تبقى طلبات خادم DNS للـ VPN لدى Meow وتتبع الوجهات الأخرى مساراتها الحالية. لا تتغير خوادم DNS العليا أو مسارات ZeroTier.</string>
     <string name="override_preview">معاينة الاتصال التالي</string>
     <string name="override_ipv6_on">\u200FIPv6 عبر VPN وسجلات AAAA مفعّلة</string>
     <string name="override_ipv6_off">\u200FIPv6 محظور لتطبيقات VPN وسجلات AAAA معطّلة</string>

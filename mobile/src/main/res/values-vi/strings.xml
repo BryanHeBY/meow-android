@@ -234,6 +234,11 @@
     <string name="override_quic_block">Chặn UDP của ứng dụng đến cổng 443</string>
     <string name="override_quic_allow">Không chặn UDP của ứng dụng đến cổng 443</string>
     <string name="override_quic_limit">Chỉ loại bỏ UDP của ứng dụng đến cổng đích 443 mà Meow chuyển tiếp. Các cổng khác và lưu lượng ZeroTier nằm ngoài cài đặt này.</string>
+    <string name="override_dns_hijack">Chặn bắt DNS</string>
+    <string name="override_dns_hijack_default">Mặc định của ứng dụng (bật)</string>
+    <string name="override_dns_hijack_on">Chặn bắt UDP và TCP trên cổng 53</string>
+    <string name="override_dns_hijack_off">Chỉ chặn bắt yêu cầu đến máy chủ DNS của VPN</string>
+    <string name="override_dns_hijack_detail">Áp dụng vào lần kết nối VPN tiếp theo. Khi tắt, Meow vẫn xử lý yêu cầu đến máy chủ DNS của VPN; các đích khác đi theo tuyến hiện có. Không thay đổi máy chủ DNS thượng nguồn hoặc tuyến ZeroTier.</string>
     <string name="override_preview">Xem trước kết nối tiếp theo</string>
     <string name="override_ipv6_on">IPv6 qua VPN và bật AAAA</string>
     <string name="override_ipv6_off">Chặn IPv6 cho ứng dụng dùng VPN và tắt AAAA</string>

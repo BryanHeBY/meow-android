@@ -1,5 +1,10 @@
 package io.github.madeye.meow.bg
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+
 /** Shared Binder result and applied state; master VPN status is independent. */
 object ForwardingControl {
     const val APPLIED = 0
@@ -23,6 +28,23 @@ internal data class TunEnvelope(
 ) {
     fun requiresNewInterface(other: TunEnvelope): Boolean =
         ipv6 != other.ipv6 || metered != other.metered || capture.canonical() != other.capture.canonical()
+}
+
+/** Snapshot from the started profile, shared by native start and ZeroTier's
+ * live updates. DNS changes do not replace the Android interface in-place. */
+internal data class TunPlan(
+    val envelope: TunEnvelope,
+    val overlayEnabled: Boolean,
+    val overlayJson: String,
+    val dnsHijacking: Boolean,
+) {
+    fun nativeConfig(meowForwarding: Boolean): String {
+        val overlay = Json.parseToJsonElement(overlayJson).jsonObject
+        return JsonObject(overlay + mapOf(
+            "meow_forwarding" to JsonPrimitive(meowForwarding),
+            "dns_hijacking" to JsonPrimitive(dnsHijacking),
+        )).toString()
+    }
 }
 
 private fun VpnAppCapture.canonical(): VpnAppCapture =

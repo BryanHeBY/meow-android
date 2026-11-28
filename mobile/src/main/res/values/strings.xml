@@ -253,6 +253,11 @@
     <string name="override_quic_block">Block app UDP to port 443</string>
     <string name="override_quic_allow">Do not block app UDP to port 443</string>
     <string name="override_quic_limit">Drops app UDP to destination port 443 only on flows Meow forwards. Other ports and ZeroTier traffic are outside this setting.</string>
+    <string name="override_dns_hijack">DNS interception</string>
+    <string name="override_dns_hijack_default">App default (on)</string>
+    <string name="override_dns_hijack_on">Intercept UDP and TCP port 53</string>
+    <string name="override_dns_hijack_off">Only intercept the VPN DNS server</string>
+    <string name="override_dns_hijack_detail">Applies on the next VPN connection. When off, DNS to the VPN DNS server still reaches Meow; other destinations follow their existing routes. DNS upstreams and ZeroTier routes do not change.</string>
     <string name="override_preview">Next connection preview</string>
     <string name="override_ipv6_on">IPv6 through the VPN and AAAA enabled</string>
     <string name="override_ipv6_off">IPv6 blocked for VPN apps and AAAA disabled</string>

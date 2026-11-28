@@ -234,6 +234,11 @@
     <string name="override_quic_block">阻止发往 443 端口的应用 UDP 流量</string>
     <string name="override_quic_allow">不阻止发往 443 端口的应用 UDP 流量</string>
     <string name="override_quic_limit">仅丢弃由 Meow 转发且目标端口为 443 的应用 UDP 流量。此设置不影响其他端口或 ZeroTier 流量。</string>
+    <string name="override_dns_hijack">DNS 拦截</string>
+    <string name="override_dns_hijack_default">应用默认（开启）</string>
+    <string name="override_dns_hijack_on">拦截 UDP 和 TCP 的 53 端口</string>
+    <string name="override_dns_hijack_off">只拦截发往 VPN DNS 服务器的请求</string>
+    <string name="override_dns_hijack_detail">下次连接 VPN 时生效。关闭后，发往 VPN DNS 服务器的请求仍由 Meow 处理，其他目标沿用原有路由。不改变 DNS 上游或 ZeroTier 路由。</string>
     <string name="override_preview">下次连接预览</string>
     <string name="override_ipv6_on">IPv6 经过 VPN，启用 AAAA</string>
     <string name="override_ipv6_off">VPN 内应用的 IPv6 已禁用，禁用 AAAA</string>
