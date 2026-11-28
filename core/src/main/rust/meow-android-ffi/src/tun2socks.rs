@@ -10,6 +10,10 @@
 #[path = "tun_owner_ingress.rs"]
 mod tun_owner_ingress;
 
+#[cfg(test)]
+#[path = "tun_dns_tests.rs"]
+mod tun_dns_tests;
+
 #[path = "tun_dns.rs"]
 mod tun_dns;
 #[cfg(all(target_os = "android", not(feature = "zerotier")))]
