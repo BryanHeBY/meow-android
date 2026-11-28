@@ -33,7 +33,8 @@ impl Drop for Upstream {
 }
 
 struct FakeTun {
-    _tun: UnixDatagram,
+    tun: UnixDatagram,
+    app_port: u16,
     peer: UnixDatagram,
     app: IpAddr,
     dns: IpAddr,
@@ -45,16 +46,29 @@ impl FakeTun {
         peer.set_read_timeout(Some(LIMIT)).unwrap();
         start(tun.as_raw_fd(), 0).unwrap();
         Self {
-            _tun: tun,
+            tun,
+            app_port: APP_PORT,
             peer,
             app,
             dns,
         }
     }
 
+    fn restart(&mut self) {
+        assert!(
+            stop(),
+            "previous worker must join before restarting the same FD"
+        );
+        // The peer queue can still contain ACKs for the first flow. A
+        // different source port makes that traffic ineligible for the next
+        // handshake rather than assuming the queue was flushed by stop.
+        self.app_port += 1;
+        start(self.tun.as_raw_fd(), 0).unwrap();
+    }
+
     fn send_tcp(&self, seq: u32, ack: u32, flags: u8, payload: &[u8]) {
         let mut tcp = vec![0; 20];
-        tcp[..2].copy_from_slice(&APP_PORT.to_be_bytes());
+        tcp[..2].copy_from_slice(&self.app_port.to_be_bytes());
         tcp[2..4].copy_from_slice(&DNS_PORT.to_be_bytes());
         tcp[4..8].copy_from_slice(&seq.to_be_bytes());
         tcp[8..12].copy_from_slice(&ack.to_be_bytes());
@@ -139,7 +153,7 @@ impl FakeTun {
             let tcp = &packet[ip_end..len];
             if tcp.len() < 20
                 || tcp[..2] != DNS_PORT.to_be_bytes()
-                || tcp[2..4] != APP_PORT.to_be_bytes()
+                || tcp[2..4] != self.app_port.to_be_bytes()
             {
                 continue;
             }
@@ -173,7 +187,7 @@ fn dns_frame(id: u16, name: &str) -> Vec<u8> {
     frame
 }
 
-fn exchange_over_fake_tun(tun: &FakeTun) -> io::Result<Vec<Vec<u8>>> {
+fn exchange_over_fake_tun(tun: &FakeTun, requests: [(u16, &str); 2]) -> io::Result<Vec<Vec<u8>>> {
     let mut tx = 1u32;
     tun.send_tcp(tx, 0, 0x02, &[]);
     tx += 1;
@@ -182,8 +196,9 @@ fn exchange_over_fake_tun(tun: &FakeTun) -> io::Result<Vec<Vec<u8>>> {
     let mut rx = syn_ack.seq.wrapping_add(1);
     tun.send_tcp(tx, rx, 0x10, &[]);
 
-    let first = dns_frame(0xb123, "first.invalid");
-    let second = dns_frame(0xb124, "second.invalid");
+    let [(first_id, first_name), (second_id, second_name)] = requests;
+    let first = dns_frame(first_id, first_name);
+    let second = dns_frame(second_id, second_name);
     // Split the first length prefix; coalesce the remainder with another
     // request on the same stream. The lwIP packet boundaries are not frames.
     let (head, rest) = first.split_at(1);
@@ -242,10 +257,18 @@ fn check_dns_round_trip(app: &str, dns: &str) {
         .block_on(tokio::net::UdpSocket::bind("127.0.0.1:0"))
         .unwrap();
     let local = server.local_addr().unwrap();
+    let exchanges = [
+        [(0xb123u16, "first.invalid"), (0xb124, "second.invalid")],
+        [
+            (0xb223, "restart-first.invalid"),
+            (0xb224, "restart-second.invalid"),
+        ],
+    ];
+    let query_count = exchanges.iter().flatten().count();
     let mut upstream = Upstream(rt.spawn(async move {
         let mut seen = Vec::new();
         let mut buf = [0; 512];
-        for _ in 0..2 {
+        for _ in 0..query_count {
             let (n, sender) = server.recv_from(&mut buf).await.unwrap();
             seen.push(buf[..n].to_vec());
             server
@@ -263,23 +286,31 @@ fn check_dns_round_trip(app: &str, dns: &str) {
         .block_on(meow_config::load_config_from_str(&yaml))
         .unwrap();
     let _resolver = PublishedResolver::set(config.dns.resolver_slot);
-    let tun = FakeTun::open(app.parse().unwrap(), dns.parse().unwrap());
-    let result = exchange_over_fake_tun(&tun);
+    let mut tun = FakeTun::open(app.parse().unwrap(), dns.parse().unwrap());
+    let mut replies = exchange_over_fake_tun(&tun, exchanges[0])
+        .expect("VPN DNS TCP/53 must reach the published resolver before restart");
+    tun.restart();
+    replies.extend(
+        exchange_over_fake_tun(&tun, exchanges[1])
+            .expect("VPN DNS TCP/53 must reach the published resolver after same-FD restart"),
+    );
     drop(tun);
-    let replies = result.expect("VPN DNS TCP/53 must reach the published resolver");
     let seen = rt
         .block_on(async { tokio::time::timeout(LIMIT, &mut upstream.0).await })
         .unwrap()
         .unwrap();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), query_count);
+    assert_eq!(replies.len(), query_count);
     for ((reply, query), (id, name)) in replies
         .iter()
         .zip(seen)
-        .zip([(0xb123u16, b"first".as_slice()), (0xb124, b"second")])
+        .zip(exchanges.into_iter().flatten())
     {
         assert_eq!(reply[..2], id.to_be_bytes());
         assert_eq!(reply[2] & 0x82, 0x80, "complete response, not a TC reply");
-        assert!(query.windows(name.len()).any(|word| word == name));
+        let label = name.split('.').next().unwrap().as_bytes();
+        assert_eq!(usize::from(query[12]), label.len());
+        assert_eq!(&query[13..13 + label.len()], label);
         assert!(from_the_profile_nameserver(reply));
     }
 }
