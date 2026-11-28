@@ -39,6 +39,12 @@ impl std::fmt::Display for DnsIssue {
 impl std::error::Error for DnsIssue {}
 
 pub(crate) const CN_NAMESERVERS: &[&str] = &["tcp://119.29.29.29", "tcp://223.5.5.5"];
+// IP authorities are certificate-validated without needing a lookup through
+// the node they are being used to resolve. No plaintext backup is added.
+const PROFILE_NODE_NAMESERVERS: &[&str] = &[
+    "https://223.5.5.5/dns-query",
+    "https://120.53.53.53/dns-query",
+];
 const NEUTRAL_NAMESERVERS: &[&str] = &["tcp://1.1.1.1", "tcp://8.8.8.8"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -560,7 +566,19 @@ pub(crate) fn engine_dns_block(
             set(&mut dns, key, NEUTRAL_NAMESERVERS.iter().copied());
         }
     }
-    if (missing_main || mode.proxy_targets().next().is_some())
+    if matches!(mode, DnsUpstreams::Inherit | DnsUpstreams::Profile) {
+        // Preserve authored lists and policies, even if explicitly empty.
+        // Both entry paths have already expanded YAML merges above.
+        if !dns.contains_key("proxy-server-nameserver")
+            && !dns.contains_key("proxy-server-nameserver-policy")
+        {
+            set(
+                &mut dns,
+                "proxy-server-nameserver",
+                PROFILE_NODE_NAMESERVERS.iter().copied(),
+            );
+        }
+    } else if (missing_main || mode.proxy_targets().next().is_some())
         && !has_list(&dns, "proxy-server-nameserver")
     {
         set(
@@ -644,6 +662,91 @@ pub(crate) fn safe_endpoint(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_compatibility_resolves_nodes_with_independent_doh() -> Result<()> {
+        use meow_dns::upstream::HostOrIp;
+
+        let policy = Default::default();
+        let explicit_main: Value = serde_yaml::from_str(concat!(
+            "nameserver: [https://192.0.2.1/dns-query]\n",
+            "default-nameserver: [tcp://192.0.2.2]\n",
+            "nameserver-policy: {example.test: 'tcp://192.0.2.3'}\n",
+        ))?;
+        for mode in [DnsUpstreams::Inherit, DnsUpstreams::Profile] {
+            for profile in [None, Some(explicit_main.clone())] {
+                let dns = engine_dns_block(profile.clone(), &mode, &policy)?;
+                let node_pool = dns["proxy-server-nameserver"].as_sequence().unwrap();
+                assert_eq!(
+                    node_pool.iter().map(Value::as_str).collect::<Vec<_>>(),
+                    vec![
+                        Some("https://223.5.5.5/dns-query"),
+                        Some("https://120.53.53.53/dns-query"),
+                    ]
+                );
+                for endpoint in node_pool {
+                    let entry = NameServerEntry::parse(endpoint.as_str().unwrap())?;
+                    assert!(entry.proxy.is_none());
+                    assert!(matches!(
+                        entry.url,
+                        NameServerUrl::Https {
+                            addr: HostOrIp::Ip(IpAddr::V4(_)),
+                            port: 443,
+                            ..
+                        }
+                    ));
+                }
+                if let Some(explicit_main) = &profile {
+                    for key in ["nameserver", "default-nameserver", "nameserver-policy"] {
+                        assert_eq!(dns[key], explicit_main[key]);
+                    }
+                } else {
+                    for key in ["nameserver", "default-nameserver"] {
+                        assert_eq!(dns[key], serde_yaml::to_value(NEUTRAL_NAMESERVERS)?);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn profile_compatibility_preserves_authored_node_choices_after_merge() -> Result<()> {
+        let policy = Default::default();
+        for (source, key, expected) in [
+            (
+                "proxy-server-nameserver: []",
+                "proxy-server-nameserver",
+                "[]",
+            ),
+            (
+                "proxy-server-nameserver: null",
+                "proxy-server-nameserver",
+                "null",
+            ),
+            (
+                "<<: {proxy-server-nameserver: ['https://192.0.2.1/dns-query']}",
+                "proxy-server-nameserver",
+                "['https://192.0.2.1/dns-query']",
+            ),
+            (
+                "<<: {proxy-server-nameserver-policy: {example.test: 'tcp://192.0.2.1'}}",
+                "proxy-server-nameserver-policy",
+                "{example.test: 'tcp://192.0.2.1'}",
+            ),
+        ] {
+            let expected: Value = serde_yaml::from_str(expected)?;
+            let profile: Value = serde_yaml::from_str(source)?;
+            for mode in [DnsUpstreams::Inherit, DnsUpstreams::Profile] {
+                let dns = engine_dns_block(Some(profile.clone()), &mode, &policy)?;
+                assert_eq!(dns[key], expected);
+                if key != "proxy-server-nameserver" {
+                    assert!(!dns.contains_key("proxy-server-nameserver"));
+                }
+            }
+        }
+        Ok(())
+    }
 
     fn custom(transport: &str, endpoint: &str, proxy: Option<&str>) -> Result<DnsUpstreams> {
         let pref = serde_json::json!({
