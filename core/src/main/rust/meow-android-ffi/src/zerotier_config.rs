@@ -1,4 +1,5 @@
 //! The VPN takes an immutable validated configuration snapshot on start.
+use crate::tun2socks::DnsHijackPolicy;
 use meow_overlay_policy::{
     apps::AppFilter,
     membership::{MoonOrbit, MoonWorldId, NetworkId, NodeAddress, OrbitSource},
@@ -43,6 +44,7 @@ struct RawMoon {
 struct RawConfig {
     enabled: bool,
     meow_forwarding: Option<bool>,
+    dns_hijacking: DnsHijackPolicy,
     network: String,
     routes: Vec<String>,
     allow_default: bool,
@@ -125,16 +127,22 @@ fn hot_without_dns_override(config: &Config) -> bool {
 }
 
 pub(crate) fn parse(json: &[u8]) -> Result<Option<Config>, &'static str> {
-    parse_session(json).map(|(overlay, _)| overlay)
+    parse_session(json).map(|(overlay, _, _)| overlay)
 }
 
-pub(crate) fn parse_session(json: &[u8]) -> Result<(Option<Config>, bool), &'static str> {
+pub(crate) fn parse_session(
+    json: &[u8],
+) -> Result<(Option<Config>, bool, DnsHijackPolicy), &'static str> {
     if json.len() > MAX_JSON {
         return Err("ZeroTier settings exceed the size limit");
     }
+    if json.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
+        return Err("invalid ZeroTier settings");
+    }
     let raw: RawConfig = serde_json::from_slice(json).map_err(|_| "invalid ZeroTier settings")?;
     let meow = raw.meow_forwarding.unwrap_or(true);
-    parse_overlay(raw).map(|overlay| (overlay, meow))
+    let dns = raw.dns_hijacking;
+    parse_overlay(raw).map(|overlay| (overlay, meow, dns))
 }
 
 fn parse_overlay(raw: RawConfig) -> Result<Option<Config>, &'static str> {
@@ -248,7 +256,7 @@ mod tests {
 
     #[test]
     fn meow_forwarding_rebuild_preference_does_not_require_an_overlay() {
-        let (overlay, meow) =
+        let (overlay, meow, _) =
             parse_session(br#"{"enabled":false,"meow_forwarding":false}"#).unwrap();
         assert!(overlay.is_none());
         assert!(!meow);

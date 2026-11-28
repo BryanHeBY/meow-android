@@ -885,21 +885,25 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
 
     #[cfg(target_os = "android")]
     let start = (|| -> Result<(), String> {
+        let json: String = env
+            .get_string(&overlay_settings)
+            .map_err(|_| "invalid TUN session settings")?
+            .into();
         #[cfg(feature = "zerotier")]
-        let (root, config, meow_enabled) = {
+        let (root, config, meow_enabled, dns_hijacking) = {
             let root: String = env
                 .get_string(&overlay_root)
                 .map_err(|e| e.to_string())?
                 .into();
-            let json: String = env
-                .get_string(&overlay_settings)
-                .map_err(|e| e.to_string())?
-                .into();
-            let (config, meow_enabled) = zerotier_config::parse_session(json.as_bytes())?;
-            (root, config, meow_enabled)
+            let (config, meow_enabled, dns_hijacking) =
+                zerotier_config::parse_session(json.as_bytes())?;
+            (root, config, meow_enabled, dns_hijacking)
         };
         #[cfg(not(feature = "zerotier"))]
-        let _ = (overlay_root, overlay_settings);
+        let dns_hijacking = {
+            let _ = overlay_root;
+            tun2socks::parse_lite_session(json.as_bytes())?
+        };
         // Capture this exact service instance, not a process-global pointer
         // that a newer session can replace while the old task exits.
         let report_exit = env.get_java_vm().ok().and_then(|jvm| {
@@ -924,6 +928,7 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
         tun2socks::start_android(
             fd,
             block_app_udp443 != JNI_FALSE,
+            dns_hijacking,
             #[cfg(feature = "zerotier")]
             config.map(|config| (root.into(), config)),
             report_exit,
@@ -934,7 +939,11 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
     #[cfg(not(target_os = "android"))]
     let start = {
         let _ = (overlay_root, overlay_settings);
-        tun2socks::start_with_udp443_policy(fd, block_app_udp443 != JNI_FALSE)
+        tun2socks::start_with_packet_policy(
+            fd,
+            block_app_udp443 != JNI_FALSE,
+            tun2socks::DnsHijackPolicy::default(),
+        )
     };
     match start {
         Ok(()) => {

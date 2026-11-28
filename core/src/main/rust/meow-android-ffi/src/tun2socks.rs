@@ -1,16 +1,20 @@
 //! tun2socks using lwip netstack: reads raw IP packets from the Android
-//! TUN fd, routes TCP through a userspace TCP/IP stack (lwip), and
-//! dispatches every accepted flow in-process via
-//! `meow_tunnel::tcp::handle_tcp` — same pattern as meow-ios.
+//! TUN fd, routes packets through a userspace TCP/IP stack (lwIP), and
+//! dispatches accepted flows to their selected VPN owner.
 //!
-//! DNS is handled in-process: UDP/53 packets are intercepted pre-stack and
-//! every query goes to `DnsServer::handle_query` — A/AAAA for fake-IP
-//! synthesis, other qtypes forwarded over the same upstreams. No loopback
-//! DNS server socket exists.
+//! DNS is handled in-process: the same session policy selects IPv4/IPv6
+//! UDP and TCP on port 53. IPv4 UDP retains its raw-packet fast path;
+//! lwIP supplies streams and reassembled datagrams for all other cases.
 
 #[cfg(all(feature = "zerotier", any(test, target_os = "android")))]
 #[path = "tun_owner_ingress.rs"]
 mod tun_owner_ingress;
+
+#[path = "tun_dns.rs"]
+mod tun_dns;
+#[cfg(all(target_os = "android", not(feature = "zerotier")))]
+pub(crate) use tun_dns::parse_lite_session;
+pub(crate) use tun_dns::DnsHijackPolicy;
 
 use crate::engine;
 use crate::logging;
@@ -209,6 +213,9 @@ const TUN2SOCKS_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const DNS_BURST_CAP: usize = 256;
 const DNS_TASK_TIMEOUT: Duration = Duration::from_secs(5);
 static DNS_CAP_LOG_LAST_MS: AtomicU64 = AtomicU64::new(0);
+const TCP_DNS_CONNECTION_CAP: usize = 64;
+const TCP_DNS_LIFETIME: Duration = Duration::from_secs(120);
+static TCP_DNS_CAP_LOG_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
 /// How often a UDP reply reader checks whether its session is still live.
 /// A DIRECT session's read never ends on its own, so this bounds how long a
@@ -232,14 +239,19 @@ fn warn_capped(slot: &AtomicU64, msg: &str) {
 
 #[cfg(test)]
 fn start(fd: i32, _dns_port: u16) -> Result<(), String> {
-    start_with_udp443_policy(fd, false)
+    start_with_packet_policy(fd, false, DnsHijackPolicy::default())
 }
 
 #[cfg(any(test, not(target_os = "android")))]
-pub fn start_with_udp443_policy(fd: i32, block_app_udp443: bool) -> Result<(), String> {
+pub fn start_with_packet_policy(
+    fd: i32,
+    block_app_udp443: bool,
+    dns_hijacking: DnsHijackPolicy,
+) -> Result<(), String> {
     start_inner(
         fd,
         block_app_udp443,
+        dns_hijacking,
         #[cfg(all(target_os = "android", feature = "zerotier"))]
         None,
         #[cfg(target_os = "android")]
@@ -256,6 +268,7 @@ type Overlay = Option<(std::path::PathBuf, crate::zerotier_config::Config)>;
 pub fn start_android(
     fd: i32,
     block_app_udp443: bool,
+    dns_hijacking: DnsHijackPolicy,
     #[cfg(feature = "zerotier")] config: Overlay,
     report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(feature = "zerotier")] meow_enabled: bool,
@@ -263,6 +276,7 @@ pub fn start_android(
     start_inner(
         fd,
         block_app_udp443,
+        dns_hijacking,
         #[cfg(feature = "zerotier")]
         config,
         report_exit,
@@ -274,6 +288,7 @@ pub fn start_android(
 fn start_inner(
     fd: i32,
     block_app_udp443: bool,
+    dns_hijacking: DnsHijackPolicy,
     #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(all(target_os = "android", feature = "zerotier"))] meow_enabled: bool,
@@ -326,6 +341,7 @@ fn start_inner(
         let run = run_tun2socks(
             tun_fd,
             block_app_udp443,
+            dns_hijacking,
             #[cfg(all(target_os = "android", feature = "zerotier"))]
             overlay,
             #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -407,6 +423,7 @@ pub fn stop() -> bool {
 async fn run_tun2socks(
     fd: OwnedFd,
     block_app_udp443: bool,
+    dns_hijacking: DnsHijackPolicy,
     #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(all(target_os = "android", feature = "zerotier"))] mut overlay_control: Option<
         mpsc::Receiver<OverlayCommand>,
@@ -421,6 +438,7 @@ async fn run_tun2socks(
     let (udp_write, mut udp_read) = udp_socket.split();
 
     let (udp_reply_tx, mut udp_reply_rx) = mpsc::channel::<UdpMsg>(256);
+    let (dns_reply_tx, mut dns_reply_rx) = mpsc::channel::<StackDnsReply>(64);
     let reply_readers: ReplyReaders = Arc::new(Mutex::new(HashMap::new()));
 
     let (stack_ingress_tx, mut stack_ingress_rx) = mpsc::channel::<StackFrame>(256);
@@ -448,6 +466,10 @@ async fn run_tun2socks(
     #[cfg(all(target_os = "android", feature = "zerotier"))]
     let direct_udp = Arc::new(crate::direct_exit::udp::Flows::default());
     let dns_sem = Arc::new(Semaphore::new(DNS_BURST_CAP));
+    let dns_sem_lwip = Arc::clone(&dns_sem);
+    let tcp_dns = TcpDnsLimits::new();
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
+    let meow_lwip = meow.clone();
     let flow_tasks: FlowTasks = Arc::new(Mutex::new(Vec::new()));
 
     let egress_tx_lwip = egress_tx.clone();
@@ -500,13 +522,25 @@ async fn run_tun2socks(
                     match accepted {
                         Some((stream, local_addr, remote_addr)) => {
                             let gate = stack_clash_gate.clone();
+                            let dns = dns_hijacking.captures(remote_addr).then(|| tcp_dns.clone());
+                            #[cfg(all(target_os = "android", feature = "zerotier"))]
+                            let generation = dns.as_ref().and_then(|_| meow_lwip.snapshot());
                             let handle = tokio::spawn(async move {
                                 match flow_exit(gate.as_deref(), owner::IPPROTO_TCP, local_addr, remote_addr).await {
-                                    FlowExit::Clash if remote_addr.port() != 53 => {
-                                        dispatch_tcp(stream, local_addr, remote_addr).await;
+                                    FlowExit::Clash => {
+                                        if let Some(dns) = dns {
+                                            run_selected_dns(
+                                                dns.serve(stream),
+                                                #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                                generation,
+                                            ).await;
+                                        } else {
+                                            dispatch_tcp(stream, local_addr, remote_addr).await;
+                                        }
                                     }
                                     #[cfg(all(target_os = "android", feature = "zerotier"))]
                                     FlowExit::Direct(_) => { let _ = crate::direct_exit::tcp(stream, remote_addr).await; }
+                                    #[cfg(feature = "zerotier")]
                                     _ => {}
                                 }
                             });
@@ -521,6 +555,11 @@ async fn run_tun2socks(
                             let reply_tx = udp_reply_tx_lwip.clone();
                             let readers = reply_readers_lwip.clone();
                             let gate = stack_clash_gate.clone();
+                            let dns = dns_hijacking.captures(dst).then(|| {
+                                (Arc::clone(&dns_sem_lwip), dns_reply_tx.clone())
+                            });
+                            #[cfg(all(target_os = "android", feature = "zerotier"))]
+                            let generation = dns.as_ref().and_then(|_| meow_lwip.snapshot());
                             #[cfg(all(target_os = "android", feature = "zerotier"))]
                             let direct = direct_udp.clone();
                             let handle = tokio::spawn(async move {
@@ -529,7 +568,34 @@ async fn run_tun2socks(
                                     return;
                                 }
                                 match exit {
-                                    FlowExit::Clash => dispatch_udp(payload, src, dst, reply_tx, readers).await,
+                                    FlowExit::Clash => {
+                                        if let Some((budget, dns_reply)) = dns {
+                                            #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                            let reply_generation = generation.clone();
+                                            let work = async {
+                                                let Ok(_permit) = budget.try_acquire() else {
+                                                    warn_dns_burst();
+                                                    return;
+                                                };
+                                                if let Ok(Some(bytes)) = tokio::time::timeout(
+                                                    DNS_TASK_TIMEOUT, answer_dns(&payload),
+                                                ).await {
+                                                    let _ = dns_reply.try_send(StackDnsReply {
+                                                        packet: (bytes, dst, src),
+                                                        #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                                        generation: reply_generation,
+                                                    });
+                                                }
+                                            };
+                                            run_selected_dns(
+                                                work,
+                                                #[cfg(all(target_os = "android", feature = "zerotier"))]
+                                                generation,
+                                            ).await;
+                                        } else {
+                                            dispatch_udp(payload, src, dst, reply_tx, readers).await;
+                                        }
+                                    }
                                     #[cfg(all(target_os = "android", feature = "zerotier"))]
                                     FlowExit::Direct(owner) => direct.transmit((src, dst), owner, payload, reply_tx),
                                     #[cfg(feature = "zerotier")]
@@ -539,6 +605,16 @@ async fn run_tun2socks(
                             track_flow_task(&flow_tasks_lwip, handle);
                         }
                         None => break,
+                    }
+                }
+                Some(reply) = dns_reply_rx.recv() => {
+                    #[cfg(all(target_os = "android", feature = "zerotier"))]
+                    if reply.generation.is_none_or(|gen| gen.is_cancelled()) {
+                        continue;
+                    }
+                    let (bytes, src, dst) = reply.packet;
+                    if udp_write.send_to(&bytes, &src, &dst).is_err() {
+                        trace!("tun2socks: dropping undeliverable UDP DNS reply");
                     }
                 }
                 msg = udp_reply_rx.recv() => {
@@ -588,6 +664,7 @@ async fn run_tun2socks(
         let ingress = ClashIngress {
             stack: stack_ingress_tx,
             dns_sem,
+            dns_hijacking,
             tasks: flow_tasks_dns,
             egress: egress_tx,
             gate: clash_gate,
@@ -945,6 +1022,7 @@ async fn overlay_exit(
 struct ClashIngress {
     stack: mpsc::Sender<StackFrame>,
     dns_sem: Arc<Semaphore>,
+    dns_hijacking: DnsHijackPolicy,
     tasks: FlowTasks,
     egress: crate::tun_egress::Tx,
     gate: Option<Arc<ClashGate>>,
@@ -958,15 +1036,13 @@ impl ClashIngress {
         #[cfg(all(target_os = "android", feature = "zerotier"))]
         generation: tokio_util::sync::CancellationToken,
     ) -> bool {
-        // In-process DNS: intercept UDP/53 pre-stack.
-        if parse_udp_packet(ip_data).is_some_and(|p| p.dst.port() == 53) {
+        // Unfragmented IPv4 fast path. IPv6 and reassembled UDP arrive
+        // through lwIP and use the same destination policy and budget.
+        if parse_udp_packet(ip_data).is_some_and(|p| self.dns_hijacking.captures(p.dst)) {
             let permit = match self.dns_sem.clone().try_acquire_owned() {
                 Ok(p) => p,
                 Err(_) => {
-                    warn_capped(
-                        &DNS_CAP_LOG_LAST_MS,
-                        "tun2socks: DNS burst cap reached, dropping query",
-                    );
+                    warn_dns_burst();
                     return true;
                 }
             };
@@ -988,20 +1064,13 @@ impl ClashIngress {
                     .await
                     {
                         FlowExit::Clash => {
-                            // Preserve the configured resolver and all DNS qtypes.
-                            let Some(slot) = crate::DNS_RESOLVER.read().clone() else {
-                                return;
-                            };
-                            let resolver = Arc::clone(&slot.read().resolver);
-                            let Ok(bytes) =
-                                DnsServer::handle_query(parsed.payload, &resolver).await
-                            else {
+                            let Some(bytes) = answer_dns(parsed.payload).await else {
                                 return;
                             };
                             bytes
                         }
                         #[cfg(all(target_os = "android", feature = "zerotier"))]
-                        FlowExit::Direct(_) if parsed.dst.ip() == Ipv4Addr::new(172, 19, 0, 2) => {
+                        FlowExit::Direct(_) if DnsHijackPolicy::is_vpn_endpoint(parsed.dst) => {
                             let Some(bytes) = crate::direct_exit::system_dns(parsed.payload).await
                             else {
                                 return;
@@ -1039,6 +1108,82 @@ impl ClashIngress {
         }
         false
     }
+}
+
+struct StackDnsReply {
+    packet: UdpMsg,
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
+    generation: Option<tokio_util::sync::CancellationToken>,
+}
+
+#[derive(Clone)]
+struct TcpDnsLimits {
+    connections: Arc<Semaphore>,
+    queries: Arc<Semaphore>,
+}
+
+impl TcpDnsLimits {
+    fn new() -> Self {
+        Self {
+            connections: Arc::new(Semaphore::new(TCP_DNS_CONNECTION_CAP)),
+            queries: Arc::new(Semaphore::new(TCP_DNS_CONNECTION_CAP)),
+        }
+    }
+
+    async fn serve(&self, stream: lwip::TcpStream) {
+        let Ok(_connection) = self.connections.try_acquire() else {
+            warn_capped(
+                &TCP_DNS_CAP_LOG_LAST_MS,
+                "tun2socks: TCP DNS connections capped",
+            );
+            return;
+        };
+        let Some(resolver) = crate::DNS_RESOLVER.read().clone() else {
+            return;
+        };
+        // The core bounds each frame and takes the latest resolver generation
+        // after each complete request. This cap also releases long-lived clients
+        // that keep sending valid frames without ever idling.
+        let _ = tokio::time::timeout(
+            TCP_DNS_LIFETIME,
+            meow_dns::server::serve_tcp_stream(stream, resolver, Arc::clone(&self.queries)),
+        )
+        .await;
+    }
+}
+
+fn warn_dns_burst() {
+    warn_capped(
+        &DNS_CAP_LOG_LAST_MS,
+        "tun2socks: DNS burst cap reached, dropping query",
+    );
+}
+
+async fn answer_dns(query: &[u8]) -> Option<Vec<u8>> {
+    let slot = crate::DNS_RESOLVER.read().clone()?;
+    let resolver = Arc::clone(&slot.read().resolver);
+    DnsServer::handle_query(query, &resolver).await.ok()
+}
+
+async fn run_selected_dns(
+    work: impl std::future::Future<Output = ()>,
+    #[cfg(all(target_os = "android", feature = "zerotier"))] generation: Option<
+        tokio_util::sync::CancellationToken,
+    >,
+) {
+    #[cfg(all(target_os = "android", feature = "zerotier"))]
+    {
+        let Some(generation) = generation else {
+            return;
+        };
+        tokio::select! {
+            biased;
+            _ = generation.cancelled() => (),
+            _ = work => (),
+        }
+    }
+    #[cfg(not(all(target_os = "android", feature = "zerotier")))]
+    work.await;
 }
 
 async fn send_ingress<T>(
@@ -1967,6 +2112,7 @@ mod tests {
                     run_tun2socks(
                         socket.into(),
                         false,
+                        DnsHijackPolicy::default(),
                         #[cfg(all(target_os = "android", feature = "zerotier"))]
                         None,
                         #[cfg(all(target_os = "android", feature = "zerotier"))]
