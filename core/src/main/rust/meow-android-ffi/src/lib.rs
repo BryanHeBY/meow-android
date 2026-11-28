@@ -876,13 +876,6 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
         return -1;
     }
 
-    // Install the global SocketProtector — every outbound TCP/UDP fd
-    // meow-rs opens (proxy adapters + the DNS resolver's default
-    // SocketFactory) will fire VpnService.protect() before connect/bind.
-    protect::install(&env, &vpn_service);
-    // Lets tun2socks tag each connection with the app that opened it.
-    owner::install(&mut env, &vpn_service);
-
     #[cfg(target_os = "android")]
     let start = (|| -> Result<(), String> {
         let json: String = env
@@ -934,10 +927,18 @@ pub extern "system" fn Java_io_github_madeye_meow_core_MeowCore_nativeStartTun2S
             report_exit,
             #[cfg(feature = "zerotier")]
             meow_enabled,
+            || {
+                // A rejected start must not replace either active app hook.
+                protect::install(&env, &vpn_service)
+                    .map_err(|e| format!("install VpnService socket protector: {e}"))?;
+                owner::install(&mut env, &vpn_service);
+                Ok(())
+            },
         )
     })();
     #[cfg(not(target_os = "android"))]
     let start = {
+        owner::install(&mut env, &vpn_service); // host stub
         let _ = (overlay_root, overlay_settings);
         tun2socks::start_with_packet_policy(
             fd,

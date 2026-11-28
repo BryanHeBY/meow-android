@@ -262,6 +262,7 @@ pub fn start_with_packet_policy(
         None,
         #[cfg(all(target_os = "android", feature = "zerotier"))]
         true,
+        || Ok(()),
     )
 }
 
@@ -276,6 +277,7 @@ pub fn start_android(
     #[cfg(feature = "zerotier")] config: Overlay,
     report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(feature = "zerotier")] meow_enabled: bool,
+    install_service_hooks: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
     start_inner(
         fd,
@@ -286,6 +288,7 @@ pub fn start_android(
         report_exit,
         #[cfg(feature = "zerotier")]
         meow_enabled,
+        install_service_hooks,
     )
 }
 
@@ -296,6 +299,7 @@ fn start_inner(
     #[cfg(all(target_os = "android", feature = "zerotier"))] overlay: Overlay,
     #[cfg(target_os = "android")] report_exit: Option<Box<dyn FnOnce(i32) + Send>>,
     #[cfg(all(target_os = "android", feature = "zerotier"))] meow_enabled: bool,
+    install_service_hooks: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
     let mut task = TUN2SOCKS_TASK.lock();
     if task.as_ref().is_some_and(|task| !task.is_finished()) {
@@ -326,6 +330,13 @@ fn start_inner(
             return Err(error.to_string());
         }
     };
+    // Only the admitted session may publish its process-global Android
+    // hooks. Do this while holding the same lock that rejects duplicate
+    // starts, and after descriptor setup can no longer fail.
+    if let Err(error) = install_service_hooks() {
+        TUN2SOCKS_ACTIVE.store(false, Ordering::SeqCst);
+        return Err(error);
+    }
     #[cfg(all(target_os = "android", feature = "zerotier"))]
     let (overlay_tx, overlay_rx) = mpsc::channel(1);
     #[cfg(all(target_os = "android", feature = "zerotier"))]
@@ -1895,6 +1906,42 @@ mod tests {
 
         assert!(finished.load(Ordering::SeqCst));
         TUN2SOCKS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn native_start_keeps_first_service_hooks_and_can_retry_failed_install() {
+        let _serial = SERIAL.lock();
+        let (first, _peer) = std::os::unix::net::UnixDatagram::pair().unwrap();
+        let (second, _peer) = std::os::unix::net::UnixDatagram::pair().unwrap();
+        let owner = std::cell::Cell::new(None);
+
+        let start_with_hooks = |fd, hook| start_inner(fd, false, DnsHijackPolicy::default(), hook);
+        let failure = start_with_hooks(first.as_raw_fd(), || {
+            Err("injected protection failure".into())
+        });
+        assert_eq!(failure.unwrap_err(), "injected protection failure");
+        assert!(!TUN2SOCKS_ACTIVE.load(Ordering::SeqCst));
+
+        let start_result =
+            start_inner(first.as_raw_fd(), false, DnsHijackPolicy::default(), || {
+                owner.set(Some("first"));
+                Ok(())
+            });
+        assert!(start_result.is_ok());
+        let duplicate = start_inner(
+            second.as_raw_fd(),
+            false,
+            DnsHijackPolicy::default(),
+            || {
+                owner.set(Some("second"));
+                Ok(())
+            },
+        );
+        let owner_after_duplicate = owner.get();
+        assert!(stop());
+        assert!(duplicate.is_err());
+        assert_eq!(owner_after_duplicate, Some("first"));
     }
 
     /// A session on one end of a datagram socketpair, which keeps packet

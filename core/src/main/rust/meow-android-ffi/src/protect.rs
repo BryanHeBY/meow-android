@@ -110,18 +110,15 @@ mod inner {
         }
     }
 
-    pub(super) fn install(env: &jni::JNIEnv, service: &jni::objects::JObject) {
-        match VpnSocketProtector::new(env, service) {
-            Ok(p) => {
-                let p = Arc::new(p);
-                *DIRECT.write() = Some(p.clone());
-                meow_common::set_socket_protector(p);
-                crate::logging::bridge_log("protect: SocketProtector installed");
-            }
-            Err(e) => {
-                crate::logging::bridge_log(&format!("protect: install failed: {e}"));
-            }
-        }
+    pub(super) fn install(
+        env: &jni::JNIEnv,
+        service: &jni::objects::JObject,
+    ) -> jni::errors::Result<()> {
+        let protector = Arc::new(VpnSocketProtector::new(env, service)?);
+        *DIRECT.write() = Some(protector.clone());
+        meow_common::set_socket_protector(protector);
+        crate::logging::bridge_log("protect: SocketProtector installed");
+        Ok(())
     }
 
     pub(super) fn clear() {
@@ -133,14 +130,14 @@ mod inner {
 
 #[cfg(not(target_os = "android"))]
 mod inner {
-    pub(super) fn install(_env: &jni::JNIEnv, _service: &jni::objects::JObject) {}
     pub(super) fn clear() {}
 }
 
 /// Install the global protector. Called from `nativeStartTun2Socks` with the
 /// live `VpnService` reference; safe to call again across VPN restarts.
-pub fn install(env: &jni::JNIEnv, service: &jni::objects::JObject) {
-    inner::install(env, service);
+#[cfg(target_os = "android")]
+pub fn install(env: &jni::JNIEnv, service: &jni::objects::JObject) -> jni::errors::Result<()> {
+    inner::install(env, service)
 }
 
 /// Remove the protector on VPN tear-down.
